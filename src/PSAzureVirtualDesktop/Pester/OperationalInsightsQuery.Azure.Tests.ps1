@@ -13,7 +13,7 @@ BeforeDiscovery {
         $LogAnalyticsWorkspace = Get-AzOperationalInsightsWorkspace -Name $LogAnalyticsWorkspaceName -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
         $Results = foreach ($CurrentPerComputerQuery in $PerComputerQueries) {
             $Result = Invoke-AzOperationalInsightsQuery -WorkspaceId $LogAnalyticsWorkspace.CustomerId -Query $CurrentPerComputerQuery
-            $Result.Results | Select-Object -Property @{Name="Resource"; Expression = {$_.Computer -replace "\..*"}}, @{Name="HostPool"; Expression = {$CurrentHostPool}}, Type, TimeGenerated, @{Name="Query"; Expression = {$CurrentPerComputerQuery}}
+            $Result.Results | Select-Object -Property @{Name = "Resource"; Expression = { $_.Computer -replace "\..*" } }, @{Name = "HostPool"; Expression = { $CurrentHostPool } }, Type, TimeGenerated, @{Name = "Query"; Expression = { $CurrentPerComputerQuery } }
         }
         #$Results.Results | Select-Object -Property Computer, Type, TimeGenerated
         $AzOperationalInsightsQuery.Add($CurrentHostPool.Name, $Results)
