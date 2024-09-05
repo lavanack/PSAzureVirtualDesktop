@@ -78,7 +78,7 @@ For some configurations (Entra joined VMs/Session Hosts without FSLogix for inst
 To install from the PowerShell gallery using PowerShellGet (in PowerShell 5.0) run the following command from your Domain Controller:
 
 ```powershell
-Install-Module -Name PSAzureVirtualDesktop
+Find-Module -Name PSAzureVirtualDesktop -Repository PSGallery | Install-Module
 ```
 To confirm installation, run the below command:
 
