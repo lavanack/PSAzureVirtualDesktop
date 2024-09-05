@@ -83,4 +83,4 @@ Install-Module -Name PSAzureVirtualDesktop
 
 ## Documentation and Examples
 
-For a full list of functions in PSAzureVirtualDesktop and examples on their use, check out the [PSAzureVirtualDesktop wiki](/lavanack/PSAzureVirtualDesktop/wiki).
+For a full list of functions in PSAzureVirtualDesktop and examples on their use, check out the [PSAzureVirtualDesktop wiki](https://github.com/lavanack/PSAzureVirtualDesktop/wiki).
