@@ -1,7 +1,7 @@
 Function Test-NewerAvailableModule {
     [CmdletBinding()]
     Param (
-    )
+    ) 
     Write-Verbose -Message "Entering function '$($MyInvocation.MyCommand)'"
 
     $ModuleName = "PSAzureVirtualDesktop"
