@@ -129,7 +129,7 @@ Class HostPool {
 
         [string] GetAzAvdScalingPlanName() {
             if ($this.ScalingPlan) {
-                return "sp-avd-{0}" -f $($this.Name.ToLower())
+                return "sp-{0}" -f $($this.Name.ToLower())
             }
             else {
                 return $null
@@ -3296,9 +3296,9 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     (
         [Parameter(Mandatory = $false)]
         [string] $Location = "EastUs",
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $true)]
         [PSCredential] $LocalAdminCredential,
-        [Parameter(Mandatory = $false)]
+        [Parameter(Mandatory = $true)]
         [PSCredential] $ADJoinCredential
     )
 
