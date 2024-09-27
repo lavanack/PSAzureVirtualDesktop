@@ -1,5 +1,4 @@
 #region PowerShell HostPool classes
-
 enum IdentityProvider {
     ActiveDirectory
     MicrosoftEntraID
@@ -20,443 +19,468 @@ enum DiffDiskPlacement {
 }
 
 Class HostPool {
-        [ValidateNotNullOrEmpty()] [IdentityProvider] $IdentityProvider
-        [ValidateNotNullOrEmpty()] [string] $Name
-        [ValidateNotNullOrEmpty()] [HostPoolType] $Type
-        [ValidateNotNullOrEmpty()] [string] $Location
-        [ValidateNotNullOrEmpty()][ValidatePattern("/subscriptions/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/resourceGroups/.*/providers/Microsoft\.Network/virtualNetworks/.*/subnets/.*")] [string] $SubnetId
-        [ValidateLength(3, 11)] [string] $NamePrefix
-        [ValidateRange(1, 10)] [uint16]    $VMNumberOfInstances
-        [ValidateNotNullOrEmpty()] [Object] $KeyVault
-        [boolean] $Intune
-        [boolean] $Spot
-        [boolean] $ScalingPlan
-        [ValidateNotNullOrEmpty()] [string] $VMSize
-        [string] $ImagePublisherName
-        [string] $ImageOffer
-        [string] $ImageSku
-        [string] $VMSourceImageId
-        [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType] $LoadBalancerType
-        [DiffDiskPlacement] $DiffDiskPlacement = [DiffDiskPlacement]::None
-        static [hashtable] $AzLocationShortNameHT = $null     
-        static [hashtable] $AzEphemeralOsDiskSkuHT = @{}
-        static [uint16] $VMProfileOsdiskSizeGb = 127
+    [ValidateNotNullOrEmpty()] [IdentityProvider] $IdentityProvider
+    [ValidateNotNullOrEmpty()] [string] $Name
+    [ValidateNotNullOrEmpty()] [HostPoolType] $Type
+    [ValidateNotNullOrEmpty()] [string] $Location
+    [ValidateNotNullOrEmpty()][ValidatePattern("/subscriptions/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/resourceGroups/.*/providers/Microsoft\.Network/virtualNetworks/.*/subnets/.*")] [string] $SubnetId
+    [ValidateLength(3, 11)] [string] $NamePrefix
+    [ValidateRange(1, 10)] [uint16]    $VMNumberOfInstances
+    [ValidateNotNullOrEmpty()] [Object] $KeyVault
+    [boolean] $Intune
+    [boolean] $Spot
+    [boolean] $ScalingPlan
+    [ValidateNotNullOrEmpty()] [string] $VMSize
+    [string] $ImagePublisherName
+    [string] $ImageOffer
+    [string] $ImageSku
+    [string] $VMSourceImageId
+    [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType] $LoadBalancerType
+    [DiffDiskPlacement] $DiffDiskPlacement = [DiffDiskPlacement]::None
+    static [hashtable] $AzLocationShortNameHT = $null     
+    static [hashtable] $AzEphemeralOsDiskSkuHT = @{}
+    static [uint16] $VMProfileOsdiskSizeGb = 127
+    static [boolean] $UseKeyVaultForStorageAccountKey_ = $false
     
-        hidden static BuildAzureLocationSortNameHashtable() {
-            $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
-            $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
-            [HostPool]::AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
-        }
+    hidden static BuildAzureLocationSortNameHashtable() {
+        $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
+        $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
+        [HostPool]::AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+    }
     
-        hidden static BuildAzureEphemeralOsDiskSkuHashtable([String] $Location, [uint16]$OSImageSizeInGB) {
-            #Based on https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-faq
-            $VmSkus = Get-AzComputeResourceSku $Location | Where-Object -FilterScript { ($_.ResourceType -eq "virtualMachines") -and  ($_.Capabilities | Where-Object -FilterScript { ($_.Name -eq "EphemeralOSDiskSupported") -and ($_.Value -eq "True")}) }
-            $EphemeralOsDisk = foreach ($sku in $VmSkus)
-            {
-                $MaxResourceVolumeGB = 0
-                $CachedDiskGB = 0
-                foreach($capability in $sku.Capabilities)
-                {
-                    if ($capability.Name -eq "MaxResourceVolumeMB")
-                    { $MaxResourceVolumeGB = [int]($capability.Value / 1024) }
+    hidden static BuildAzureEphemeralOsDiskSkuHashtable([String] $Location, [uint16]$OSImageSizeInGB) {
+        #Based on https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-faq
+        $VmSkus = Get-AzComputeResourceSku $Location | Where-Object -FilterScript { ($_.ResourceType -eq "virtualMachines") -and ($_.Capabilities | Where-Object -FilterScript { ($_.Name -eq "EphemeralOSDiskSupported") -and ($_.Value -eq "True") }) }
+        $EphemeralOsDisk = foreach ($sku in $VmSkus) {
+            $MaxResourceVolumeGB = 0
+            $CachedDiskGB = 0
+            foreach ($capability in $sku.Capabilities) {
+                if ($capability.Name -eq "MaxResourceVolumeMB") {
+                    $MaxResourceVolumeGB = [int]($capability.Value / 1024) 
+                }
  
-                    if ($capability.Name -eq "CachedDiskBytes")
-                    { $CachedDiskGB = [int]($capability.Value / 1GB) }
-                }
-                [PSCustomObject][ordered]@{
-                    Name = $sku.Name
-                    MaxResourceVolumeGB = $MaxResourceVolumeGB
-                    OSImageSizeInGB = $OSImageSizeInGB
-                    ResourceDisk = ($MaxResourceVolumeGB -ge $OSImageSizeInGB)
-                    CacheDisk = ($CachedDiskGB -ge $OSImageSizeInGB)
+                if ($capability.Name -eq "CachedDiskBytes") {
+                    $CachedDiskGB = [int]($capability.Value / 1GB) 
                 }
             }
-            [HostPool]::AzEphemeralOsDiskSkuHT[$Location] = $EphemeralOsDisk 
-        }
-
-        static [array] GetAzureEphemeralOsDiskSku([String] $Location) {
-            if (($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) -or (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($Location)))) {
-                [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($Location, [HostPool]::VMProfileOsdiskSizeGb)
+            [PSCustomObject][ordered]@{
+                Name                = $sku.Name
+                MaxResourceVolumeGB = $MaxResourceVolumeGB
+                OSImageSizeInGB     = $OSImageSizeInGB
+                ResourceDisk        = ($MaxResourceVolumeGB -ge $OSImageSizeInGB)
+                CacheDisk           = ($CachedDiskGB -ge $OSImageSizeInGB)
             }
-            return $([HostPool]::AzEphemeralOsDiskSkuHT[$Location])
         }
+        [HostPool]::AzEphemeralOsDiskSkuHT[$Location] = $EphemeralOsDisk 
+    }
 
-        hidden Init([Object] $KeyVault, [string] $SubnetId) {
-            if ($null -eq [HostPool]::AzLocationShortNameHT) {
-                [HostPool]::BuildAzureLocationSortNameHashtable()
-            }
-            if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
-                [HostPool]::AzEphemeralOsDiskSkuHT = @{}
-            }
-            $this.VMSize = "Standard_D2s_v5"
-            $this.SubnetId = $SubnetId
+    static UseKeyVaultForStorageAccountKey([boolean] $UseKeyVaultForStorageAccountKey) {
+        [HostPool]::UseKeyVaultForStorageAccountKey_ = $UseKeyVaultForStorageAccountKey
+    }
 
-            #Getting the VNet from the Subnet
-            $VirtualNetwork = Get-AzResource -Id $($this.SubnetId -replace "/subnets/.*$")
+    static UseKeyVaultForStorageAccountKey() {
+        #[HostPool]::UseKeyVaultForStorageAccountKey_ = $true
+        [HostPool]::UseKeyVaultForStorageAccountKey($true)
+    }
 
-            $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $SubnetId
-            # Get the vnet ID
-            $VirtualNetworkId = $SubnetId -replace "/subnets/.*$"
-            $VirtualNetwork = Get-AzResource -ResourceId $VirtualNetworkId | Get-AzVirtualNetwork
-            #$VirtualNetwork = Get-AzResource -Id $($this.SubnetId -replace "/subnets/.*$")
-
-            $this.SetLocation($VirtualNetwork.location)
-            $this.VMNumberOfInstances = 3
-            $this.DisableSpotInstance()
-            $this.DisableIntune()            
-            $this.DisableScalingPlan()
-            $this.KeyVault = $KeyVault
-            $this.IdentityProvider = [IdentityProvider]::ActiveDirectory
+    static [array] GetAzureEphemeralOsDiskSku([String] $Location) {
+        if (($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) -or (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($Location)))) {
+            [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($Location, [HostPool]::VMProfileOsdiskSizeGb)
         }
+        return $([HostPool]::AzEphemeralOsDiskSkuHT[$Location])
+    }
+
+    hidden Init([Object] $KeyVault, [string] $SubnetId) {
+        if ($null -eq [HostPool]::AzLocationShortNameHT) {
+            [HostPool]::BuildAzureLocationSortNameHashtable()
+        }
+        if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
+            [HostPool]::AzEphemeralOsDiskSkuHT = @{}
+        }
+        $this.VMSize = "Standard_D2s_v5"
+        $this.SubnetId = $SubnetId
+
+        #Getting the VNet from the Subnet
+        $VirtualNetwork = Get-AzResource -Id $($this.SubnetId -replace "/subnets/.*$")
+
+        $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $SubnetId
+        # Get the vnet ID
+        $VirtualNetworkId = $SubnetId -replace "/subnets/.*$"
+        $VirtualNetwork = Get-AzResource -ResourceId $VirtualNetworkId | Get-AzVirtualNetwork
+        #$VirtualNetwork = Get-AzResource -Id $($this.SubnetId -replace "/subnets/.*$")
+
+        $this.SetLocation($VirtualNetwork.location)
+        $this.VMNumberOfInstances = 3
+        $this.DisableSpotInstance()
+        $this.DisableIntune()            
+        $this.DisableScalingPlan()
+        $this.KeyVault = $KeyVault
+        $this.IdentityProvider = [IdentityProvider]::ActiveDirectory
+    }
         
-        HostPool([Object] $KeyVault, [string] $SubnetId) {
-            #Write-Host "Calling HostPool Constructor with KeyVault parameter ..."
-            $this.Init($KeyVault, $SubnetId)
+    HostPool([Object] $KeyVault, [string] $SubnetId) {
+        #Write-Host "Calling HostPool Constructor with KeyVault parameter ..."
+        $this.Init($KeyVault, $SubnetId)
+    }
+
+    HostPool([Object] $KeyVault) {
+        #Write-Host "Calling HostPool Constructor with KeyVault parameter ..."
+        $ThisDomainController = Get-AzVMCompute | Get-AzVM
+        # Get the VM's network interface
+        $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
+        $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
+        $this.Init($KeyVault, $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id)
+    }
+
+    [string] GetAzAvdWorkSpaceName() {
+        return "ws-{0}" -f $($this.Name.ToLower())
+    }
+
+    [string] GetAzAvdScalingPlanName() {
+        if ($this.ScalingPlan) {
+            return "sp-{0}" -f $($this.Name.ToLower())
         }
-
-        HostPool([Object] $KeyVault) {
-            #Write-Host "Calling HostPool Constructor with KeyVault parameter ..."
-            $ThisDomainController = Get-AzVMCompute | Get-AzVM
-            # Get the VM's network interface
-            $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
-            $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
-            $this.Init($KeyVault, $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id)
+        else {
+            return $null
         }
+    }
 
-        [string] GetAzAvdWorkSpaceName() {
-            return "ws-{0}" -f $($this.Name.ToLower())
-        }
+    [string] GetLogAnalyticsWorkSpaceName() {
+        return "log{0}" -f $($this.Name.ToLower() -replace "\W")
+    }
 
-        [string] GetAzAvdScalingPlanName() {
-            if ($this.ScalingPlan) {
-                return "sp-{0}" -f $($this.Name.ToLower())
-            }
-            else {
-                return $null
-            }
-        }
+    [string] GetResourceGroupName() {
+        return "rg-avd-{0}" -f $($this.Name.ToLower())
+    }
 
-        [string] GetLogAnalyticsWorkSpaceName() {
-            return "log{0}" -f $($this.Name.ToLower() -replace "\W")
-        }
+    [string] GetKeyVaultName() {
+        $KeyVaultNameMaxLength = 24
+        $KeyVaultName = "kv{0}" -f $($this.Name.ToLower() -replace "\W")
+        $KeyVaultName = $KeyVaultName.Substring(0, [system.math]::min($KeyVaultNameMaxLength, $KeyVaultName.Length)).ToLower()
+        return $KeyVaultName
+    }
 
-        [string] GetResourceGroupName() {
-            return "rg-avd-{0}" -f $($this.Name.ToLower())
-        }
-
-        [string] GetKeyVaultName() {
-            return "kv{0}" -f $($this.Name.ToLower() -replace "\W")
-        }
-
-        [object] GetPropertyForJSON() {
-            return $this | Select-Object -Property *, @{Name = "ResourceGroupName"; Expression = { $_.GetResourceGroupName() } }, @{Name = "KeyVaultName"; Expression = { $_.GetKeyVaultName() } }, @{Name = "LogAnalyticsWorkSpaceName"; Expression = { $_.GetLogAnalyticsWorkSpaceName() } } -ExcludeProperty "KeyVault"
-        }
+    [object] GetPropertyForJSON() {
+        return $this | Select-Object -Property *, @{Name = "ResourceGroupName"; Expression = { $_.GetResourceGroupName() } }, @{Name = "KeyVaultName"; Expression = { $_.GetKeyVaultName() } }, @{Name = "LogAnalyticsWorkSpaceName"; Expression = { $_.GetLogAnalyticsWorkSpaceName() } } -ExcludeProperty "KeyVault"
+    }
 
 
-        [HostPool] SetVMNumberOfInstances([uint16] $VMNumberOfInstances) {
-            $this.VMNumberOfInstances = $VMNumberOfInstances
-            return $this
-        }
+    [HostPool] SetVMNumberOfInstances([uint16] $VMNumberOfInstances) {
+        $this.VMNumberOfInstances = $VMNumberOfInstances
+        return $this
+    }
 
-        [HostPool]DisableIntune() {
-            $this.Intune = $false
-            return $this
-        }
+    [HostPool]DisableIntune() {
+        $this.Intune = $false
+        return $this
+    }
 
-        [HostPool]EnableIntune() {
-            $this.Intune = $true
-            $this.SetIdentityProvider([IdentityProvider]::MicrosoftEntraID)
-            return $this
-        }
+    [HostPool]EnableIntune() {
+        $this.Intune = $true
+        $this.SetIdentityProvider([IdentityProvider]::MicrosoftEntraID)
+        return $this
+    }
 
-        <#
+    <#
         [bool] IsIntuneEnrolled() {
             return $this.Intune
         }
         #>
 
-        [HostPool]DisableScalingPlan() {
-            $this.ScalingPlan = $false
-            return $this
-        }
+    [HostPool]DisableScalingPlan() {
+        $this.ScalingPlan = $false
+        return $this
+    }
 
-        [HostPool]EnableScalingPlan() {
-            $this.ScalingPlan = $true
-            return $this
-        }
+    [HostPool]EnableScalingPlan() {
+        $this.ScalingPlan = $true
+        return $this
+    }
 
-        [HostPool]DisableSpotInstance() {
-            $this.Spot = $false
-            return $this
-        }
+    [HostPool]DisableSpotInstance() {
+        $this.Spot = $false
+        return $this
+    }
 
-        [HostPool]EnableSpotInstance() {
-            $this.Spot = $true
-            return $this
-        }
+    [HostPool]EnableSpotInstance() {
+        $this.Spot = $true
+        return $this
+    }
 
-        [HostPool]DisableEphemeralOSDisk() {
-            $this.DiffDiskPlacement = [DiffDiskPlacement]::None
-            return $this
-        }
+    [HostPool]DisableEphemeralOSDisk() {
+        $this.DiffDiskPlacement = [DiffDiskPlacement]::None
+        return $this
+    }
 
-        [HostPool]EnableEphemeralOSDisk([DiffDiskPlacement] $DiffDiskPlacement) {
-            if (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($this.Location))) {
-                [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
-            }
-            $AzEphemeralOsDiskSkuForThisLocation = ([HostPool]::AzEphemeralOsDiskSkuHT)[$this.Location]
-            Write-Verbose -Message "$($AzEphemeralOsDiskSkuForThisLocation | Out-String)"
-            $CurrentAzEphemeralOsDiskSku = $AzEphemeralOsDiskSkuForThisLocation | Where-Object -FilterScript { $_.Name -eq $this.VMSize}
-            if ($null -ne $CurrentAzEphemeralOsDiskSku) {
-                Write-Verbose -Message "$($CurrentAzEphemeralOsDiskSku | Out-String)"
-                if ($CurrentAzEphemeralOsDiskSku.$DiffDiskPlacement) {
-                    Write-Verbose -Message "'$($this.VMSize)' is eligible to Ephemeral OS Disk for '$DiffDiskPlacement'"
-                    $this.DiffDiskPlacement = $DiffDiskPlacement
-                    return $this
-                }
-                else {
-                    $this.DiffDiskPlacement = [DiffDiskPlacement]::None
-                    Write-Verbose -Message "'$($this.VMSize)' is eligible to Ephemeral OS Disk but NOT for '$DiffDiskPlacement'. Returning $null"
-                    return $null
-                }
+    [HostPool]EnableEphemeralOSDisk([DiffDiskPlacement] $DiffDiskPlacement) {
+        if (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($this.Location))) {
+            [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
+        }
+        $AzEphemeralOsDiskSkuForThisLocation = ([HostPool]::AzEphemeralOsDiskSkuHT)[$this.Location]
+        Write-Verbose -Message "$($AzEphemeralOsDiskSkuForThisLocation | Out-String)"
+        $CurrentAzEphemeralOsDiskSku = $AzEphemeralOsDiskSkuForThisLocation | Where-Object -FilterScript { $_.Name -eq $this.VMSize }
+        if ($null -ne $CurrentAzEphemeralOsDiskSku) {
+            Write-Verbose -Message "$($CurrentAzEphemeralOsDiskSku | Out-String)"
+            if ($CurrentAzEphemeralOsDiskSku.$DiffDiskPlacement) {
+                Write-Verbose -Message "'$($this.VMSize)' is eligible to Ephemeral OS Disk for '$DiffDiskPlacement'"
+                $this.DiffDiskPlacement = $DiffDiskPlacement
+                return $this
             }
             else {
                 $this.DiffDiskPlacement = [DiffDiskPlacement]::None
-                Write-Verbose -Message "The specified '$($this.VMSize)' VM Size is not available in the '$($this.Location)' Azure region. Returning $null"
+                Write-Verbose -Message "'$($this.VMSize)' is eligible to Ephemeral OS Disk but NOT for '$DiffDiskPlacement'. Returning $null"
                 return $null
             }
         }
-
-        hidden RefreshNames() {
-            #Overwritten in the child classes
-        }
-
-        [bool] IsMicrosoftEntraIdJoined() {
-            return ($this.IdentityProvider -eq [IdentityProvider]::MicrosoftEntraID)
-        }
-
-        [bool] IsActiveDirectoryJoined() {
-            return ($this.IdentityProvider -eq [IdentityProvider]::ActiveDirectory)
-        }
-
-        [HostPool] SetIdentityProvider([IdentityProvider] $IdentityProvider) {
-            $this.IdentityProvider = $IdentityProvider
-            if ($IdentityProvider -eq [IdentityProvider]::ActiveDirectory) {
-                $this.DisableIntune()
-            }
-            $this.RefreshNames()
-            return $this
-        }
-
-        [HostPool] SetVMSize([string] $VMSize) {
-            if ($VMSize -in (Get-AzVMSize -Location $this.Location).Name) {
-                $this.VMSize = $VMSize
-            }
-            else {
-                Write-Warning "The specified '$VMSize' VM Size is not available in the '$($this.Location)' Azure region. We keep the previously set VM Size: '$($this.VMSize)' ..."
-            }
-
-            #Changing Size resets the DiffDiskPlacement
+        else {
             $this.DiffDiskPlacement = [DiffDiskPlacement]::None
-            return $this
+            Write-Verbose -Message "The specified '$($this.VMSize)' VM Size is not available in the '$($this.Location)' Azure region. Returning $null"
+            return $null
+        }
+    }
+
+    hidden RefreshNames() {
+        #Overwritten in the child classes
+    }
+
+    [bool] IsMicrosoftEntraIdJoined() {
+        return ($this.IdentityProvider -eq [IdentityProvider]::MicrosoftEntraID)
+    }
+
+    [bool] IsActiveDirectoryJoined() {
+        return ($this.IdentityProvider -eq [IdentityProvider]::ActiveDirectory)
+    }
+
+    [HostPool] SetIdentityProvider([IdentityProvider] $IdentityProvider) {
+        $this.IdentityProvider = $IdentityProvider
+        if ($IdentityProvider -eq [IdentityProvider]::ActiveDirectory) {
+            $this.DisableIntune()
+        }
+        $this.RefreshNames()
+        return $this
+    }
+
+    [HostPool] SetVMSize([string] $VMSize) {
+        if ($VMSize -in (Get-AzVMSize -Location $this.Location).Name) {
+            $this.VMSize = $VMSize
+        }
+        else {
+            Write-Warning "The specified '$VMSize' VM Size is not available in the '$($this.Location)' Azure region. We keep the previously set VM Size: '$($this.VMSize)' ..."
         }
 
-        [HostPool] SetLocation([string] $Location) {
-            if ([HostPool]::AzLocationShortNameHT.ContainsKey($Location)) {
-                if ($this.VMSize -in (Get-AzVMSize -Location $Location).Name) {
-                    $this.Location = $Location
-                    $this.RefreshNames()
-                }
-                else {
-                    Write-Warning "The specified '$($Location)' Azure region doesn't allow the '$($this.VMSize)'. We keep the previously set location: '$($this.Location)' ..."
-                }
+        #Changing Size resets the DiffDiskPlacement
+        $this.DiffDiskPlacement = [DiffDiskPlacement]::None
+        return $this
+    }
+
+    [HostPool] SetLocation([string] $Location) {
+        if ([HostPool]::AzLocationShortNameHT.ContainsKey($Location)) {
+            if ($this.VMSize -in (Get-AzVMSize -Location $Location).Name) {
+                $this.Location = $Location
+                $this.RefreshNames()
             }
             else {
-                Write-Warning -Message "Unknown Azure Location: '$($Location)'. We keep the previously set location: '$($this.Location)'"
+                Write-Warning "The specified '$($Location)' Azure region doesn't allow the '$($this.VMSize)'. We keep the previously set location: '$($this.Location)' ..."
             }
-
-            if (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($this.Location))) {
-                [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
-            }
-
-            return $this
+        }
+        else {
+            Write-Warning -Message "Unknown Azure Location: '$($Location)'. We keep the previously set location: '$($this.Location)'"
         }
 
-        [HostPool] SetName([string] $Name, [string] $NamePrefix) {
-            $this.Name = $Name
-            $this.NamePrefix = $NamePrefix
-            return $this
+        if (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($this.Location))) {
+            [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
         }
 
-        [HostPool] SetImage([string] $ImagePublisherName, [string] $ImageOffer, [string] $ImageSku ) {
-            $this.ImagePublisherName = $ImagePublisherName
-            $this.ImageOffer = $ImageOffer
-            $this.ImageSku = $ImageSku
-            $this.RefreshNames()
-            return $this
-        }
-
-        [HostPool] SetVMSourceImageId([string] $VMSourceImageId) {
-            $this.VMSourceImageId = $VMSourceImageId
-            $this.RefreshNames()
-            return $this
-        }
-
+        return $this
     }
+
+    [HostPool] SetName([string] $Name, [string] $NamePrefix) {
+        $this.Name = $Name
+        $this.NamePrefix = $NamePrefix
+        return $this
+    }
+
+    [HostPool] SetImage([string] $ImagePublisherName, [string] $ImageOffer, [string] $ImageSku ) {
+        $this.ImagePublisherName = $ImagePublisherName
+        $this.ImageOffer = $ImageOffer
+        $this.ImageSku = $ImageSku
+        $this.RefreshNames()
+        return $this
+    }
+
+    [HostPool] SetVMSourceImageId([string] $VMSourceImageId) {
+        $this.VMSourceImageId = $VMSourceImageId
+        $this.RefreshNames()
+        return $this
+    }
+}
 
 class PooledHostPool : HostPool {
-        hidden [ValidateRange(0, 999)] static [uint16] $Index = 0
-        [ValidateRange(0, 10)] [uint16] $MaxSessionLimit
-        [ValidateNotNullOrEmpty()] [boolean] $FSlogix
-        [ValidateNotNullOrEmpty()] [boolean] $MSIX
+    hidden [ValidateRange(0, 999)] static [uint16] $Index = 0
+    [ValidateRange(0, 10)] [uint16] $MaxSessionLimit
+    [ValidateNotNullOrEmpty()] [boolean] $FSlogix
+    [ValidateNotNullOrEmpty()] [boolean] $MSIX
+    [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType] $PreferredAppGroupType  
 
 
-        hidden Init() {
-            [PooledHostPool]::Index++
-            $this.Type = [HostPoolType]::Pooled
-            $this.MaxSessionLimit = 5
-            $this.ImagePublisherName = "microsoftwindowsdesktop"
-            $this.ImageOffer = "office-365"
-            $this.ImageSku = "win11-23h2-avd-m365"
-            $this.FSlogix = $true
-            $this.MSIX = $true
-            $this.LoadBalancerType = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType]::BreadthFirst
-            $this.RefreshNames()
+    hidden Init() {
+        [PooledHostPool]::Index++
+        $this.Type = [HostPoolType]::Pooled
+        $this.MaxSessionLimit = 5
+        $this.ImagePublisherName = "microsoftwindowsdesktop"
+        $this.ImageOffer = "office-365"
+        $this.ImageSku = "win11-23h2-avd-m365"
+        $this.FSlogix = $true
+        $this.MSIX = $true
+        $this.LoadBalancerType = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType]::BreadthFirst
+        $this.PreferredAppGroupType = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType]::Desktop
+        $this.RefreshNames()
+    }
+
+    PooledHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
+        $this.Init()
+    }
+
+    PooledHostPool([Object] $KeyVault):base($KeyVault) {
+        $this.Init()
+    }
+
+    static ResetIndex() {
+        [PooledHostPool]::Index = 0
+    }
+
+    [string] GetFSLogixStorageAccountName() {
+        if ($this.FSlogix) {
+            $StorageAccountNameMaxLength = 24
+            $StorageAccountName = "fsl{0}" -f $($this.Name.ToLower() -replace "\W")
+            $StorageAccountName = $StorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $StorageAccountName.Length)).ToLower()
+            return $StorageAccountName
         }
-
-        PooledHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
-            $this.Init()
-        }
-
-        PooledHostPool([Object] $KeyVault):base($KeyVault) {
-            $this.Init()
-        }
-
-        static ResetIndex() {
-            [PooledHostPool]::Index = 0
-        }
-
-        [string] GetFSLogixStorageAccountName() {
-            if ($this.FSlogix) {
-                return "fsl{0}" -f $($this.Name.ToLower() -replace "\W")
-            }
-            else {
-                return $null
-            }
-        }
-
-        [string] GetMSIXStorageAccountName() {
-            if ($this.MSIX) {
-                return "msix{0}" -f $($this.Name.ToLower() -replace "\W")
-            }
-            else {
-                return $null
-            }
-        }
-
-        [PooledHostPool] SetLoadBalancerType([Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType] $LoadBalancerType) {
-            $this.LoadBalancerType = $LoadBalancerType
-            return $this
-        }
-
-        [PooledHostPool] SetIndex([uint16] $Index) {
-            [PooledHostPool]::Index = $Index
-            $this.RefreshNames()        
-            return $this
-        }
-
-        [PooledHostPool] SetMaxSessionLimit([uint16] $MaxSessionLimit) {
-            $this.MaxSessionLimit = $MaxSessionLimit
-            return $this
-        }
-
-        [PooledHostPool]DisableFSLogix() {
-            $this.FSLogix = $false
-            return $this
-        }
-
-        [PooledHostPool]EnableFSLogix() {
-            $this.FSLogix = $true
-            return $this
-        }
-
-        [PooledHostPool]DisableMSIX() {
-            $this.MSIX = $false
-            return $this
-        }
-
-        [PooledHostPool]EnableMSIX() {
-            if (-not($this.IsMicrosoftEntraIdJoined())) {
-                $this.MSIX = $true
-            }
-            return $this
-        }
-
-        [PooledHostPool] SetIdentityProvider([IdentityProvider] $IdentityProvider) {
-            $this.IdentityProvider = $IdentityProvider
-            if ($this.IsMicrosoftEntraIdJoined()) {
-                #No MSIX with EntraID: https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
-                $this.MSIX = $false
-            }
-            $this.RefreshNames()
-            return $this
-        }
-
-        hidden RefreshNames() {
-            $TempName = "hp-np"
-            $TempNamePrefix = "n"
-
-            if ($this.IsMicrosoftEntraIdJoined()) {
-                $TempName += "-ei"
-                $TempNamePrefix += "e"
-            }
-            else {
-                $TempName += "-ad"
-                $TempNamePrefix += "a"
-            }
-        
-            $TempName += "-poc"
-            $TempNamePrefix += "p"
-
-            if ($this.VMSourceImageId) {
-                $TempName += "-cg"
-                $TempNamePrefix += "c"
-            }
-            else {
-                $TempName += "-mp"
-                $TempNamePrefix += "m"
-            }
-
-            $this.Name = "{0}-{1}-{2:D3}" -f $TempName, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PooledHostPool]::Index
-            $this.NamePrefix = "{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PooledHostPool]::Index
+        else {
+            return $null
         }
     }
 
+    [string] GetMSIXStorageAccountName() {
+        if ($this.MSIX) {
+            $StorageAccountNameMaxLength = 24
+            $StorageAccountName = "msix{0}" -f $($this.Name.ToLower() -replace "\W")
+            $StorageAccountName = $StorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $StorageAccountName.Length)).ToLower()
+            return $StorageAccountName
+        }
+        else {
+            return $null
+        }
+    }
+
+    [PooledHostPool] SetLoadBalancerType([Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType] $LoadBalancerType) {
+        $this.LoadBalancerType = $LoadBalancerType
+        return $this
+    }
+
+    [PooledHostPool] SetIndex([uint16] $Index) {
+        [PooledHostPool]::Index = $Index
+        $this.RefreshNames()        
+        return $this
+    }
+
+    [PooledHostPool] SetMaxSessionLimit([uint16] $MaxSessionLimit) {
+        $this.MaxSessionLimit = $MaxSessionLimit
+        return $this
+    }
+
+    [PooledHostPool]DisableFSLogix() {
+        $this.FSLogix = $false
+        return $this
+    }
+
+    [PooledHostPool]EnableFSLogix() {
+        $this.FSLogix = $true
+        return $this
+    }
+
+    [PooledHostPool]DisableMSIX() {
+        $this.MSIX = $false
+        return $this
+    }
+
+    [PooledHostPool]EnableMSIX() {
+        if (-not($this.IsMicrosoftEntraIdJoined())) {
+            $this.MSIX = $true
+        }
+        return $this
+    }
+
+    [PooledHostPool] SetIdentityProvider([IdentityProvider] $IdentityProvider) {
+        $this.IdentityProvider = $IdentityProvider
+        if ($this.IsMicrosoftEntraIdJoined()) {
+            #No MSIX with EntraID: https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
+            $this.MSIX = $false
+        }
+        $this.RefreshNames()
+        return $this
+    }
+
+    hidden RefreshNames() {
+        $TempName = "hp-np"
+        $TempNamePrefix = "n"
+
+        if ($this.IsMicrosoftEntraIdJoined()) {
+            $TempName += "-ei"
+            $TempNamePrefix += "e"
+        }
+        else {
+            $TempName += "-ad"
+            $TempNamePrefix += "a"
+        }
+        
+        $TempName += "-poc"
+        $TempNamePrefix += "p"
+
+        if ($this.VMSourceImageId) {
+            $TempName += "-cg"
+            $TempNamePrefix += "c"
+        }
+        else {
+            $TempName += "-mp"
+            $TempNamePrefix += "m"
+        }
+
+        $this.Name = "{0}-{1}-{2:D3}" -f $TempName, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PooledHostPool]::Index
+        $this.NamePrefix = "{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PooledHostPool]::Index
+    }
+
+    [PooledHostPool] SetPreferredAppGroupType ([Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType] $PreferredAppGroupType) {
+        $this.PreferredAppGroupType = $PreferredAppGroupType 
+        return $this
+    }
+}
+
 class PersonalHostPool : HostPool {
-        hidden [ValidateRange(0, 999)] static [uint16] $Index = 0
-        #Hibernation is not compatible with Spot Instance and is only allowed for Personal Dektop
-        [ValidateNotNullOrEmpty()] [boolean] $HibernationEnabled = $false
+    hidden [ValidateRange(0, 999)] static [uint16] $Index = 0
+    #Hibernation is not compatible with Spot Instance and is only allowed for Personal Dektop
+    [ValidateNotNullOrEmpty()] [boolean] $HibernationEnabled = $false
 
-        hidden Init() {
-            [PersonalHostPool]::Index++
-            $this.Type = [HostPoolType]::Personal
-            $this.ImagePublisherName = "microsoftwindowsdesktop"
-            $this.ImageOffer = "windows-11"
-            $this.ImageSku = "win11-23h2-ent"
-            $this.HibernationEnabled = $false
-            $this.LoadBalancerType = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType]::Persistent
-            $this.RefreshNames()
-        }
+    hidden Init() {
+        [PersonalHostPool]::Index++
+        $this.Type = [HostPoolType]::Personal
+        $this.ImagePublisherName = "microsoftwindowsdesktop"
+        $this.ImageOffer = "windows-11"
+        $this.ImageSku = "win11-23h2-ent"
+        $this.HibernationEnabled = $false
+        $this.LoadBalancerType = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType]::Persistent
+        $this.RefreshNames()
+    }
 
-        PersonalHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
-            $this.Init()
-        }
+    PersonalHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
+        $this.Init()
+    }
 
-        PersonalHostPool([Object] $KeyVault):base($KeyVault) {
-            $this.Init()
-        }
+    PersonalHostPool([Object] $KeyVault):base($KeyVault) {
+        $this.Init()
+    }
 
-        <#
+    <#
         PersonalHostPool([Object] $KeyVault, [string] $Location):base($KeyVault, $Location) {
             [PersonalHostPool]::Index++
             $this.Type = [HostPoolType]::Personal
@@ -468,64 +492,64 @@ class PersonalHostPool : HostPool {
         }
         #>
 
-        static ResetIndex() {
-            [PersonalHostPool]::Index = 0
-        }
-
-        [PersonalHostPool] SetIndex([uint16] $Index) {
-            [PersonalHostPool]::Index = $Index
-            $this.RefreshNames()        
-            return $this
-        }
-
-        [PersonalHostPool]DisableHibernation() {
-            $this.HibernationEnabled = $false
-            return $this
-        }
-
-        [PersonalHostPool]EnableHibernation() {
-            $this.HibernationEnabled = $true
-            #$this.Spot = $false
-            $this.DisableSpotInstance()
-            return $this
-        }
-
-        [PersonalHostPool]EnableSpotInstance() {
-            ([HostPool]$this).EnableSpotInstance()
-            #$this.Spot = $true
-            $this.DisableHibernation()
-            return $this
-        }
-
-        hidden RefreshNames() {
-            $TempName = "hp-pd"
-            $TempNamePrefix = "p"
-
-            if ($this.IsMicrosoftEntraIdJoined()) {
-                $TempName += "-ei"
-                $TempNamePrefix += "e"
-            }
-            else {
-                $TempName += "-ad"
-                $TempNamePrefix += "a"
-            }
-        
-            $TempName += "-poc"
-            $TempNamePrefix += "p"
-
-            if ($this.VMSourceImageId) {
-                $TempName += "-cg"
-                $TempNamePrefix += "c"
-            }
-            else {
-                $TempName += "-mp"
-                $TempNamePrefix += "m"
-            }
-
-            $this.Name = "{0}-{1}-{2:D3}" -f $TempName, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PersonalHostPool]::Index
-            $this.NamePrefix = "{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PersonalHostPool]::Index
-        }
+    static ResetIndex() {
+        [PersonalHostPool]::Index = 0
     }
+
+    [PersonalHostPool] SetIndex([uint16] $Index) {
+        [PersonalHostPool]::Index = $Index
+        $this.RefreshNames()        
+        return $this
+    }
+
+    [PersonalHostPool]DisableHibernation() {
+        $this.HibernationEnabled = $false
+        return $this
+    }
+
+    [PersonalHostPool]EnableHibernation() {
+        $this.HibernationEnabled = $true
+        #$this.Spot = $false
+        $this.DisableSpotInstance()
+        return $this
+    }
+
+    [PersonalHostPool]EnableSpotInstance() {
+            ([HostPool]$this).EnableSpotInstance()
+        #$this.Spot = $true
+        $this.DisableHibernation()
+        return $this
+    }
+
+    hidden RefreshNames() {
+        $TempName = "hp-pd"
+        $TempNamePrefix = "p"
+
+        if ($this.IsMicrosoftEntraIdJoined()) {
+            $TempName += "-ei"
+            $TempNamePrefix += "e"
+        }
+        else {
+            $TempName += "-ad"
+            $TempNamePrefix += "a"
+        }
+        
+        $TempName += "-poc"
+        $TempNamePrefix += "p"
+
+        if ($this.VMSourceImageId) {
+            $TempName += "-cg"
+            $TempNamePrefix += "c"
+        }
+        else {
+            $TempName += "-mp"
+            $TempNamePrefix += "m"
+        }
+
+        $this.Name = "{0}-{1}-{2:D3}" -f $TempName, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PersonalHostPool]::Index
+        $this.NamePrefix = "{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PersonalHostPool]::Index
+    }
+}
 
 #endregion
 
@@ -571,7 +595,7 @@ foreach ($Type in $ExportableTypes) {
 }
 # Remove type accelerators when the module is removed.
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
-    foreach($Type in $ExportableTypes) {
+    foreach ($Type in $ExportableTypes) {
         $TypeAcceleratorsClass::Remove($Type.FullName)
     }
 }.GetNewClosure()
@@ -580,64 +604,8 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
 #region Function definitions
 
 #region Prerequisites
-<#
-function Install-RequiredModule {
-    [CmdletBinding()]
-    Param()
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-    #For installing required modules if needed
-    #Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
-    $null = Get-PackageProvider -Name NuGet -Force
-    $RequiredModules = 'Az.Accounts', @{ ModuleName='Az.Compute'; MinimumVersion='7.1.2' }, 'Az.DesktopVirtualization', 'Az.ImageBuilder', 'Az.ManagedServiceIdentity', 'Az.KeyVault', 'Az.Monitor', 'Az.Network', 'Az.OperationalInsights', 'Az.PrivateDns', 'Az.Resources', 'Az.Storage', @{ ModuleName='Microsoft.Graph.Authentication'; MaximumVersion='2.17.0' }, @{ ModuleName='Microsoft.Graph.Beta.DeviceManagement'; MaximumVersion='2.17.0' }, @{ ModuleName='Microsoft.Graph.Beta.DeviceManagement.Actions'; MaximumVersion='2.17.0' }, @{ ModuleName='Microsoft.Graph.Beta.DeviceManagement.Administration'; MaximumVersion='2.17.0' }, @{ ModuleName='Microsoft.Graph.Beta.Groups'; MaximumVersion='2.17.0' }, @{ ModuleName='Microsoft.Graph.Beta.Identity.DirectoryManagement'; MaximumVersion='2.17.0' }, @{ ModuleName='Microsoft.Graph.Beta.Identity.SignIns'; MaximumVersion='2.17.0' }, 'ThreadJob'
-
-    $NonVersionedRequiredModules = $RequiredModules | Where-Object { $_ -is [string]}
-    $NonVersionedInstalledModules = Get-InstalledModule -Name $NonVersionedRequiredModules -ErrorAction Ignore
-    if (-not([String]::IsNullOrEmpty($NonVersionedInstalledModules))) {
-        $NonVersionedMissingModules = (Compare-Object -ReferenceObject $NonVersionedRequiredModules -DifferenceObject $NonVersionedInstalledModules.Name).InputObject
-    }
-    else {
-        $NonVersionedMissingModules = $NonVersionedRequiredModules
-    }
-    if (-not([String]::IsNullOrEmpty($NonVersionedMissingModules))) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Installing PowerShell Modules: $($NonVersionedMissingModules -join ', ')"
-        Install-Module -Name $NonVersionedMissingModules -Force -AllowClobber -Scope AllUsers
-    }
-
-    $VersionedRequiredModules = $RequiredModules | Where-Object { $_ -is [hashtable] }
-    foreach ($CurrentVersionedRequiredModule in $VersionedRequiredModules)
-    {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentVersionedRequiredModule:`r`n$($CurrentVersionedRequiredModule | Out-String)"
-        if ($CurrentVersionedRequiredModule.ContainsKey('MinimumVersion')) {
-            $InstalledModule = Get-InstalledModule -Name $CurrentVersionedRequiredModule['ModuleName'] -MinimumVersion $CurrentVersionedRequiredModule['MinimumVersion'] -ErrorAction Ignore
-            if ($null -eq $InstalledModule) {
-                Write-Verbose -Message $("Installing PowerShell Module: {0} - {1}" -f $CurrentVersionedRequiredModule['ModuleName'], $CurrentVersionedRequiredModule['MinimumVersion'])
-                Install-Module -Name $CurrentVersionedRequiredModule['ModuleName'] -MinimumVersion $CurrentVersionedRequiredModule['MinimumVersion'] -Force -AllowClobber -Scope AllUsers #-WhatIf
-            }
-            else {
-                Write-Verbose -Message $("MinimumVersion '{0}': PowerShell Module '{1}' already installed in version '{2}'" -f $CurrentVersionedRequiredModule['MinimumVersion'], $InstalledModule.Name, $InstalledModule.Version)
-            }
-        }
-        elseif ($CurrentVersionedRequiredModule.ContainsKey('MaximumVersion')) {
-            $InstalledModule = Get-InstalledModule -Name $CurrentVersionedRequiredModule['ModuleName'] -MaximumVersion $CurrentVersionedRequiredModule['MaximumVersion'] -ErrorAction Ignore
-            if ($null -eq $InstalledModule) {
-                Write-Verbose -Message $("Installing PowerShell Module: {0} - {1}" -f $CurrentVersionedRequiredModule['ModuleName'], $CurrentVersionedRequiredModule['MaximumVersion'])
-                Install-Module -Name $CurrentVersionedRequiredModule['ModuleName'] -MaximumVersion $CurrentVersionedRequiredModule['MaximumVersion'] -Force -AllowClobber -Scope AllUsers #-WhatIf
-            }
-            else {
-                Write-Verbose -Message $("MaximumVersion '{0}': PowerShell Module '{1}' already installed in version '{2}'" -f $CurrentVersionedRequiredModule['MaximumVersion'], $InstalledModule.Name, $InstalledModule.Version)
-            }
-        }
-    }
-
-    $InstalledModule = Get-InstalledModule -Name $($NonVersionedRequiredModules+($VersionedRequiredModules | ForEach-Object -Process { $_['ModuleName']})) -ErrorAction Ignore
-    Write-Verbose -Message "Installed Modules: `r`n$InstalledModule"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-}
-#>
 function Connect-PsAvdAzure {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param()
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -646,7 +614,8 @@ function Connect-PsAvdAzure {
 
     try { 
         $null = Get-AzAccessToken -ErrorAction Stop
-    } catch {
+    }
+    catch {
         Connect-AzAccount -UseDeviceAuthentication
         Get-AzSubscription | Out-GridView -OutputMode Single | Select-AzSubscription
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Account : $((Get-AzContext).Account)"
@@ -667,7 +636,7 @@ function Connect-PsAvdAzure {
 }
 
 function Register-PsAvdRequiredResourceProvider {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param()
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -676,7 +645,7 @@ function Register-PsAvdRequiredResourceProvider {
     #To use Azure Virtual Desktop, you have to register for the providers and to ensure that RegistrationState will be set to Registered.
     #$RequiredResourceProviders = "Microsoft.ContainerInstance", "Microsoft.DesktopVirtualization", "Microsoft.Insights", "Microsoft.VirtualMachineImages", "Microsoft.Storage", "Microsoft.Compute", "Microsoft.KeyVault", "Microsoft.ManagedIdentity"
     $RequiredResourceProviders = "Microsoft.ContainerInstance", "Microsoft.DesktopVirtualization", "Microsoft.Insights", "Microsoft.VirtualMachineImages", "Microsoft.Storage", "Microsoft.Compute", "Microsoft.KeyVault", "Microsoft.ManagedIdentity", "Microsoft.Compute/VMHibernationPreview" #,"Microsoft.Compute/AdditionalStorageTypesForEphemeralOSDiskPreview" 
-    $RequiredPreviewResourceProviders = $RequiredResourceProviders | Where-Object -FilterScript { $_ -match "preview|/"}
+    $RequiredPreviewResourceProviders = $RequiredResourceProviders | Where-Object -FilterScript { $_ -match "preview|/" }
     $RequiredNonPreviewResourceProviders = $RequiredResourceProviders | Where-Object -FilterScript { $_ -notin $RequiredPreviewResourceProviders }
 
     #region Non-preview Resource Providers
@@ -696,7 +665,7 @@ function Register-PsAvdRequiredResourceProvider {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'Register-AzResourceProvider' job to finish"
     $Result = $Jobs | Receive-Job -Wait -AutoRemoveJob -ErrorAction Ignore
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Waiting is over for the 'Register-AzResourceProvider' job"
-    $NonRegisteredProviders = ($Result | Where-Object -FilterScript {$_.RegistrationState -ne "Registered"}).ProviderNamespace
+    $NonRegisteredProviders = ($Result | Where-Object -FilterScript { $_.RegistrationState -ne "Registered" }).ProviderNamespace
     if ($NonRegisteredProviders) {
         Write-Warning -Message "The following resource providers were NOT registered: $($NonRegisteredProviders -join ', ')"
     }
@@ -728,7 +697,7 @@ function Register-PsAvdRequiredResourceProvider {
 }
 
 function Install-PsAvdFSLogixGpoSettings {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [switch] $Force
     )
@@ -749,7 +718,7 @@ function Install-PsAvdFSLogixGpoSettings {
         }
         $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$FSLogixLatestURI' to '$OutFile'"
-        Start-BitsTransfer $FSLogixLatestURI -destination $OutFile
+        Start-BitsTransfer $FSLogixLatestURI -Destination $OutFile
         $DestinationPath = Join-Path -Path $env:Temp -ChildPath "FSLogixLatest"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unzipping '$OutFile' into '$DestinationPath'..."
         Expand-Archive -Path $OutFile -DestinationPath $DestinationPath -Force
@@ -766,7 +735,7 @@ function Install-PsAvdFSLogixGpoSettings {
 }
 
 function Install-PsAvdAvdGpoSettings {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [switch] $Force
     )
@@ -780,7 +749,7 @@ function Install-PsAvdAvdGpoSettings {
         $AVDGPOLatestURI = 'https://aka.ms/avdgpo'
         Invoke-WebRequest -Uri  $AVDGPOLatestURI -OutFile $OutFile 
         $AVDGPOLatestDir = New-Item -Path $env:Temp\AVDGPOLatest -ItemType Directory -Force
-        Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "extrac32 $OutFile /Y" -WorkingDirectory $AVDGPOLatestDir -Wait 
+        Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "extrac32 $OutFile /Y" -WorkingDirectory $AVDGPOLatestDir -Wait -NoNewWindow
         $ZipFiles = Get-ChildItem -Path $AVDGPOLatestDir -Filter *.zip -File 
         $ZipFiles | Expand-Archive -DestinationPath $AVDGPOLatestDir -Force
         Remove-Item -Path $ZipFiles.FullName, $OutFile  -Force
@@ -801,7 +770,7 @@ function Install-PsAvdAvdGpoSettings {
 
 #region Microsoft Entra ID Conditional Access Policies
 function New-PsAvdNoMFAUserEntraIDGroup {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [string] $NoMFAEntraIDGroupName = 'No-MFA Users'
     )
@@ -826,11 +795,12 @@ function New-PsAvdNoMFAUserEntraIDGroup {
             $null = $EntraIDGroupMutex.ReleaseMutex()
             #$EntraIDGroupMutex.Dispose()
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
-        } Else {
+        }
+        Else {
             Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
         }
     }
-    catch [System.Threading.AbandonedMutexException]{
+    catch [System.Threading.AbandonedMutexException] {
         #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
         $null = $EntraIDGroupMutex.ReleaseMutex()
     }
@@ -852,7 +822,7 @@ function New-PsAvdNoMFAUserEntraIDGroup {
 }
 
 function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [string[]] $ExcludeGroupName = 'No-MFA Users',
         [string] $DisplayName = "[AVD] Require multifactor authentication for all users",
@@ -876,24 +846,24 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex" -Verbose
             $MFAForAllUsersConditionalAccessPolicy = Get-MgBetaIdentityConditionalAccessPolicy -Filter "displayName eq '$DisplayName'"
             $policyProperties = @{
-                State = "Enabled"
-                Conditions = @{
+                State         = "Enabled"
+                Conditions    = @{
                     Applications = @{
                         IncludeApplications = @((Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Virtual Desktop'").AppId)
                     }
-                    Users = @{
-                        IncludeUsers = $IncludeUsers
+                    Users        = @{
+                        IncludeUsers  = $IncludeUsers
                         ExcludeGroups = $ExcludeGroups.Id
-                        ExcludeRoles = $DirectorySynchronizationAccountsRole.RoleTemplateId 
+                        ExcludeRoles  = $DirectorySynchronizationAccountsRole.RoleTemplateId 
                     }
-                    Locations = @{
+                    Locations    = @{
                         ExcludeLocations = @("AllTrusted")
                         IncludeLocations = @("All")
                     }
                 }
                 GrantControls = @{
                     BuiltInControls = @("Mfa")
-                    Operator = "OR"
+                    Operator        = "OR"
                 }
             }
             if (-not($MFAForAllUsersConditionalAccessPolicy)) {
@@ -916,11 +886,12 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
             $null = $ConditionalAccessPolicyMutex.ReleaseMutex()
             #$ConditionalAccessPolicyMutex.Dispose()
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
-        } Else {
+        }
+        Else {
             Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
         }
     }
-    catch [System.Threading.AbandonedMutexException]{
+    catch [System.Threading.AbandonedMutexException] {
         #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
         $null = $ConditionalAccessPolicyMutex.ReleaseMutex()
     }
@@ -946,7 +917,7 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
 
 #From https://github.com/andrew-s-taylor/public/blob/main/Powershell%20Scripts/Intune/function-getallpagination.ps1
 function Get-MgGraphObject {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [ValidateScript({ $_ -match '^https?://' })]
         [string] $Uri
@@ -972,7 +943,7 @@ function Get-MgGraphObject {
 }
 
 function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [string[]] $GroupId,
         [uint16] $TimeoutInSeconds = 300
@@ -981,23 +952,23 @@ function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
-    $mobilityManagementPolicyId= "0000000a-0000-0000-c000-000000000000"  
+    $mobilityManagementPolicyId = "0000000a-0000-0000-c000-000000000000"  
     #Bug : returns $null
     #$PolicyMobileDeviceManagementPolicy = Get-MgBetaPolicyMobileDeviceManagementPolicy -MobilityManagementPolicyId $mobilityManagementPolicyId
     $PolicyMobileDeviceManagementPolicy = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/policies/mobileDeviceManagementPolicies/$mobilityManagementPolicyId/includedGroups/$ref"
     foreach ($CurrentGroupId in $GroupId) {
         $CurrentGroup = Get-MgBetaGroup -GroupId $CurrentGroupId
         if ($CurrentGroup.Id -notin $PolicyMobileDeviceManagementPolicy.Id) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$($CurrentGroup.DisplayName)' Group to windows Intune Enrollment selected groups"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$($CurrentGroup.DisplayName)' Group to the windows Intune Enrollment selected groups"
             $OdataId = "https://graph.microsoft.com/odata/groups('$($CurrentGroup.Id)')"
-            $Timer =  [system.diagnostics.stopwatch]::StartNew()
+            $Timer = [system.diagnostics.stopwatch]::StartNew()
             Do {
                 try {
                     $Result = New-MgBetaPolicyMobileDeviceManagementPolicyIncludedGroupByRef -MobilityManagementPolicyId $mobilityManagementPolicyId -OdataId $OdataId -PassThru -ErrorAction Stop
                 }
                 catch {
                     Write-Warning -Message "$($_.Exception)"
-                    $Result =  $false
+                    $Result = $false
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                 }
@@ -1013,8 +984,9 @@ function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
 Function Sync-PsAvdIntuneSessionHostViaGraphAPI {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -1028,7 +1000,7 @@ Function Sync-PsAvdIntuneSessionHostViaGraphAPI {
     #region Devices
     $RegExp = ($HostPool.NamePrefix -replace '(^[^\n]*$)', '^$1-') -join '|'
     $AllDevices = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/managedDevices"
-    $FilteredDevices = $AllDevices | Where-Object -FilterScript {$_.DeviceName -match $RegExp }
+    $FilteredDevices = $AllDevices | Where-Object -FilterScript { $_.DeviceName -match $RegExp }
     $FilteredDevices | ForEach-Object -Process { 
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sending Sync request to Device with Device name '$($_.DeviceName)'"
         $RemovedDevices = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/managedDevices/$($_.id)/microsoft.graph.syncDevice" -Method POST -OutputType PSObject
@@ -1037,9 +1009,10 @@ Function Sync-PsAvdIntuneSessionHostViaGraphAPI {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
+#>
+<#
 Function Remove-PsAvdIntuneItemViaGraphAPI {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -1053,7 +1026,7 @@ Function Remove-PsAvdIntuneItemViaGraphAPI {
     #region deviceManagementScripts and groupPolicyConfigurations
     $RegExp = ($HostPool.Name -replace '(^[^\n]*$)', '^\[$1\]') -join '|'
     $Topics = "deviceManagementScripts", "groupPolicyConfigurations"
-    foreach($CurrentTopic in $Topics) {
+    foreach ($CurrentTopic in $Topics) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentTopic)'"
         $URI = "https://graph.microsoft.com/beta/deviceManagement/$($CurrentTopic)?`$select=id,displayname"
         $DeviceManagementTopics = Get-MgGraphObject -Uri $URI | Where-Object -FilterScript { ($_.displayName -match $RegExp) }
@@ -1067,7 +1040,7 @@ Function Remove-PsAvdIntuneItemViaGraphAPI {
     #region configurationPolicies
     $RegExp = ($HostPool.Name -replace '(^[^\n]*$)', '^\[$1\]') -join '|'
     $Topics = "configurationPolicies"
-    foreach($CurrentTopic in $Topics) {
+    foreach ($CurrentTopic in $Topics) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentTopic)'"
         $URI = "https://graph.microsoft.com/beta/deviceManagement/$($CurrentTopic)?`$select=id,name"
         $DeviceManagementTopics = Get-MgGraphObject -Uri $URI | Where-Object -FilterScript { ($_.name -match $RegExp) }
@@ -1081,7 +1054,7 @@ Function Remove-PsAvdIntuneItemViaGraphAPI {
     #region Devices
     $RegExp = ($HostPool.NamePrefix -replace '(^[^\n]*$)', '^$1-') -join '|'
     $AllDevices = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/managedDevices"
-    $FilteredDevices = $AllDevices | Where-Object -FilterScript {$_.DeviceName -match $RegExp }
+    $FilteredDevices = $AllDevices | Where-Object -FilterScript { $_.DeviceName -match $RegExp }
     $FilteredDevices | ForEach-Object -Process { 
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Intune Enrolled Device : $($_.DeviceName)"
         $RemovedDevices = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/managedDevices/$($_.id)" -Method DELETE -OutputType PSObject
@@ -1090,10 +1063,11 @@ Function Remove-PsAvdIntuneItemViaGraphAPI {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
+#>
+<#
 #From https://learn.microsoft.com/en-us/graph/api/intune-shared-devicemanagementscript-create?view=graph-rest-beta
 Function New-PsAvdIntunePowerShellScriptViaGraphAPI {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$HostPoolName,
@@ -1207,9 +1181,10 @@ Function New-PsAvdIntunePowerShellScriptViaGraphAPI {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
+#>
+<#
 function Get-PsAvdGroupPolicyDefinitionPresentationViaGraphAPI {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [array] $GroupPolicyDefinition
@@ -1235,9 +1210,10 @@ function Get-PsAvdGroupPolicyDefinitionPresentationViaGraphAPI {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
+#>
+<#
 function Import-PsAvdFSLogixADMXViaGraphAPI {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
     )
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -1269,7 +1245,7 @@ function Import-PsAvdFSLogixADMXViaGraphAPI {
     $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest" -UseBasicParsing).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
     $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$FSLogixLatestURI' to '$OutFile'"
-    Start-BitsTransfer $FSLogixLatestURI -destination $OutFile
+    Start-BitsTransfer $FSLogixLatestURI -Destination $OutFile
     $DestinationPath = Join-Path -Path $env:Temp -ChildPath "FSLogixLatest"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unzipping '$OutFile' into '$DestinationPath'"
     Expand-Archive -Path $OutFile -DestinationPath $DestinationPath -Force
@@ -1336,7 +1312,8 @@ function Import-PsAvdFSLogixADMXViaGraphAPI {
     return $GroupPolicyUploadedDefinitionFile
     #endregion
 }
-
+#>
+<#
 function Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI {
     [CmdletBinding(DefaultParameterSetName = 'Enable', PositionalBinding = $false)]
     param(
@@ -1407,7 +1384,7 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI {
     }
     
     $Body = @{
-        added = @(
+        added      = @(
             @{
                 "definition@odata.bind" = "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions('$($GroupPolicyDefinition.id)')"
                 "enabled"               = $($psCmdlet.ParameterSetName -eq 'Enable')
@@ -1427,313 +1404,7 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
-#region Administrative Templates: DO NOT USE - Use Settings Catalog instead
-function New-PsAvdFSLogixIntuneAdministrativeTemplateConfigurationPolicyViaGraphAPI {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [Alias('StorageAccountName')]
-        [string] $CurrentHostPoolStorageAccountName,
-
-        [Parameter(Mandatory = $true)]
-        [string]$HostPoolName,
-
-        [Parameter(Mandatory = $false)]
-        [string] $StorageEndpointSuffix = 'core.windows.net'
-    )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-
-    #region Graph API
-    #region Azure AD Desktop Application Group 
-    $HostPoolDAGUsersAzADGroupName = "$HostPoolName - Desktop Application Group Users"
-    #$HostPoolDAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolDAGUsersAzADGroupName
-    $HostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolDAGUsersAzADGroupName'"
-    if ($null -eq $HostPoolDAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolDAGUsersAzADGroupName' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #endregion
-
-    #region Azure AD Remote Application Group 
-    $HostPoolRAGUsersAzADGroupName = "$HostPoolName - Remote Application Group Users"
-    #$HostPoolRAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolRAGUsersAzADGroupName
-    $HostPoolRAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolRAGUsersAzADGroupName'"
-    if ($null -eq $HostPoolRAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolRAGUsersAzADGroup' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #endregion
-
-    #region groupPolicyConfigurations
-    $GroupPolicyConfigurationName = "[{0}] FSLogix Policy" -f $HostPoolName
-    #$Now = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssK")
-    $Now = Get-Date -Format o 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$GroupPolicyConfigurationName' Group Policy Configuration"
-    $Body = @{
-        #"createdDateTime" = $Now
-        "displayName" = $GroupPolicyConfigurationName
-        #"description" = ""
-        #"roleScopeTagIds" = @("0")
-        #"policyConfigurationIngestionType" = "custom"
-        #"id" = (New-Guid).Guid
-        #"lastModifiedDateTime" = $Now
-    }
-
-    #Checking if the groupPolicyConfigurations is already present
-    $GroupPolicyConfiguration = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyConfigurations?`$filter=displayName+eq+'$GroupPolicyConfigurationName'"
-    if ($GroupPolicyConfiguration) {
-        foreach ($CurrentValue in $GroupPolicyConfiguration) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Deleting the previously '$($CurrentValue.displayName)' groupPolicyConfigurations (id: '$($CurrentValue.id)')"
-            Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyConfigurations/$($CurrentValue.id)" -Method DELETE -OutputType PSObject
-        }
-    }
-    $GroupPolicyConfiguration = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/groupPolicyConfigurations" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
-    #endregion
-
-    #region Assign
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolDAGUsersAzADGroupName'"
-    $Body = @{
-        assignments = @(
-            @{
-                target = @{
-                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                    groupId       = $HostPoolDAGUsersAzADGroup.Id
-                }
-            }
-        )
-    }
-
-    $Assign = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/groupPolicyConfigurations/$($GroupPolicyConfiguration.id)/assign" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolRAGUsersAzADGroupName'"
-    $Body = @{
-        assignments = @(
-            @{
-                target = @{
-                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                    groupId       = $HostPoolRAGUsersAzADGroup.Id
-                }
-            }
-        )
-    }
-    $Assign = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/groupPolicyConfigurations/$($GroupPolicyConfiguration.id)/assign" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
-    #endregion
-
-    #region ADMX Management
-    $FSLogixProfileContainersGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\FSLogix\Profile Containers')"
-    if (-not($FSLogixProfileContainersGroupPolicyDefinitions)) {
-        $GroupPolicyUploadedDefinitionFile = Import-PsAvdFSLogixADMXViaGraphAPI
-    }
-    #endregion
-
-
-    #region FSLogix Profile Containers Settings
-    $FSLogixProfileContainersGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\FSLogix\Profile Containers')"
-    #Adding a FullPath Property
-    $FSLogixProfileContainersGroupPolicyDefinitions = $FSLogixProfileContainersGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($FSLogixProfileContainersGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Enabled' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue }  
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Delete Local Profile When VHD Should Apply' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Flip Flop Profile Directory Name' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Count' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 3; continue }  
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Interval' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 15; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Profile Type' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "0"; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Interval' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 15; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Count' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 3; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Size In MBs' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 30000; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Failure' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Temp Profile' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue }   
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Volume Type (VHD or VHDX)' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 'VHDX'; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Is Dynamic (VHD)' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\VHD Locations' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Redirection XML Source Folder' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"; continue } 
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region FSLogix Logging Settings
-    $FSLogixLoggingGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\FSLogix\Logging')"
-    $FSLogixLoggingGroupPolicyDefinitions = $FSLogixLoggingGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($FSLogixLoggingGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\FSLogix\Logging\Log Keeping Period' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 10 }
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #endregion
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-}
-
-function New-PsAvdIntuneAdministrativeTemplateConfigurationPolicyViaGraphAPI {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$HostPoolName
-    )
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-
-    #region Graph API
-    #region Azure AD Desktop Application Group 
-    $HostPoolDAGUsersAzADGroupName = "$HostPoolName - Desktop Application Group Users"
-    #$HostPoolDAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolDAGUsersAzADGroupName
-    $HostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolDAGUsersAzADGroupName'"
-    if ($null -eq $HostPoolDAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolDAGUsersAzADGroupName' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #endregion
-
-    #region Azure AD Remote Application Group 
-    $HostPoolRAGUsersAzADGroupName = "$HostPoolName - Remote Application Group Users"
-    #$HostPoolRAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolRAGUsersAzADGroupName
-    $HostPoolRAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolRAGUsersAzADGroup'"
-    if ($null -eq $HostPoolRAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolRAGUsersAzADGroup' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #endregion
-
-    #region groupPolicyConfigurations
-    $GroupPolicyConfigurationName = "[{0}] AVD Policy" -f $HostPoolName
-    #$Now = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssK")
-    $Now = Get-Date -Format o 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$GroupPolicyConfigurationName' Group Policy Configuration"
-    $Body = @{
-        #"createdDateTime" = $Now
-        "displayName" = $GroupPolicyConfigurationName
-        #"description" = ""
-        #"roleScopeTagIds" = @("0")
-        #"policyConfigurationIngestionType" = "custom"
-        #"id" = (New-Guid).Guid
-        #"lastModifiedDateTime" = $Now
-    }
-
-    #Checking if the groupPolicyConfigurations is already present
-    $GroupPolicyConfiguration = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyConfigurations?`$filter=displayName+eq+'$GroupPolicyConfigurationName'"
-    if ($GroupPolicyConfiguration) {
-        foreach ($CurrentGroupPolicyConfiguration in $GroupPolicyConfiguration) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Deleting the previously '$($CurrentGroupPolicyConfiguration.displayName)' groupPolicyConfigurations (id: '$($CurrentGroupPolicyConfiguration.id)')"
-            Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyConfigurations/$($CurrentGroupPolicyConfiguration.id)" -Method DELETE -OutputType PSObject
-        }
-    }
-    $GroupPolicyConfiguration = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/groupPolicyConfigurations" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
-    #endregion
-
-    #region Assign
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolDAGUsersAzADGroupName'"
-    $Body = @{
-        assignments = @(
-            @{
-                target = @{
-                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                    groupId       = $HostPoolDAGUsersAzADGroup.Id
-                }
-            }
-        )
-    }
-    $Assign = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/groupPolicyConfigurations/$($GroupPolicyConfiguration.id)/assign" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolRAGUsersAzADGroupName'"
-    $Body = @{
-        assignments = @(
-            @{
-                target = @{
-                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-                    groupId       = $HostPoolRAGUsersAzADGroup.Id
-                }
-            }
-        )
-    }
-    $Assign = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/groupPolicyConfigurations/$($GroupPolicyConfiguration.id)/assign" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
-    #endregion
-
-    #region Network\Background Intelligent Transfer Service (BITS) Settings
-    $NetworkBITSGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\Network\Background Intelligent Transfer Service (BITS)')"
-    $NetworkBITSGroupPolicyDefinitions = $NetworkBITSGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkBITSGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Background Intelligent Transfer Service (BITS)\Do not allow the BITS client to use Windows Branch Cache' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\BranchCache Settings
-    $NetworkBranchCacheGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\Network\BranchCache')"
-    $NetworkBranchCacheGroupPolicyDefinitions = $NetworkBranchCacheGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkBranchCacheGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\BranchCache\Enable Hotspot Authentication' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\Hotspot Authentication Settings
-    $NetworkHotspotAuthenticationGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\Network\Hotspot Authentication')"
-    $NetworkHotspotAuthenticationGroupPolicyDefinitions = $NetworkHotspotAuthenticationGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkHotspotAuthenticationGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Hotspot Authentication\Enable Hotspot Authentication' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\Microsoft Peer-to-Peer Networking Services Settings
-    $NetworkP2PGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\Network\Microsoft Peer-to-Peer Networking Services')"
-    switch ($NetworkP2PGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Microsoft Peer-to-Peer Networking Services\Turn off Microsoft Peer-to-Peer Networking Services' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\Offline Files Settings
-    $NetworkOfflineFilesGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\Network\Offline Files')"
-    $NetworkOfflineFilesGroupPolicyDefinitions = $NetworkOfflineFilesGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkOfflineFilesGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Offline Files\Allow or Disallow use of the Offline Files feature' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Remote Desktop Services Settings
-    $RDSSessionTimeLimitsGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits')"
-    $RDSSessionTimeLimitsGroupPolicyDefinitions = $RDSSessionTimeLimitsGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($RDSSessionTimeLimitsGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active but idle Remote Desktop Services sessions' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "900000"; continue }  
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for disconnected sessions' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "900000"; continue }  
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active Remote Desktop Services sessions' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "0"; continue }  
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\End session when time limits are reached' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Remote Desktop Services Settings
-    $RDSAVDGroupPolicyDefinitions = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions?`$filter=startsWith(categoryPath,'\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop')"
-    $RDSAVDGroupPolicyDefinitions = $RDSAVDGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    $GroupPolicyDefinitionPresentation = Get-PsAvdGroupPolicyDefinitionPresentationViaGraphAPI -GroupPolicyDefinition $RDSAVDGroupPolicyDefinitions
-    switch ($RDSAVDGroupPolicyDefinitions) {
-        #{ $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop\Enable screen capture protection' } { Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "1"; continue }  
-        { ($_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop\Enable watermarking') -and ($_.version -eq '2.0') } { 
-            $Value = @{
-                "QR code bitmap scale factor"                                     = 4
-                "QR code bitmap opacity"                                          = 2000
-                "Width of grid box in percent relative to QR code bitmap width"   = 320
-                "Height of grid box in percent relative to QR code bitmap height" = 180
-                "QR code embedded content"                                        = "0"
-            }
-            Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value $Value; continue 
-        }
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-    #endregion
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-}
-
+#>
 #endregion
 
 #region Settings Catalog
@@ -1764,7 +1435,7 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
 
     [array] $Children = @()
     if ($PSCmdlet.ParameterSetName -eq "Enable") {
-        $value = ($Setting.options | Where-Object -FilterScript { $_.Name -eq "Enabled"}).itemId
+        $value = ($Setting.options | Where-Object -FilterScript { $_.Name -eq "Enabled" }).itemId
         #$ChildSettings = $Settings | Where-Object -FilterScript { $_.id -eq $Setting.options.dependedOnBy.dependedOnBy }
         $ChildSettings = $Settings | Where-Object -FilterScript { $_.id -in $Setting.options.dependedOnBy.dependedOnBy }
         $Children = foreach ($CurrentChildSetting in $ChildSettings) {
@@ -1772,10 +1443,10 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
                 if ($null -ne $SettingValue) {
                     if ($SettingValue -is [hashtable]) {
                         $choiceSettingValueValue = $SettingValue[$CurrentChildSetting.displayName -replace "\s*\(Device\)"]
-                        $choiceSettingValue = ($CurrentChildSetting.options | Where-Object -FilterScript { $_.optionValue.value -eq $choiceSettingValueValue}).ItemId
+                        $choiceSettingValue = ($CurrentChildSetting.options | Where-Object -FilterScript { $_.optionValue.value -eq $choiceSettingValueValue }).ItemId
                     }
                     else {
-                        $choiceSettingValue = ($CurrentChildSetting.options | Where-Object -FilterScript {$_.Name.Trim() -eq $SettingValue.ToString()}).ItemId
+                        $choiceSettingValue = ($CurrentChildSetting.options | Where-Object -FilterScript { $_.Name.Trim() -eq $SettingValue.ToString() }).ItemId
                     }
                     if ($null -eq $choiceSettingValue) {
                         Write-Warning -Message "No ItemId found for '$SettingValue'. Switching back to the Setting default value: '$($CurrentChildSetting.defaultOptionId)'"
@@ -1786,51 +1457,51 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
                     $choiceSettingValue = $CurrentChildSetting.defaultOptionId
                 }
                 @{
-                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+                    "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                     "settingDefinitionId" = $CurrentChildSetting.id
-                    "choiceSettingValue" = @{
+                    "choiceSettingValue"  = @{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingValue"
-                        "value" = $choiceSettingValue
-                        "children" = @()
+                        "value"       = $choiceSettingValue
+                        "children"    = @()
                     }
                 }
             }
             elseif ($CurrentChildSetting.'@odata.type' -eq '#microsoft.graph.deviceManagementConfigurationSettingGroupCollectionDefinition') {
                 if ($SettingValue -is [hashtable]) {
-                    $KeySettingDefinitionId = $CurrentChildSetting.dependedOnBy.dependedOnBy | Where-Object { $_ -match "_key$"}
-                    $ValueSettingDefinitionId = $CurrentChildSetting.dependedOnBy.dependedOnBy | Where-Object { $_ -match "value$"}
+                    $KeySettingDefinitionId = $CurrentChildSetting.dependedOnBy.dependedOnBy | Where-Object { $_ -match "_key$" }
+                    $ValueSettingDefinitionId = $CurrentChildSetting.dependedOnBy.dependedOnBy | Where-Object { $_ -match "value$" }
                     [array] $groupSettingCollectionValue = foreach ($CurrentKey in $SettingValue.Keys) {
                         $CurrentValue = $SettingValue[$CurrentKey].ToString()
                         @{
                             "children" = @(
-                            @{
-                                "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                                "settingDefinitionId" = $KeySettingDefinitionId
-                                "simpleSettingValue" = @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                                    "value" = $CurrentKey
+                                @{
+                                    "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                                    "settingDefinitionId" = $KeySettingDefinitionId
+                                    "simpleSettingValue"  = @{
+                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
+                                        "value"       = $CurrentKey
+                                    }
                                 }
-                            }
-                            @{
-                                "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
-                                "settingDefinitionId" = $ValueSettingDefinitionId
-                                "simpleSettingValue" = @{
-                                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
-                                    "value" = $CurrentValue
+                                @{
+                                    "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                                    "settingDefinitionId" = $ValueSettingDefinitionId
+                                    "simpleSettingValue"  = @{
+                                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
+                                        "value"       = $CurrentValue
+                                    }
                                 }
-                            }
-                        )
+                            )
                         }
                     }
                     @{
-                        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationGroupSettingCollectionInstance"
-                        "settingDefinitionId" = $CurrentChildSetting.id
+                        "@odata.type"                 = "#microsoft.graph.deviceManagementConfigurationGroupSettingCollectionInstance"
+                        "settingDefinitionId"         = $CurrentChildSetting.id
                         "groupSettingCollectionValue" = $groupSettingCollectionValue
                     }
                 }
             }
-            else #if ($CurrentChildSetting.'@odata.type' -eq '#microsoft.graph.deviceManagementConfigurationSimpleSettingDefinition') {
-            {
+            else {
+                #if ($CurrentChildSetting.'@odata.type' -eq '#microsoft.graph.deviceManagementConfigurationSimpleSettingDefinition') {
                 if ($SettingValue -is [hashtable]) {
                     $simpleSettingValue = $SettingValue[$CurrentChildSetting.displayName -replace "\s*\(Device\)"]
                 }
@@ -1838,11 +1509,11 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
                     $simpleSettingValue = $SettingValue.ToString()
                 }
                 @{
-                    "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
+                    "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
                     "settingDefinitionId" = $CurrentChildSetting.id
-                    "simpleSettingValue" = @{
+                    "simpleSettingValue"  = @{
                         "@odata.type" = $CurrentChildSetting.defaultValue.'@odata.type'
-                        "value" = $simpleSettingValue
+                        "value"       = $simpleSettingValue
                     }
                 }
             }
@@ -1851,21 +1522,22 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
             $Children = @()
         }
         if (($Setting.'@odata.type' -eq '#microsoft.graph.deviceManagementConfigurationChoiceSettingDefinition') -and ([string]::IsNullOrEmpty($value))) {
-                $value = ($Setting.options | Where-Object -FilterScript {$_.Name.Trim() -eq $SettingValue.ToString()}).ItemId
+            $value = ($Setting.options | Where-Object -FilterScript { $_.Name.Trim() -eq $SettingValue.ToString() }).ItemId
         }
-    } else {
-        $value = ($_.options | Where-Object -FilterScript { $_.Name -eq "Disabled"}).itemId
+    }
+    else {
+        $value = ($_.options | Where-Object -FilterScript { $_.Name -eq "Disabled" }).itemId
         $Children = @()
     }
     $CurrentSettings = @{
-        "@odata.type" = "#microsoft.graph.deviceManagementConfigurationSetting"
+        "@odata.type"     = "#microsoft.graph.deviceManagementConfigurationSetting"
         "settingInstance" = @{
-            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
+            "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
             "settingDefinitionId" = $_.id
-            "choiceSettingValue" = @{
+            "choiceSettingValue"  = @{
                 "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingValue"
-                "value" = $value
-                "children" = $Children
+                "value"       = $value
+                "children"    = $Children
             }
         }
     }
@@ -1875,7 +1547,7 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
 }
 
 function Add-PsAvdCategoryFullPath {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -1888,14 +1560,14 @@ function Add-PsAvdCategoryFullPath {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ParentCategory: $($CurrentCategory.displayName)"
     if ($null -eq $ParentCategory) {
         #Top Category
-        $ParentCategory = $Categories | Where-Object {$_.parentCategoryId -match "^(0|-)+$"}
-        $ParentCategory = $ParentCategory | Add-Member -NotePropertyMembers @{ FullPath=$("\{0}" -f $ParentCategory.displayName) } -PassThru
+        $ParentCategory = $Categories | Where-Object { $_.parentCategoryId -match "^(0|-)+$" }
+        $ParentCategory = $ParentCategory | Add-Member -NotePropertyMembers @{ FullPath = $("\{0}" -f $ParentCategory.displayName) } -PassThru
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Parent Category Full Path: $($ParentCategory.FullPath)"
     }
 
-    $ChildCategories = $Categories | Where-Object {$_.parentCategoryId -eq $ParentCategory.id}
+    $ChildCategories = $Categories | Where-Object { $_.parentCategoryId -eq $ParentCategory.id }
     foreach ($CurrentChildCategory in $ChildCategories) {
-        $CurrentChildCategory = $CurrentChildCategory | Add-Member -NotePropertyMembers @{ FullPath=$("{0}\{1}" -f $ParentCategory.FullPath, $CurrentChildCategory.displayName) } -PassThru
+        $CurrentChildCategory = $CurrentChildCategory | Add-Member -NotePropertyMembers @{ FullPath = $("{0}\{1}" -f $ParentCategory.FullPath, $CurrentChildCategory.displayName) } -PassThru
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Current Child Category Full Path: $($CurrentChildCategory.FullPath)"
         Add-PsAvdCategoryFullPath -Categories $Categories -ParentCategory $CurrentChildCategory
     }
@@ -1904,7 +1576,7 @@ function Add-PsAvdCategoryFullPath {
 }
 
 function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [Alias('StorageAccountName')]
@@ -1941,55 +1613,93 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 
     #region 'FSLogix > Profile Containers' Settings
     #$FSLogixProfileContainersConfigurationChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript {$_.displayName -eq "Profile Containers"}
-    $FSLogixProfileContainersConfigurationChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\FSLogix\Profile Containers"}
+    $FSLogixProfileContainersConfigurationChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\FSLogix\Profile Containers" }
     $FSLogixProfileContainersConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($FSLogixProfileContainersConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $FSLogixProfileContainersConfigurationSettings = $FSLogixProfileContainersConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $FSLogixProfileContainersConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
 
     [array] $settings += switch ($FSLogixProfileContainersConfigurationSettings) {
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Enabled' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue }  
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Delete Local Profile When VHD Should Apply' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Count' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 3 -Enable; continue }  
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Interval' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 15 -Enable}
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Profile Type' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 'Normal Profile' -Enable}
-        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Interval' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 15 -Enable}
-        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Count' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 3 -Enable}
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Size In MBs' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 30000 -Enable}
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Failure' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 1 -Enable; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Temp Profile' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 1 -Enable; continue }   
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Is Dynamic (VHD)' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 1 -Enable; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\VHD Locations' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles" -Enable; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Redirection XML Source Folder' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles" -Enable; continue } 
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Enabled' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue 
+        }  
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Delete Local Profile When VHD Should Apply' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue 
+        } 
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Count' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 3 -Enable; continue 
+        }  
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Interval' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 15 -Enable
+        }
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Profile Type' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 'Normal Profile' -Enable
+        }
+        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Interval' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 15 -Enable
+        }
+        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Count' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 3 -Enable
+        }
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Size In MBs' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 30000 -Enable
+        }
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Failure' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 1 -Enable; continue 
+        } 
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Temp Profile' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 1 -Enable; continue 
+        }   
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Is Dynamic (VHD)' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue 1 -Enable; continue 
+        } 
+        { $_.FullPath -eq '\FSLogix\Profile Containers\VHD Locations' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles" -Enable; continue 
+        } 
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Redirection XML Source Folder' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles" -Enable; continue 
+        } 
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'FSLogix > Profile Containers Settings > Container and Directory Naming' Settings
-    $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\FSLogix\Profile Containers\Container and Directory Naming"}
+    $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\FSLogix\Profile Containers\Container and Directory Naming" }
     $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($FSLogixProfileContainersConfigurationContainerAndDirectoryNamingChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingSettings = $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingChildCategory.FullPath -ChildPath $_.displayName } }
        
     [array] $settings += switch ($FSLogixProfileContainersConfigurationContainerAndDirectoryNamingSettings) {
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Flip Flop Profile Directory Name' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Volume Type (VHD or VHDX)' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingSettings -Setting $_ -SettingValue 'VHDX' -Enable ; continue}
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Flip Flop Profile Directory Name' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue 
+        } 
+        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Volume Type (VHD or VHDX)' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingSettings -Setting $_ -SettingValue 'VHDX' -Enable ; continue
+        }
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'FSLogix > Logging' Settings
     #$FSLogixConfigurationLoggingChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript {$_.displayName -eq "Logging"}
-    $FSLogixConfigurationLoggingChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\FSLogix\Logging"}
+    $FSLogixConfigurationLoggingChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\FSLogix\Logging" }
     $FSLogixConfigurationLoggingSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($FSLogixConfigurationLoggingChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $FSLogixConfigurationLoggingSettings = $FSLogixConfigurationLoggingSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $FSLogixConfigurationLoggingChildCategory.FullPath -ChildPath $_.displayName } }
 
     [array] $settings += switch ($FSLogixConfigurationLoggingSettings) {
-        { $_.FullPath -eq '\FSLogix\Logging\Log Keeping Period' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixConfigurationLoggingSettings -Setting $_ -SettingValue 10 -Enable; continue}
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\FSLogix\Logging\Log Keeping Period' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixConfigurationLoggingSettings -Setting $_ -SettingValue 10 -Enable; continue
+        }
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #$Body | ConvertTo-Json -Depth 100 | Set-Clipboard
     #endregion
@@ -2020,27 +1730,31 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 
     #region Administrative Templates Category and Child Categories
     #region Getting Administrative Templates Category and Child Categories
-    $AdministrativeTemplatesConfigurationCategory = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=technologies+has+'mdm'+and+description+eq+'Administrative Templates'" -Verbose
+    $AdministrativeTemplatesConfigurationCategory = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=technologies+has+'mdm'+and+description+eq+'Administrative+Templates'" -Verbose
     [array] $AdministrativeTemplatesConfigurationChildCategories = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=rootCategoryId+eq+'$($AdministrativeTemplatesConfigurationCategory.id)'"
     Add-PsAvdCategoryFullPath -Categories $AdministrativeTemplatesConfigurationChildCategories
     #endregion
 
     #region 'Administrative Templates > Windows Components > Remote Desktop Services > Remote Desktop Session Host > Device and Resource Redirection
-    $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Device and Resource Redirection"}
+    $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Device and Resource Redirection" }
     $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationSettings = $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
     
     [array] $settings += switch ($AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationSettings) {
-        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Device and Resource Redirection\Allow time zone redirection' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationSettings -Setting $_ -Enable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Device and Resource Redirection\Allow time zone redirection' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHConfigurationSettings -Setting $_ -Enable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
 
     #endregion
 
     #region 'Administrative Templates > Windows Components > Microsoft Defender Antivirus > Exclusions
-    $AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Windows Components\Microsoft Defender Antivirus\Exclusions"}
+    $AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Windows Components\Microsoft Defender Antivirus\Exclusions" }
     $AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
@@ -2049,37 +1763,39 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     [array] $settings += switch ($AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationSettings) {
         { $_.FullPath -eq '\Administrative Templates\Windows Components\Microsoft Defender Antivirus\Exclusions\Path Exclusions' } { 
             $Exclusions = @{
-                '%TEMP%\*\*.VHD' = 0
-                '%TEMP%\*\*.VHDX' = 0
-                '%Windir%\TEMP\*\*.VHD' = 0
-                '%Windir%\TEMP\*\*.VHDX' = 0
-                '%ProgramData%\FSLogix\Cache\*' = 0
-                '%ProgramData%\FSLogix\Proxy\*' = 0
-                '%ProgramFiles%\FSLogix\Apps\frxdrv.sys' = 0
-                '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys' = 0
-                '%ProgramFiles%\FSLogix\Apps\frxccd.sys' = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD" = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.lock" = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.meta" = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.metadata" = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX" = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.lock" = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.meta" = 0
+                '%TEMP%\*\*.VHD'                                                                     = 0
+                '%TEMP%\*\*.VHDX'                                                                    = 0
+                '%Windir%\TEMP\*\*.VHD'                                                              = 0
+                '%Windir%\TEMP\*\*.VHDX'                                                             = 0
+                '%ProgramData%\FSLogix\Cache\*'                                                      = 0
+                '%ProgramData%\FSLogix\Proxy\*'                                                      = 0
+                '%ProgramFiles%\FSLogix\Apps\frxdrv.sys'                                             = 0
+                '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys'                                           = 0
+                '%ProgramFiles%\FSLogix\Apps\frxccd.sys'                                             = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD"           = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.lock"      = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.meta"      = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.metadata"  = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX"          = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.lock"     = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.meta"     = 0
                 "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.metadata" = 0
-                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.CIM" = 0
+                "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.CIM"           = 0
             }
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationSettings -Setting $_ -SettingValue $Exclusions -Enable; continue 
         }  
         { $_.FullPath -eq '\Administrative Templates\Windows Components\Microsoft Defender Antivirus\Exclusions\Process Exclusions' } { 
             $Exclusions = @{
-                '%ProgramFiles%\FSLogix\Apps\frxccd.exe' = 0
-                '%ProgramFiles%\FSLogix\Apps\frxccds.exe' = 0
-                '%ProgramFiles%\FSLogix\Apps\frxsvc.exe' = 0
+                '%ProgramFiles%\FSLogix\Apps\frxccd.exe'      = 0
+                '%ProgramFiles%\FSLogix\Apps\frxccds.exe'     = 0
+                '%ProgramFiles%\FSLogix\Apps\frxsvc.exe'      = 0
                 '%ProgramFiles%\FSLogix\Apps\frxrobocopy.exe' = 0
             }
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationSettings -Setting $_ -SettingValue $Exclusions -Enable; continue 
         }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
 
     #endregion
@@ -2092,7 +1808,7 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     #endregion
 
     #region Storage
-    $StorageConfigurationChildCategory = $StorageConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Storage"}
+    $StorageConfigurationChildCategory = $StorageConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Storage" }
     $StorageConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($StorageConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
@@ -2100,8 +1816,11 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 
     [array] $settings += switch ($StorageConfigurationSettings) {
         { $_.FullPath -eq '\Storage\Allow Storage Sense Global' } { 
-        New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $StorageConfigurationSettings -Setting $_ -SettingValue 'Block' -Enable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $StorageConfigurationSettings -Setting $_ -SettingValue 'Block' -Enable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
     #endregion
@@ -2114,11 +1833,11 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 
     
     $Body = @{
-        name = $ConfigurationPolicyName
-        description = $ConfigurationPolicyName
-        platforms = "windows10"
+        name         = $ConfigurationPolicyName
+        description  = $ConfigurationPolicyName
+        platforms    = "windows10"
         technologies = "mdm"
-        settings = $settings
+        settings     = $settings
     }
 
     #Checking if the Configuration Policy is already present
@@ -2155,7 +1874,7 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 }
 
 function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [Alias('StorageAccountName')]
@@ -2185,78 +1904,98 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 
     #region Administrative Templates Category and Child Categories
     #region Getting Administrative Templates Category and Child Categories
-    $AdministrativeTemplatesConfigurationCategory = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=technologies+has+'mdm'+and+description+eq+'Administrative Templates'" -Verbose
+    $AdministrativeTemplatesConfigurationCategory = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=technologies+has+'mdm'+and+description+eq+'Administrative+Templates'" -Verbose
     [array] $AdministrativeTemplatesConfigurationChildCategories = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=rootCategoryId+eq+'$($AdministrativeTemplatesConfigurationCategory.id)'"
     Add-PsAvdCategoryFullPath -Categories $AdministrativeTemplatesConfigurationChildCategories
     #endregion
 
     #region 'Administrative Templates > Network > Offline Files' Settings
-    $AdministrativeTemplatesNetworkOfflineFilesConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Network\Offline Files"}
+    $AdministrativeTemplatesNetworkOfflineFilesConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Network\Offline Files" }
     $AdministrativeTemplatesNetworkOfflineFilesConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesNetworkOfflineFilesConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $AdministrativeTemplatesNetworkOfflineFilesConfigurationSettings = $AdministrativeTemplatesNetworkOfflineFilesConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesNetworkOfflineFilesConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
     
     [array] $settings += switch ($AdministrativeTemplatesNetworkOfflineFilesConfigurationSettings) {
-        { $_.FullPath -eq '\Administrative Templates\Network\Offline Files\Allow or Disallow use of the Offline Files feature' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\Administrative Templates\Network\Offline Files\Allow or Disallow use of the Offline Files feature' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'Administrative Templates > Network > Hotspot Authentication' Settings
-    $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Network\Hotspot Authentication"}
+    $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Network\Hotspot Authentication" }
     $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationSettings = $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
     
     [array] $settings += switch ($AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationSettings) {
-        { $_.FullPath -eq '\Administrative Templates\Network\Hotspot Authentication\Enable Hotspot Authentication' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\Administrative Templates\Network\Hotspot Authentication\Enable Hotspot Authentication' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'Administrative Templates > Network > Background Intelligent Transfer Service (BITS)' Settings
-    $AdministrativeTemplatesNetworkBITSConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Network\Background Intelligent Transfer Service (BITS)"}
+    $AdministrativeTemplatesNetworkBITSConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Network\Background Intelligent Transfer Service (BITS)" }
     $AdministrativeTemplatesNetworkBITSConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesNetworkBITSConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $AdministrativeTemplatesNetworkBITSConfigurationSettings = $AdministrativeTemplatesNetworkBITSConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesNetworkBITSConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
     
     [array] $settings += switch ($AdministrativeTemplatesNetworkBITSConfigurationSettings) {
-        { $_.FullPath -eq '\Administrative Templates\Network\Background Intelligent Transfer Service (BITS)\Do not allow the BITS client to use Windows Branch Cache' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\Administrative Templates\Network\Background Intelligent Transfer Service (BITS)\Do not allow the BITS client to use Windows Branch Cache' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'Administrative Templates > Network > Hotspot Authentication' Settings
-    $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Network\Hotspot Authentication"}
+    $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Network\Hotspot Authentication" }
     $AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesNetworkHotspotAuthenticationConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $AdministrativeTemplatesNetworkHotspotAuthenticationSettingsConfigurationSettings = $AdministrativeTemplatesNetworkHotspotAuthenticationSettingsConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesNetworkHotspotAuthenticationSettingsConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
     
     [array] $settings += switch ($AdministrativeTemplatesNetworkHotspotAuthenticationSettingsConfigurationSettings) {
-        { $_.FullPath -eq '\Administrative Templates\Network\Hotspot Authentication\Enable Hotspot Authentication' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\Administrative Templates\Network\Hotspot Authentication\Enable Hotspot Authentication' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'Administrative Templates > Network > BranchCache' Settings
-    $AdministrativeTemplatesNetworkBranchCacheConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Network\BranchCache"}
+    $AdministrativeTemplatesNetworkBranchCacheConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Network\BranchCache" }
     $AdministrativeTemplatesNetworkBranchCacheConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesNetworkBranchCacheConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $AdministrativeTemplatesNetworkBranchCacheSettingsConfigurationSettings = $AdministrativeTemplatesNetworkBranchCacheSettingsConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesNetworkBranchCacheSettingsConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
     
     [array] $settings += switch ($AdministrativeTemplatesNetworkBranchCacheSettingsConfigurationSettings) {
-        { $_.FullPath -eq '\Administrative Templates\Network\BranchCache\Turn On BranchCache' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\Administrative Templates\Network\BranchCache\Turn On BranchCache' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'Administrative Templates > Windows Components > Remote Desktop Services > Remote Desktop Session Host > Azure Virtual Desktop'
-    $AdministrativeTemplatesWindowsComponentsRDSRDSHAVDConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop"}
+    $AdministrativeTemplatesWindowsComponentsRDSRDSHAVDConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop" }
     $AdministrativeTemplatesWindowsComponentsRDSRDSHAVDConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesWindowsComponentsRDSRDSHAVDConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
@@ -2273,24 +2012,36 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
                 "QR code embedded content"                                        = "0"
             }
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHAVDConfigurationSettings -Setting $_ -SettingValue $SettingValue -Enable ; continue 
-            }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
     #endregion
 
     #region 'Administrative Templates > Windows Components > Remote Desktop Services > Remote Desktop Session Host > Session Time Limits
-    $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript {$_.FullPath -eq "\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits"}
+    $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits" }
     $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
     #Adding a FullPath Property
     $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings = $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
     
     [array] $settings += switch ($AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings) {
-        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active but idle Remote Desktop Services sessions' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -SettingValue '15 minutes' -Enable; continue }  
-        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for disconnected sessions' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -SettingValue '15 minutes' -Enable; continue }  
-        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active Remote Desktop Services sessions' } {  New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -SettingValue 'Never' -Enable; continue }  
-        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\End session when time limits are reached' } { New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -Enable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
+        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active but idle Remote Desktop Services sessions' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -SettingValue '15 minutes' -Enable; continue 
+        }  
+        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for disconnected sessions' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -SettingValue '15 minutes' -Enable; continue 
+        }  
+        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active Remote Desktop Services sessions' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -SettingValue 'Never' -Enable; continue 
+        }  
+        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\End session when time limits are reached' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsRDSRDSHSessionTimeLimitsConfigurationSettings -Setting $_ -Enable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
     }
 
     #endregion
@@ -2300,11 +2051,11 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     $ConfigurationPolicyName = "[{0}] AVD Policy" -f $HostPoolName
 
     $Body = @{
-        name = $ConfigurationPolicyName
-        description = $ConfigurationPolicyName
-        platforms = "windows10"
+        name         = $ConfigurationPolicyName
+        description  = $ConfigurationPolicyName
+        platforms    = "windows10"
         technologies = "mdm"
-        settings = $settings
+        settings     = $settings
     }
     
     #Checking if the Configuration Policy is already present
@@ -2345,7 +2096,7 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 
 #region PowerShell Cmdlets
 Function Sync-PsAvdIntuneSessionHostViaCmdlet {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -2360,7 +2111,7 @@ Function Sync-PsAvdIntuneSessionHostViaCmdlet {
     #region Devices
     #Getting all session hosts starting with the Name Prefixes
     $RegExp = ($HostPool.NamePrefix -replace '(^[^\n]*$)', '^$1-') -join '|'
-    $Result = Get-MgBetaDeviceManagementManagedDevice -All | Where-Object -FilterScript {$_.DeviceName -match $RegExp } | ForEach-Object -Process { 
+    $Result = Get-MgBetaDeviceManagementManagedDevice -All | Where-Object -FilterScript { $_.DeviceName -match $RegExp } | ForEach-Object -Process { 
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sending Sync request to Device with Device name '$($_.DeviceName)'"
         Sync-MgBetaDeviceManagementManagedDevice -ManagedDeviceId $_.Id -PassThru
     }
@@ -2372,7 +2123,7 @@ Function Sync-PsAvdIntuneSessionHostViaCmdlet {
 }
 
 Function Remove-PsAvdIntuneItemViaCmdlet {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -2390,14 +2141,14 @@ Function Remove-PsAvdIntuneItemViaCmdlet {
     $RegExp = ($HostPool.Name -replace '(^[^\n]*$)', '^\[$1\]') -join '|'
 
     #region Configuration Policies - Administratives Templates
-    Get-MgBetaDeviceManagementGroupPolicyConfiguration -All | Where-Object -FilterScript {$_.displayName -match $RegExp } | ForEach-Object -Process {
+    Get-MgBetaDeviceManagementGroupPolicyConfiguration -All | Where-Object -FilterScript { $_.displayName -match $RegExp } | ForEach-Object -Process {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Device Management Group Policy Configuration: '$($_.displayName)'"
         Remove-MgBetaDeviceManagementGroupPolicyConfiguration -GroupPolicyConfigurationId $_.Id
     }
     #endregion
 
     #region Configuration Policies - Settings Catalog
-    Get-MgBetaDeviceManagementConfigurationPolicy -All | Where-Object -FilterScript {$_.Name -match $RegExp } | ForEach-Object -Process { 
+    Get-MgBetaDeviceManagementConfigurationPolicy -All | Where-Object -FilterScript { $_.Name -match $RegExp } | ForEach-Object -Process { 
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Device Management Policy Configuration: '$($_.Name)'"
         Remove-MgBetaDeviceManagementConfigurationPolicy -DeviceManagementConfigurationPolicyId $_.Id
     }
@@ -2405,7 +2156,7 @@ Function Remove-PsAvdIntuneItemViaCmdlet {
 
     #The pipeline has been stopped ==> Get-MgBetaDeviceManagementScript -Filter "startswith(Name,'[$HostPoolName]')" | Remove-MgBetaDeviceManagementScript
     #Get-MgBetaDeviceManagementScript -Filter "startswith(Name,'[$HostPoolName]')" -All | ForEach-Object -Process {
-    Get-MgBetaDeviceManagementScript -All | Where-Object -FilterScript {$_.DisplayName -match $RegExp } | ForEach-Object -Process {
+    Get-MgBetaDeviceManagementScript -All | Where-Object -FilterScript { $_.DisplayName -match $RegExp } | ForEach-Object -Process {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Device Management Script: '$($_.DisplayName)'"
         Remove-MgBetaDeviceManagementScript -DeviceManagementScriptId $_.Id
     }
@@ -2414,7 +2165,7 @@ Function Remove-PsAvdIntuneItemViaCmdlet {
     #region Devices
     #Getting all session hosts starting with the Name Prefixes
     $RegExp = ($HostPool.NamePrefix -replace '(^[^\n]*$)', '^$1-') -join '|'
-    Get-MgBetaDeviceManagementManagedDevice -All | Where-Object -FilterScript {$_.DeviceName -match $RegExp } | ForEach-Object -Process { 
+    Get-MgBetaDeviceManagementManagedDevice -All | Where-Object -FilterScript { $_.DeviceName -match $RegExp } | ForEach-Object -Process { 
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Intune Enrolled Device : $($_.DeviceName)"
         Remove-MgBetaDeviceManagementManagedDevice -ManagedDeviceId $_.Id 
     }
@@ -2428,7 +2179,7 @@ Function Remove-PsAvdIntuneItemViaCmdlet {
 }
 
 Function New-PsAvdIntunePowerShellScriptViaCmdlet {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [string]$HostPoolName,
@@ -2438,7 +2189,10 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
         [string]$ScriptURI,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'ScriptPath')]
-        [string]$ScriptPath
+        [string]$ScriptPath,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'ScriptBlock')]
+        [System.Management.Automation.ScriptBlock]$ScriptBlock
     )
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -2461,10 +2215,14 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
         #$ScriptContentInputFile = Join-Path -Path $env:TEMP -ChildPath [System.IO.Path]::GetRandomFileName()
         $ScriptContent = Invoke-RestMethod -Uri $ScriptURI -OutFile $ScriptContentInputFile
     }
-    else {
+    elseif ($ScriptPath) {
         $FileName = Split-Path $ScriptPath -Leaf
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$ScriptPath' script"
         $ScriptContentInputFile = $ScriptPath
+    }
+    else {
+        $ScriptContentInputFile = Join-Path -Path $env:TEMP -ChildPath $([System.IO.Path]::GetRandomFileName())
+        New-Item -Path $ScriptContentInputFile -ItemType File -Value $ScriptBlock.ToString()
     }
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FileName: '$FileName'"
@@ -2475,7 +2233,7 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
     Get-MgBetaDeviceManagementScript -Filter "displayName eq '$DisplayName'" -All | Remove-MgBetaDeviceManagementScript
 
     $AddedScript = New-MgBetaDeviceManagementScript -DisplayName $DisplayName -FileName $FileName -RoleScopeTagIds @("0") -RunAsAccount 'system'-ScriptContentInputFile $ScriptContentInputFile
-    if ($ScriptURI) {
+    if ($ScriptURI -or $ScriptBlock) {
         Remove-Item -Path $ScriptContentInputFile -Force
     }
 
@@ -2484,14 +2242,14 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
     #region Assign
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$FileName' PowerShell script to '$HostPoolDeviceAzADGroup'"
     $BodyParameter = @{
-	    deviceManagementScriptAssignments = @(
-		    @{
-			    target = @{
-				    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-				    groupId = $HostPoolDeviceAzADGroup.Id
-			    }
-		    }
-	    )
+        deviceManagementScriptAssignments = @(
+            @{
+                target = @{
+                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                    groupId       = $HostPoolDeviceAzADGroup.Id
+                }
+            }
+        )
     }
     Set-MgBetaDeviceManagementScript -DeviceManagementScriptId $AddedScript.Id -BodyParameter $BodyParameter
     #endregion
@@ -2500,7 +2258,7 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
 }
 
 function Get-PsAvdGroupPolicyDefinitionPresentationViaCmdlet {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [array] $GroupPolicyDefinition
@@ -2526,10 +2284,10 @@ function Get-PsAvdGroupPolicyDefinitionPresentationViaCmdlet {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
  
+<#
 function Import-PsAvdFSLogixADMXViaCmdlet {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
-        [switch] $Wait
     )
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -2543,7 +2301,7 @@ function Import-PsAvdFSLogixADMXViaCmdlet {
     $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest" -UseBasicParsing).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
     $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$FSLogixLatestURI' to '$OutFile'"
-    Start-BitsTransfer $FSLogixLatestURI -destination $OutFile
+    Start-BitsTransfer $FSLogixLatestURI -Destination $OutFile
     $DestinationPath = Join-Path -Path $env:Temp -ChildPath "FSLogixLatest"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unzipping '$OutFile' into '$DestinationPath'"
     Expand-Archive -Path $OutFile -DestinationPath $DestinationPath -Force
@@ -2569,15 +2327,15 @@ function Import-PsAvdFSLogixADMXViaCmdlet {
     $Now = Get-Date -Format o 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Uploading the ADMX and ADML files"
     $GroupPolicyUploadedLanguageFiles = @(
-            @{
-                "fileName"     = $ADMLFileName
-                "languageCode" = "en-US"
-                "content"      = $ADMLFileContent
-                #"id" = (New-Guid).Guid
-                #"lastModifiedDateTime" = $Now
-            }
-        )
-    New-MgBetaDeviceManagementGroupPolicyUploadedDefinitionFile -LanguageCodes @("en-US") -TargetPrefix $("FSLogix{0}" -f $GUID) -TargetNamespace "FSLogix.Policies" -policyType 'admxIngested' -FileName $ADMXFileName -ContentInputFile $ADMXFileContent -GroupPolicyUploadedLanguageFiles $GroupPolicyUploadedLanguageFiles
+        @{
+            "fileName"     = $ADMLFileName
+            "languageCode" = "en-US"
+            "content"      = $ADMLFileContent
+            #"id" = (New-Guid).Guid
+            #"lastModifiedDateTime" = $Now
+        }
+    )
+    New-MgBetaDeviceManagementGroupPolicyUploadedDefinitionFile -LanguageCodes @("en-US") -TargetPrefix $("FSLogix{0}" -f $GUID) -TargetNamespace "FSLogix.Policies" -PolicyType 'admxIngested' -FileName $ADMXFileName -ContentInputFile $ADMXFileContent -GroupPolicyUploadedLanguageFiles $GroupPolicyUploadedLanguageFiles
     $GroupPolicyUploadedDefinitionFileId = $GroupPolicyUploadedDefinitionFile.id
     While ($GroupPolicyUploadedDefinitionFile.status -eq 'uploadInProgress') {
         $GroupPolicyUploadedDefinitionFile = Get-MgBetaDeviceManagementGroupPolicyUploadedDefinitionFile -Filter "id eq '$GroupPolicyUploadedDefinitionFileId'" -All
@@ -2589,7 +2347,7 @@ function Import-PsAvdFSLogixADMXViaCmdlet {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
+#>
 function Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet {
     [CmdletBinding(DefaultParameterSetName = 'Enable', PositionalBinding = $false)]
     param(
@@ -2660,7 +2418,7 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet {
     }
 
     $BodyParameter = @{
-        added = @(
+        added      = @(
             @{
                 "definition@odata.bind" = "https://graph.microsoft.com/beta/deviceManagement/groupPolicyDefinitions('$($GroupPolicyDefinition.id)')"
                 "enabled"               = $($psCmdlet.ParameterSetName -eq 'Enable')
@@ -2676,270 +2434,13 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
-#region Administrative Templates: DO NOT USE - Use Settings Catalog instead
-function New-PsAvdFSLogixIntuneAdministrativeTemplateConfigurationPolicyViaCmdlet {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [Alias('StorageAccountName')]
-        [string] $CurrentHostPoolStorageAccountName,
-
-        [Parameter(Mandatory = $true)]
-        [string]$HostPoolName,
-
-        [Parameter(Mandatory = $false)]
-        [string] $StorageEndpointSuffix = 'core.windows.net'
-    )
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-
-    #region Azure AD Desktop Application Group 
-    $HostPoolDAGUsersAzADGroupName = "$HostPoolName - Desktop Application Group Users"
-    #$HostPoolDAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolDAGUsersAzADGroupName
-    $HostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolDAGUsersAzADGroupName'"
-    if ($null -eq $HostPoolDAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolDAGUsersAzADGroupName' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #endregion
-
-    #region Azure AD Remote Application Group 
-    $HostPoolRAGUsersAzADGroupName = "$HostPoolName - Remote Application Group Users"
-    #$HostPoolRAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolRAGUsersAzADGroupName
-    $HostPoolRAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolRAGUsersAzADGroupName'"
-    if ($null -eq $HostPoolRAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolRAGUsersAzADGroup' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #region groupPolicyConfigurations
-    $GroupPolicyConfigurationName = "[{0}] FSLogix Policy" -f $HostPoolName
-    #$Now = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssK")
-    $Now = Get-Date -Format o 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$GroupPolicyConfigurationName' Group Policy Configuration"
-    #Removing the groupPolicyConfigurations if already present
-    #The pipeline has been stopped ==> Get-MgBetaDeviceManagementGroupPolicyConfiguration -Filter "displayName eq '$GroupPolicyConfigurationName'" -All | Remove-MgBetaDeviceManagementGroupPolicyConfiguration
-    Get-MgBetaDeviceManagementGroupPolicyConfiguration -Filter "displayName eq '$GroupPolicyConfigurationName'" -All | ForEach-Object -Process {
-        Remove-MgBetaDeviceManagementGroupPolicyConfiguration -GroupPolicyConfigurationId  $_.Id
-    }
-    $GroupPolicyConfiguration = New-MgBetaDeviceManagementGroupPolicyConfiguration -DisplayName $GroupPolicyConfigurationName
-    #endregion
-
-    #region Assign
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolDAGUsersAzADGroupName'"
-    $BodyParameter = @{
-        target = @{
-            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-            groupId       = $HostPoolDAGUsersAzADGroup.Id
-        }
-    }
-    $Assign = New-MgBetaDeviceManagementGroupPolicyConfigurationAssignment -GroupPolicyConfigurationId $GroupPolicyConfiguration.Id -BodyParameter $BodyParameter
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolRAGUsersAzADGroupName'"
-    $BodyParameter = @{
-        target = @{
-            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-            groupId       = $HostPoolRAGUsersAzADGroup.Id
-        }
-    }
-    $Assign = New-MgBetaDeviceManagementGroupPolicyConfigurationAssignment -GroupPolicyConfigurationId $GroupPolicyConfiguration.Id -BodyParameter $BodyParameter
-    #endregion
-
-    #region ADMX Management
-    $FSLogixProfileContainersGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\FSLogix\Profile Containers')" -All
-    if (-not($FSLogixProfileContainersGroupPolicyDefinitions)) {
-        $GroupPolicyUploadedDefinitionFile = Import-PsAvdFSLogixADMXViaCmdlet
-    }
-    #endregion
-
-    #region FSLogix Profile Containers Settings
-    $FSLogixProfileContainersGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\FSLogix\Profile Containers')" -All
-    #Adding a FullPath Property
-    $FSLogixProfileContainersGroupPolicyDefinitions = $FSLogixProfileContainersGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($FSLogixProfileContainersGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Enabled' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue }  
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Delete Local Profile When VHD Should Apply' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Flip Flop Profile Directory Name' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Count' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 3; continue }  
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Locked Retry Interval' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 15; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Profile Type' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "0"; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Interval' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 15; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\ReAttach Count' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 3; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Size In MBs' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 30000; continue }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Failure' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Prevent Login With Temp Profile' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue }   
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Container and Directory Naming\Volume Type (VHD or VHDX)' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 'VHDX' }
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Is Dynamic (VHD)' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\VHD Locations' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"; continue } 
-        { $_.FullPath -eq '\FSLogix\Profile Containers\Redirection XML Source Folder' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"; continue } 
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region FSLogix Logging Settings
-    $FSLogixLoggingGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\FSLogix\Logging')" -All
-    #Adding a FullPath Property
-    $FSLogixLoggingGroupPolicyDefinitions = $FSLogixLoggingGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($FSLogixLoggingGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\FSLogix\Logging\Log Keeping Period' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 10 }
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-    #endregion
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-}
-
-function New-AvdIntuneAdministrativeTemplateConfigurationPolicyViaCmdlet {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$HostPoolName
-    )
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-
-    #region Azure AD Desktop Application Group 
-    $HostPoolDAGUsersAzADGroupName = "$HostPoolName - Desktop Application Group Users"
-    #$HostPoolDAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolDAGUsersAzADGroupName
-    $HostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolDAGUsersAzADGroupName'"
-    if ($null -eq $HostPoolDAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolDAGUsersAzADGroupName' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #endregion
-
-    #region Azure AD Remote Application Group 
-    $HostPoolRAGUsersAzADGroupName = "$HostPoolName - Remote Application Group Users"
-    #$HostPoolRAGUsersAzADGroup = Get-AzADGroup -DisplayName $HostPoolRAGUsersAzADGroupName
-    $HostPoolRAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolRAGUsersAzADGroup'"
-    if ($null -eq $HostPoolRAGUsersAzADGroup) {
-        Write-Error -Message "The '$HostPoolRAGUsersAzADGroup' doesn't exist !"
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        return $null
-    }
-    #region groupPolicyConfigurations
-    $GroupPolicyConfigurationName = "[{0}] AVD Policy" -f $HostPoolName
-    #$Now = $(Get-Date -Format "yyyy-MM-ddTHH:mm:ssK")
-    $Now = Get-Date -Format o 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$GroupPolicyConfigurationName' Group Policy Configuration"
-    #Removing any existing groupPolicyConfigurations with the same name (if any)
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Deleting the previously '$GroupPolicyConfigurationName' groupPolicyConfigurations"
-    $GroupPolicyConfiguration = Get-MgBetaDeviceManagementGroupPolicyConfiguration -Filter "displayName eq '$GroupPolicyConfigurationName'" -All | Remove-MgBetaDeviceManagementGroupPolicyConfiguration
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$GroupPolicyConfigurationName' groupPolicyConfigurations"
-    $GroupPolicyConfiguration = New-MgBetaDeviceManagementGroupPolicyConfiguration -DisplayName $GroupPolicyConfigurationName
-    #endregion
-
-    #region Assign
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolDAGUsersAzADGroupName'"
-    $BodyParameter = @{
-        target = @{
-            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-            groupId       = $HostPoolDAGUsersAzADGroup.Id
-        }
-    }
-    $Assign = New-MgBetaDeviceManagementGroupPolicyConfigurationAssignment -GroupPolicyConfigurationId $GroupPolicyConfiguration.Id -BodyParameter $BodyParameter
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$GroupPolicyConfigurationName' Group Policy Configuration to '$HostPoolRAGUsersAzADGroupName'"
-    $BodyParameter = @{
-        target = @{
-            "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
-            groupId       = $HostPoolRAGUsersAzADGroup.Id
-        }
-    }
-    $Assign = New-MgBetaDeviceManagementGroupPolicyConfigurationAssignment -GroupPolicyConfigurationId $GroupPolicyConfiguration.Id -BodyParameter $BodyParameter
-    #endregion
-
-    #region Network\Background Intelligent Transfer Service (BITS) Settings
-    $NetworkBITSGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\Network\Background Intelligent Transfer Service (BITS)')" -All
-    $NetworkBITSGroupPolicyDefinitions = $NetworkBITSGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkBITSGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Background Intelligent Transfer Service (BITS)\Do not allow the BITS client to use Windows Branch Cache' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\BranchCache Settings
-    $NetworkBranchCacheGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\Network\BranchCache')" -All
-    $NetworkBranchCacheGroupPolicyDefinitions = $NetworkBranchCacheGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkBranchCacheGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\BranchCache\Turn on BranchCache' } { 
-        Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\Hotspot Authentication Settings
-    $NetworkHotspotAuthenticationGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\Network\Hotspot Authentication')" -All
-    $NetworkHotspotAuthenticationGroupPolicyDefinitions = $NetworkHotspotAuthenticationGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkHotspotAuthenticationGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Hotspot Authentication\Enable Hotspot Authentication' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\Microsoft Peer-to-Peer Networking Services Settings
-    $NetworkP2PGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\Network\Microsoft Peer-to-Peer Networking Services')" -All
-    switch ($NetworkP2PGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Microsoft Peer-to-Peer Networking Services\Turn off Microsoft Peer-to-Peer Networking Services' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Network\Offline Files Settings
-    $NetworkOfflineFilesGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\Network\Offline Files')" -All
-    $NetworkOfflineFilesGroupPolicyDefinitions = $NetworkOfflineFilesGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($NetworkOfflineFilesGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Network\Offline Files\Allow or Disallow use of the Offline Files feature' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Disable; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Remote Desktop Services Settings\Session Time Limits
-    $RDSSessionTimeLimitsGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits')" -All
-    $RDSSessionTimeLimitsGroupPolicyDefinitions = $RDSSessionTimeLimitsGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    switch ($RDSSessionTimeLimitsGroupPolicyDefinitions) {
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active but idle Remote Desktop Services sessions' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "900000"; continue }  
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for disconnected sessions' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "900000"; continue }  
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\Set time limit for active Remote Desktop Services sessions' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "0"; continue }  
-        { $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Session Time Limits\End session when time limits are reached' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value 1; continue }  
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-
-    #region Remote Desktop Services Settings\Azure Virtual Desktop
-    $RDSAVDGroupPolicyDefinitions = Get-MgBetaDeviceManagementGroupPolicyDefinition -Filter "startsWith(categoryPath,'\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop')" -All
-    $RDSAVDGroupPolicyDefinitions = $RDSAVDGroupPolicyDefinitions | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $_.categoryPath -ChildPath $_.displayName } }
-    $GroupPolicyDefinitionPresentation = Get-PsAvdGroupPolicyDefinitionPresentationViaCmdlet -GroupPolicyDefinition $RDSAVDGroupPolicyDefinitions
-    switch ($RDSAVDGroupPolicyDefinitions) {
-        #{ $_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop\Enable screen capture protection' } { Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value "2"; continue }  
-        { ($_.FullPath -eq '\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Azure Virtual Desktop\Enable watermarking') -and ($_.version -eq '2.0') } { 
-            $Value = @{
-                "QR code bitmap scale factor"                                     = 4
-                "QR code bitmap opacity"                                          = 2000
-                "Width of grid box in percent relative to QR code bitmap width"   = 320
-                "Height of grid box in percent relative to QR code bitmap height" = 180
-                "QR code embedded content"                                        = "0"
-            }
-            Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet -GroupPolicyConfiguration $GroupPolicyConfiguration -GroupPolicyDefinition $_ -Value $Value; continue 
-        }
-        default { Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" }  
-    }
-    #endregion
-    #endregion
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-}
 #endregion
 #endregion
 #endregion
 
 #This function was only created because sometimes Set-GPRegistryValue returns "Access Denied" so I implemented a retry.
 function Set-PsAvdGPRegistryValue {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [Parameter(Mandatory)]
         [string] $Name,
@@ -2956,7 +2457,7 @@ function Set-PsAvdGPRegistryValue {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-    $Timer =  [System.Diagnostics.Stopwatch]::StartNew()
+    $Timer = [System.Diagnostics.Stopwatch]::StartNew()
     Do {
         try {
             $Output = Set-GPRegistryValue -Name $Name -Key $Key -ValueName $ValueName -Type $Type -Value $Value -ErrorAction Stop
@@ -2964,7 +2465,7 @@ function Set-PsAvdGPRegistryValue {
         }
         catch {
             Write-Warning -Message "$($_.Exception)"
-            $Result =  $false
+            $Result = $false
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
             Start-Sleep -Seconds 10
         }
@@ -2976,9 +2477,9 @@ function Set-PsAvdGPRegistryValue {
 }
 
 function Update-PsAvdMgBetaUserUsageLocation {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
-        [ValidateScript({$_ -in $([System.Globalization.CultureInfo]::GetCultures([System.Globalization.CultureTypes]::SpecificCultures) | ForEach-Object -Process { (New-Object System.Globalization.RegionInfo $_.name).TwoLetterISORegionName } | Select-Object -Unique | Sort-Object)})]
+        [ValidateScript({ $_ -in $([System.Globalization.CultureInfo]::GetCultures([System.Globalization.CultureTypes]::SpecificCultures) | ForEach-Object -Process { (New-Object System.Globalization.RegionInfo $_.name).TwoLetterISORegionName } | Select-Object -Unique | Sort-Object) })]
         [string] $UsageLocation = 'US',
         [Alias('All')]
         [switch] $Force
@@ -3001,30 +2502,29 @@ function Update-PsAvdMgBetaUserUsageLocation {
 }
 
 function Set-PsAvdMgBetaUsersGroupLicense {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         #Validating only available intune licenses
         #[ValidateScript({$_ -in $((Get-MgBetaSubscribedSku -All | Where-Object -FilterScript { ($_.ServicePlans.ServicePlanName -match "intune") -and (($_.PrepaidUnits.Enabled - $_.ConsumedUnits) -gt 0)}).SkuPartNumber)})]
-        [ValidateScript({$_ -in $((Get-MgBetaSubscribedSku -All | Where-Object -FilterScript { ($_.ServicePlans.ServicePlanName -match "intune")}).SkuPartNumber)})]
+        [ValidateScript({ $_ -in $((Get-MgBetaSubscribedSku -All | Where-Object -FilterScript { ($_.ServicePlans.ServicePlanName -match "intune") }).SkuPartNumber) })]
         [string] $SkuPartNumber = 'Microsoft_365_E5_(no_Teams)',
         [Parameter(Mandatory)]
-        [ValidateScript({$_ -in $((Get-MgBetaGroup).DisplayName)})]
+        [ValidateScript({ $_ -in $((Get-MgBetaGroup).DisplayName) })]
         [string] $GroupDisplayName 
     )
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
-    $SubscribedSku = Get-MgBetaSubscribedSku -All | Where-Object -FilterScript {$_.SkuPartNumber -eq $SkuPartNumber}
+    $SubscribedSku = Get-MgBetaSubscribedSku -All | Where-Object -FilterScript { $_.SkuPartNumber -eq $SkuPartNumber }
     if (($SubscribedSku.PrepaidUnits.Enabled - $SubscribedSku.ConsumedUnits) -gt 0) {
         $Group = Get-MgBetaGroup -Filter "DisplayName eq '$GroupDisplayName'"
     
         #https://developer.microsoft.com/en-us/graph/known-issues/?search=20454
         #$SkuId = (Get-MgBetaSubscribedSku -All -Search "SkuPartNumber:'$SkuPartNumber'").SkuId 
-        $SkuId = (Get-MgBetaSubscribedSku -All | Where-Object -FilterScript {$_.SkuPartNumber -eq $SkuPartNumber}).SkuId
-        Set-MgBetaGroupLicense -GroupId $Group.Id -AddLicenses @{SkuId = $SkuId} -RemoveLicenses @()
+        $SkuId = (Get-MgBetaSubscribedSku -All | Where-Object -FilterScript { $_.SkuPartNumber -eq $SkuPartNumber }).SkuId
+        Set-MgBetaGroupLicense -GroupId $Group.Id -AddLicenses @{SkuId = $SkuId } -RemoveLicenses @()
     }
-    else
-    {
+    else {
         Write-Warning -Message "No more licenses available for '$SkuPartNumber' ($($SubscribedSku.ConsumedUnits) consumed out of $($SubscribedSku.PrepaidUnits.Enabled))"
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -3157,7 +2657,7 @@ function Get-CallerPreference {
 }
 
 function Test-DomainController {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
     )
 
@@ -3169,7 +2669,7 @@ function Test-DomainController {
 }
 
 function Get-PsAvdLatestOperationalInsightsData {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [Parameter(Mandatory = $true)]
         [array] $HostPool
@@ -3179,7 +2679,7 @@ function Get-PsAvdLatestOperationalInsightsData {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     #Querying the latest HeartBeat, Performance Counter and Event Log entry sent per Computer
-    [string[]] $Queries  = @("Heartbeat | summarize arg_max(TimeGenerated, *) by Computer", "Perf | summarize arg_max(TimeGenerated, *) by Computer", "Event | summarize arg_max(TimeGenerated, *) by Computer")
+    [string[]] $Queries = @("Heartbeat | summarize arg_max(TimeGenerated, *) by Computer", "Perf | summarize arg_max(TimeGenerated, *) by Computer", "Event | summarize arg_max(TimeGenerated, *) by Computer")
     #Querying the latest HeartBeat, Performance Counter and Event Log entry sent
     #[string[]] $Queries = @("Heartbeat | order by TimeGenerated desc | limit 1", "Perf | order by TimeGenerated desc | limit 1", "Event | order by TimeGenerated desc | limit 1")
 
@@ -3193,7 +2693,7 @@ function Get-PsAvdLatestOperationalInsightsData {
 
             # Run the query
             $Result = Invoke-AzOperationalInsightsQuery -WorkspaceId $CurrentLogAnalyticsWorkspace.CustomerId -Query $CurrentQuery
-            $Result.Results | Select-Object -Property *, @{Name = "LocalTimeGenerated"; Expression = {Get-Date $_.TimeGenerated}}, @{Name = "LogAnalyticsWorkspaceName"; Expression = {$CurrentLogAnalyticsWorkspaceName}}, @{Name = "Query"; Expression = {$CurrentQuery}}
+            $Result.Results | Select-Object -Property *, @{Name = "LocalTimeGenerated"; Expression = { Get-Date $_.TimeGenerated } }, @{Name = "LogAnalyticsWorkspaceName"; Expression = { $CurrentLogAnalyticsWorkspaceName } }, @{Name = "Query"; Expression = { $CurrentQuery } }
         }
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -3201,7 +2701,7 @@ function Get-PsAvdLatestOperationalInsightsData {
 
 #From https://stackoverflow.com/questions/63529599/how-to-grant-admin-consent-to-an-azure-aad-app-in-powershell
 function Set-AdminConsent {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [Parameter(Mandatory)]
         [string]$applicationId,
@@ -3227,7 +2727,7 @@ function Set-AdminConsent {
 }
 
 function Test-PsAvdStorageAccountNameAvailability {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -3265,7 +2765,7 @@ function Test-PsAvdStorageAccountNameAvailability {
 }
 
 function Test-PsAvdKeyVaultNameAvailability {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -3276,7 +2776,7 @@ function Test-PsAvdKeyVaultNameAvailability {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     $result = $true
-    foreach ($CurrentHostPool in $($HostPool | Where-Object -FilterScript { $null -ne $_})) {
+    foreach ($CurrentHostPool in $($HostPool | Where-Object -FilterScript { $null -ne $_ })) {
         $CurrentHostPoolKeyVaultName = $CurrentHostPool.GetKeyVaultName()
         if (-not(Test-AzKeyVaultNameAvailability -Name $CurrentHostPoolKeyVaultName).NameAvailable) {
             Write-Error -Message "The '$CurrentHostPoolKeyVaultName' Key Vault Name is NOT available"
@@ -3296,10 +2796,14 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     (
         [Parameter(Mandatory = $false)]
         [string] $Location = "EastUs",
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [PSCredential] $LocalAdminCredential,
-        [Parameter(Mandatory = $true)]
+        [Parameter(Mandatory = $false)]
         [PSCredential] $ADJoinCredential
+        <#
+        [Parameter(Mandatory = $false)]
+        [PSCredential] $AzFileShareACEManagerCredential
+        #>
     )
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -3357,7 +2861,7 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretPassword -SecretValue $SecurePassword
     #endregion
 
-    #region Defining ad join credential(s)
+    #region Defining AD join credential(s)
     if ($ADJoinCredential) {
         $SecureUserName = $(ConvertTo-SecureString -String $ADJoinCredential.UserName -AsPlainText -Force) 
         $SecurePassword = $ADJoinCredential.Password
@@ -3378,6 +2882,28 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretPassword -SecretValue $SecurePassword
     #endregion
 
+    <#
+    #region Defining Azure File Share ACE Manager credential(s)
+    if ($AzFileShareACEManagerCredential) {
+        $SecureUserName = $(ConvertTo-SecureString -String $AzFileShareACEManagerCredential.UserName -AsPlainText -Force) 
+        $SecurePassword = $AzFileShareACEManagerCredential.Password
+    }
+    else {
+        $UserName = "azfFileshareacemgr"
+        $SecureUserName = $(ConvertTo-SecureString -String $UserName -AsPlainText -Force) 
+        Write-Host "UserName: $UserName"
+        $SecurePassword = New-RandomPassword -AsSecureString
+    }
+
+    $SecretUserName = "AzFileShareACEManagerUserName"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating a secret in $KeyVaultName called '$SecretUserName'"
+    $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretUserName -SecretValue $SecureUserName
+
+    $SecretPassword = "AzFileShareACEManagerPassword"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating a secret in $KeyVaultName called '$SecretPassword'"
+    $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretPassword -SecretValue $SecurePassword
+    #endregion
+    #>
     $ThisDomainController = Get-AzVMCompute | Get-AzVM
     # Get the VM's network interface
     $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
@@ -3437,6 +2963,92 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     return $KeyVault
 }
 
+function New-PsAvdHostPoolCredentialKeyVault {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [HostPool] $HostPool
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    $ThisDomainController = Get-AzVMCompute | Get-AzVM
+    # Get the VM's network interface
+    $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
+    $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
+    # Get the subnet ID
+    $ThisDomainControllerSubnetId = $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id
+    $ThisDomainControllerSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $ThisDomainControllerSubnetId
+    # Get the vnet ID
+    $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
+    $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
+
+    #region Key Vault
+    #region Key Vault Name Setup
+    $HostPoolKeyVaultName = $HostPool.GetKeyVaultName()
+    $HostPoolResourceGroupName = $HostPool.GetResourceGroupName()
+    #endregion 
+
+    #region Dedicated Key Vault Setup
+    $HostPoolKeyVault = Get-AzKeyVault -VaultName $HostPoolKeyVaultName -ErrorAction Ignore
+    if (-not($HostPoolKeyVault)) {
+        if (-not(Test-AzKeyVaultNameAvailability -Name $HostPoolKeyVaultName).NameAvailable) {
+            Stop-Transcript
+            Write-Error "The key vault name '$HostPoolKeyVaultName' is not available !" -ErrorAction Stop
+        }
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolKeyVaultName' Key Vault (in the '$HostPoolResourceGroupName' Resource Group)"
+        $HostPoolKeyVault = New-AzKeyVault -ResourceGroupName $HostPoolResourceGroupName -VaultName $HostPoolKeyVaultName -Location $ThisDomainControllerVirtualNetwork.Location -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
+    }
+    #endregion
+
+    #region Private endpoint for Key Vault Setup
+    #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
+    #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
+    ## Create the private endpoint connection. ## 
+
+    $PrivateEndpointName = "pep{0}" -f $($HostPoolKeyVaultName -replace "\W")
+    $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $HostPoolKeyVault.ResourceId).GroupId
+    $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $HostPoolKeyVault.ResourceId -GroupId $GroupId
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Key Vault '$HostPoolKeyVaultName' (in the '$HostPoolResourceGroupName' Resource Group)"
+    $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $HostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerSubnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
+
+    ## Create the private DNS zone. ##
+    $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
+    $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
+    if ($null -eq $PrivateDnsZone) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Key Vault '$HostPoolKeyVaultName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
+        $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName
+    }
+
+    $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($ThisDomainControllerVirtualNetwork.Name -replace "\W")
+    $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
+    if ($null -eq $PrivateDnsVirtualNetworkLink) {
+        $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerVirtualNetwork.Id
+        ## Create a DNS network link. ##
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS VNet Link for the Key Vault '$HostPoolKeyVaultName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
+        $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $ThisDomainControllerVirtualNetworkId
+    }
+
+
+    ## Configure the DNS zone. ##
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the Private Dns Zone Group for Key Vault '$HostPoolKeyVaultName'"
+    $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZone.Name -PrivateDnsZoneId $PrivateDnsZone.ResourceId
+
+    ## Create the DNS zone group. ##
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$HostPoolResourceGroupName' Resource Group)"
+    $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $HostPoolResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
+
+    #Key Vault - Disabling Public Access
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault'$HostPoolKeyVaultName' (in the '$HostPoolResourceGroupName' Resource Group)"
+    $null = Update-AzKeyVault -VaultName $HostPoolKeyVaultName -ResourceGroupName $HostPoolResourceGroupName -PublicNetworkAccess "Disabled" 
+    #endregion
+
+    #endregion
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
 #Based from https://adamtheautomator.com/powershell-random-password/
 function New-RandomPassword {
     [CmdletBinding(PositionalBinding = $false)]
@@ -3469,9 +3081,10 @@ function New-RandomPassword {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
-#Was coded as an alterative to Test-AzKeyVaultNameAvailability (for testing purpose - no more used in this script)
+<#
+#Was coded as an alternative to Test-AzKeyVaultNameAvailability (for testing purpose - no more used in this script)
 function Get-PsAvdKeyVaultNameAvailability {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
         [Alias('Name')]
@@ -3522,10 +3135,10 @@ function Get-PsAvdKeyVaultNameAvailability {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $Response
 }
-
+#>
 #Was coded as an alterative to Expand-AzWvdMsixImage (for testing purpose - no more used in this script)
 function Expand-PsAvdMSIXImage {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
         [string]$HostPoolName,
@@ -3581,7 +3194,7 @@ function Expand-PsAvdMSIXImage {
 }
 
 function Grant-PsAvdADJoinPermission {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
         [PSCredential]$Credential,
@@ -3731,14 +3344,15 @@ function Grant-PsAvdADJoinPermission {
             "AccessControlType"     = [System.Security.AccessControl.AccessControlType]::Allow
         }
     )
-    $ADUser = Get-ADUser -Filter "SamAccountName -eq '$($Credential.UserName)'"
+    #$ADUser = Get-ADUser -Filter "SamAccountName -eq '$($Credential.UserName)'"
+    $ADUser = Get-ADUser -Identity $($Credential.UserName) -ErrorAction Ignore
     #If the user doesn't exist, we create it
     if (-not($ADUser)) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($Credential.UserName)' AD User (for adding Azure VM to ADDS)"
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
         #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Forest.Name
-        $ADUser = New-ADUser -Name $Credential.UserName -AccountPassword $Credential.Password -PasswordNeverExpires $true -Enabled $true -Description "Created by PowerShell Script for ADDS-joined AVD Session Hosts" -UserPrincipalName $("{0}@{1}" -f $Credential.UserName, $DomainName) -PassThru
+        $ADUser = New-ADUser -Name $Credential.UserName -AccountPassword $Credential.Password -PasswordNeverExpires $true -Enabled $true -Description "Created by PowerShell Script for joining AVD Session Hosts to ADDS" -UserPrincipalName $("{0}@{1}" -f $Credential.UserName, $DomainName) -PassThru
     }
 
     # Define the security SamAccountName (user or group) to which you want to grant the permission
@@ -3756,16 +3370,50 @@ function Grant-PsAvdADJoinPermission {
     Get-ADOrganizationalUnit -Filter "DistinguishedName -like '$OrganizationalUnit'" -SearchBase $OrganizationalUnit -SearchScope Subtree | ForEach-Object {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Applying those required privileges to '$_'"
         Import-Module -Name ActiveDirectory
-        Set-Acl -path "AD:$_" $Permission
+        Set-Acl -Path "AD:$_" $Permission
     }
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Permissions granted successfully."
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+Function Get-PsAvdAzFileShareACEManagerADUser { 
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true)]
+        [HostPool]$HostPool
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    $AzFileShareACEManagerUserName = $HostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerUserName -AsPlainText
+    $AzFileShareACEManagerPassword = ($HostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerPassword).SecretValue
+    #$ADUser = Get-ADUser -Filter "SamAccountName -eq '$($Credential.UserName)'"
+    $ADUser = Get-ADUser -Identity $AzFileShareACEManagerUserName -ErrorAction Ignore
+    #If the user doesn't exist, we create it
+    if (-not($ADUser)) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$AzFileShareACEManagerUserName' AD User (for adding Azure VM to ADDS)"
+        #$DomainName = (Get-ADDomain).DNSRoot
+        $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
+        #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Forest.Name
+
+        #region AVD OU Management
+        $DefaultNamingContext = (Get-ADRootDSE).defaultNamingContext
+        #$DomainName = (Get-ADDomain).DNSRoot
+        $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
+        $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
+        #endregion
+
+        $ADUser = New-ADUser -Name $AzFileShareACEManagerUserName -AccountPassword $AzFileShareACEManagerPassword -PasswordNeverExpires $true -Enabled $true -Description "Created by PowerShell Script for setting up ACE on The MSIX/FSLogix Azure file shares" -UserPrincipalName $("{0}@{1}" -f $AzFileShareACEManagerUserName, $DomainName) -Path $AVDRootOU -PassThru
+    }
+    $ADUser
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
 #From https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
 function New-AzureComputeGallery {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $false)]
         [string]$Location = "EastUS",
@@ -3870,9 +3518,9 @@ function New-AzureComputeGallery {
     # Download the config
     Invoke-WebRequest -Uri $aibRoleImageCreationUrl -UseBasicParsing -OutFile $aibRoleImageCreationPath
 
-    ((Get-Content -path $aibRoleImageCreationPath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $aibRoleImageCreationPath
-    ((Get-Content -path $aibRoleImageCreationPath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $aibRoleImageCreationPath
-    ((Get-Content -path $aibRoleImageCreationPath -Raw) -replace 'Azure Image Builder Service Image Creation Role', $imageRoleDefName) | Set-Content -Path $aibRoleImageCreationPath
+    ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $aibRoleImageCreationPath
+    ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $aibRoleImageCreationPath
+    ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace 'Azure Image Builder Service Image Creation Role', $imageRoleDefName) | Set-Content -Path $aibRoleImageCreationPath
 
     # Create a role definition
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$imageRoleDefName' Role Definition"
@@ -3914,16 +3562,16 @@ function New-AzureComputeGallery {
 
     Invoke-WebRequest -Uri $templateUrl -UseBasicParsing -OutFile $templateFilePath
 
-    ((Get-Content -path $templateFilePath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $templateFilePath
-    ((Get-Content -path $templateFilePath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $templateFilePath
     #((Get-Content -path $templateFilePath -Raw) -replace '<region>',$location) | Set-Content -Path $templateFilePath
-    ((Get-Content -path $templateFilePath -Raw) -replace '<runOutputName>', $runOutputName01) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<runOutputName>', $runOutputName01) | Set-Content -Path $templateFilePath
 
-    ((Get-Content -path $templateFilePath -Raw) -replace '<imageDefName>', $imageDefName01) | Set-Content -Path $templateFilePath
-    ((Get-Content -path $templateFilePath -Raw) -replace '<sharedImageGalName>', $GalleryName) | Set-Content -Path $templateFilePath
-    ((Get-Content -path $templateFilePath -Raw) -replace '<targetRegions>', $($targetRegionSettings | ConvertTo-Json)) | Set-Content -Path $templateFilePath
-    ((Get-Content -path $templateFilePath -Raw) -replace '<imgBuilderId>', $AssignedIdentity.Id) | Set-Content -Path $templateFilePath
-    ((Get-Content -path $templateFilePath -Raw) -replace '<version>', $version) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<imageDefName>', $imageDefName01) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<sharedImageGalName>', $GalleryName) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<targetRegions>', $($targetRegionSettings | ConvertTo-Json)) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<imgBuilderId>', $AssignedIdentity.Id) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<version>', $version) | Set-Content -Path $templateFilePath
     #endregion
 
     #region Submit the template
@@ -4101,9 +3749,33 @@ function New-AzureComputeGallery {
     return $Gallery
 }
 
+function Update-PsAvdSystemAssignedAzVM {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Microsoft.Azure.Commands.Compute.Models.PSVirtualMachine] $VM = $(Get-AzVMCompute | Get-AzVM)
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    if ($null -eq $VM.Identity) {
+        # Enable system-assigned managed identity
+        $VM.Identity = New-Object Microsoft.Azure.Management.Compute.Models.VirtualMachineIdentity
+        $VM.Identity.Type = "SystemAssigned"
+
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting a 'SystemAssigned' identity to the '$($VM.Name)' VM"
+        # Update the VM with the managed identity
+        $null = $VM | Update-AzVM
+    }
+    else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] A 'SystemAssigned' identity is already set for the '$($VM.Name)' VM"
+    }
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
 #Get The Azure VM Compute Object for the VM executing this function
 function Get-AzVMCompute {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
     )
 
@@ -4178,7 +3850,7 @@ function New-PsAvdSessionHost {
     $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
     $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
 
-    if ($null -eq (Get-AZVMSize -Location $ThisDomainControllerVirtualNetwork.Location | Where-Object -FilterScript { $_.Name -eq $VMSize })) {
+    if ($null -eq (Get-AzVMSize -Location $ThisDomainControllerVirtualNetwork.Location | Where-Object -FilterScript { $_.Name -eq $VMSize })) {
         Stop-Transcript
         Write-Error "The '$VMSize' VM Size is not available in the '$($ThisDomainControllerVirtualNetwork.Location)' location" -ErrorAction Stop
     }
@@ -4230,8 +3902,7 @@ function New-PsAvdSessionHost {
     }
     #Set OsDisk configuration
     #From https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-deploy#powershell
-    if ($DiffDiskPlacement -eq [DiffDiskPlacement]::None)
-    {
+    if ($DiffDiskPlacement -eq [DiffDiskPlacement]::None) {
         $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] No Ephemeral OS disk for '$VMName' Azure VM"
     } 
@@ -4247,8 +3918,8 @@ function New-PsAvdSessionHost {
         $null = New-AzVM -ResourceGroupName $ResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -VM $VMConfig -Tag $Tag -DisableBginfoExtension -ErrorAction Stop
     } 
     #Maybe: Ephemeral OS disk is not supported for specified VM size.
-    catch #[ComputeCloudException]
-    {
+    catch {
+        #[ComputeCloudException]
         # Dig into the exception to get the Response details.
         # Note that value__ is not a typo.
         Write-Warning -Message "StatusCode: $($_.Exception.Response.StatusCode.value__ )"
@@ -4284,7 +3955,7 @@ function New-PsAvdSessionHost {
         $AdJoinUserName = $KeyVault | Get-AzKeyVaultSecret -Name AdJoinUserName -AsPlainText
         $AdJoinPassword = ($KeyVault | Get-AzKeyVaultSecret -Name AdJoinPassword).SecretValue
 
-        $ADDomainJoinUser = Get-ADUser -Identity $AdJoinUserName -Properties UserPrincipalName
+        $ADDomainJoinUser = Get-ADUser -Identity $AdJoinUserName -Properties UserPrincipalName -ErrorAction Ignore
         if ([string]::IsNullOrEmpty($ADDomainJoinUser.UserPrincipalName)) {
             $ADDomainJoinUPNCredential = New-Object System.Management.Automation.PSCredential -ArgumentList("$AdJoinUserName@$DomainName", $AdJoinPassword)
         }
@@ -4295,7 +3966,7 @@ function New-PsAvdSessionHost {
         $aadJoin = [boolean]::FalseString
     }
     # Adding local admin Credentials to the Credential Manager (and escaping the password)
-    #Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "cmdkey /generic:$VMName /user:$($LocalAdminCredential.UserName) /pass:$($LocalAdminCredential.GetNetworkCredential().Password -replace "(\W)", '^$1')" -Wait
+    #Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "cmdkey /generic:$VMName /user:$($LocalAdminCredential.UserName) /pass:$($LocalAdminCredential.GetNetworkCredential().Password -replace "(\W)", '^$1')" -Wait -NoNewWindow
     
     #To be sure the VM is started
     $Result = Start-AzVM -Name $VMName -ResourceGroupName $ResourceGroupName
@@ -4367,7 +4038,7 @@ function New-PsAvdSessionHost {
             #From https://rozemuller.com/how-to-join-azure-ad-automated/
             #From https://virtuallyflatfeet.com/category/intune/
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding '$VMName' as a device into 'Microsoft Entra ID' and enrolled with Intune"
-            $domainJoinSettings  = @{
+            $domainJoinSettings = @{
                 mdmId = "0000000a-0000-0000-c000-000000000000"
             }
 
@@ -4632,7 +4303,7 @@ function Copy-PsAvdMSIXDemoPFXFile {
     #Copying the PFX to all session hosts
     $Session | ForEach-Object -Process { Copy-Item -Path $DownloadedPFXFiles.FullName -Destination C:\ -ToSession $_ -Force }
 
-    Invoke-command -Session $Session -ScriptBlock {
+    Invoke-Command -Session $Session -ScriptBlock {
         $using:DownloadedPFXFiles | ForEach-Object -Process { 
             $LocalFile = $(Join-Path -Path C: -ChildPath $_.Name)
             #Adding the self-signed certificate to the Trusted Root Certification Authorities (To validate this certificate)
@@ -4664,7 +4335,7 @@ function Wait-PSSession {
         [ValidateNotNullOrEmpty()] 
         [int]$Attempts = 10,
         [switch]$PassThru
-	)
+    )
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -4728,7 +4399,7 @@ function Wait-PsAvdRunPowerShell {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Infinite Loop Mode Enabled"  
     }
     $Loop = 0
-    $SessionHosts = Get-AzWvdSessionHost -HostpoolName $HostPoolName -ResourceGroupName $ResourceGroupName
+    $SessionHosts = Get-AzWvdSessionHost -HostPoolName $HostPoolName -ResourceGroupName $ResourceGroupName
     #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Session Hosts (Nb: $($SessionHosts.Count)): $($SessionHosts.Name -replace "^.*/" -join ', ')"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Session Hosts (Nb: $($SessionHosts.Count)): $($SessionHosts.Name -replace "^.*/" -replace "\..*$" -join ', ')"
     Do {
@@ -4758,7 +4429,7 @@ function Wait-PsAvdRunPowerShell {
 }
 
 function Start-MicrosoftEntraIDConnectSync {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param()
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -4793,7 +4464,7 @@ function Start-MicrosoftEntraIDConnectSync {
 }
 
 function Remove-PsAvdHostPoolSetup {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true, ParameterSetName = 'HostPool')]
         [ValidateNotNullOrEmpty()]
@@ -4821,7 +4492,7 @@ function Remove-PsAvdHostPoolSetup {
         $HostPools = $HostPools | Sort-Object -Property Name -Unique
     }
     else {
-        $HostPools = $HostPool | Select-Object -Property *, @{Name="ResourceGroupName"; Expression = {$_.GetResourceGroupName()}} -ExcludeProperty "KeyVault"
+        $HostPools = $HostPool | Select-Object -Property *, @{Name = "ResourceGroupName"; Expression = { $_.GetResourceGroupName() } } -ExcludeProperty "KeyVault"
     }
     $HostPools = $HostPools | Where-Object -FilterScript { $_.Name }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Cleaning up the '$($HostPools.Name -join ', ')' Host Pools"
@@ -4840,7 +4511,8 @@ function Remove-PsAvdHostPoolSetup {
                     Remove-DnsServerResourceRecord -ZoneName $DomainName -RRType "A" -Name "$_" -Force -ErrorAction Ignore
                 }
             } 
-            catch {} 
+            catch {
+            } 
         }
     }
     #endregion
@@ -4859,7 +4531,7 @@ function Remove-PsAvdHostPoolSetup {
     #Getting all session hosts starting with the Name Prefixes
     $RegExp = ($MicrosoftEntraIDHostPools.NamePrefix -replace '(^[^\n]*$)', '^$1-') -join '|'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RegExp : $RegExp"
-    Get-MgBetaDevice -All | Where-Object -FilterScript { $_.DisplayName -match $RegExp }| ForEach-Object -Process { 
+    Get-MgBetaDevice -All | Where-Object -FilterScript { $_.DisplayName -match $RegExp } | ForEach-Object -Process { 
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Microsoft Entra ID Device : $($_.DisplayName)"
         Remove-MgBetaDevice -DeviceId $_.Id 
     }
@@ -4894,19 +4566,19 @@ function Remove-PsAvdHostPoolSetup {
     $ResourceGroup = Get-AzResourceGroup | Where-Object -FilterScript { ($_.ResourceGroupName -in $ResourceGroupName) }
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Azure Delete Lock (if any) on Resource Group(s): $($ResourceGroup.ResourceGroupName -join, ', ')"
-    $ResourceGroup | Foreach-Object -Process { Get-AzResourceLock -ResourceGroupName $_.ResourceGroupName -AtScope | Where-Object -FilterScript { $_.Properties.level -eq 'CanNotDelete' } } | Remove-AzResourceLock -Force -ErrorAction Ignore
+    $ResourceGroup | ForEach-Object -Process { Get-AzResourceLock -ResourceGroupName $_.ResourceGroupName -AtScope | Where-Object -FilterScript { $_.Properties.level -eq 'CanNotDelete' } } | Remove-AzResourceLock -Force -ErrorAction Ignore
 
     #region Windows Credential Manager Cleanup
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Credentials from Windows Credential Manager"
     $StorageAccountName = ($ResourceGroup | Get-AzStorageAccount).StorageAccountName
     $Pattern = $StorageAccountName -join "|"
-    $StorageAccountCredentials = cmdkey /list | Select-string -Pattern "(?<Target>Target: (?<Domain>Domain:target=(?<FQDN>(?<Pattern>$Pattern)\.file\.core\.windows\.net)))" -AllMatches
+    $StorageAccountCredentials = cmdkey /list | Select-String -Pattern "(?<Target>Target: (?<Domain>Domain:target=(?<FQDN>(?<Pattern>$Pattern)\.file\.core\.windows\.net)))" -AllMatches
     if ($StorageAccountCredentials.Matches) {
         $StorageAccountCredentials.Matches | ForEach-Object -Process { 
             $FQDN = $_.Groups['FQDN']
             $Domain = $_.Groups['Domain']
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$FQDN' credentials will be removed from the Windows Credential Manager"
-            Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "cmdkey /delete:$Domain" -Wait
+            Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "cmdkey /delete:$Domain" -Wait -NoNewWindow
         }
     }
     #endregion
@@ -4949,7 +4621,7 @@ function Remove-PsAvdHostPoolSetup {
 }
 
 function New-PsAvdPersonalHostPoolSetup {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [Alias('Name')]
@@ -4975,8 +4647,6 @@ function New-PsAvdPersonalHostPoolSetup {
 
         #region Variables
         $SKUName = "Standard_LRS"
-        $CurrentHostPoolStorageAccountNameMaxLength = 24
-        $CurrentHostPoolKeyVaultNameMaxLength = 24
 
         $ThisDomainController = Get-AzVMCompute | Get-AzVM
         # Get the VM's network interface
@@ -4999,7 +4669,10 @@ function New-PsAvdPersonalHostPoolSetup {
             Write-Host -Object "Starting '$($CurrentHostPool.Name)' Setup"
             $CurrentHostPoolStartTime = Get-Date
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; Intune = $Status[$CurrentHostPool.Intune]; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; Hibernation = $Status[$CurrentHostPool.HibernationEnabled]; SpotInstance = $Status[$CurrentHostPool.Spot]}
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; Intune = $Status[$CurrentHostPool.Intune]; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; Hibernation = $Status[$CurrentHostPool.HibernationEnabled]; SpotInstance = $Status[$CurrentHostPool.Spot] }
+            if ($CurrentHostPool.$PreferredAppGroupType) {
+                $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
+            }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Tag['Image'] = 'Azure Compute Gallery'
                 $Tag['VMSourceImageId'] = $CurrentHostPool.VMSourceImageId
@@ -5095,12 +4768,13 @@ function New-PsAvdPersonalHostPoolSetup {
 
             }
             #endregion 
-
+            
+            New-PsAvdHostPoolCredentialKeyVault -HostPool $CurrentHostPool
+             
+            <#
             #region Key Vault
             #region Key Vault Name Setup
             $CurrentHostPoolKeyVaultName = $CurrentHostPool.GetKeyVaultName()
-            $CurrentHostPoolKeyVaultName = $CurrentHostPoolKeyVaultName.Substring(0, [system.math]::min($CurrentHostPoolKeyVaultNameMaxLength, $CurrentHostPoolKeyVaultName.Length)).ToLower()
-            $CurrentHostPoolKeyVaultName = $CurrentHostPoolKeyVaultName.ToLower()
             #endregion 
 
             #region Dedicated Key Vault Setup
@@ -5111,7 +4785,7 @@ function New-PsAvdPersonalHostPoolSetup {
                     Write-Error "The key vault name '$CurrentHostPoolKeyVaultName' is not available !" -ErrorAction Stop
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolKeyVaultName' Key Vault (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $CurrentHostPoolKeyVault = New-AzKeyVault -ResourceGroupName $CurrentHostPoolResourceGroupName -VaultName $CurrentHostPoolKeyVaultName -Location $ThisDomainControllerVirtualNetwork.Location -EnabledForDiskEncryption -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
+                $CurrentHostPoolKeyVault = New-AzKeyVault -ResourceGroupName $CurrentHostPoolResourceGroupName -VaultName $CurrentHostPoolKeyVaultName -Location $ThisDomainControllerVirtualNetwork.Location -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
             }
             #endregion
 
@@ -5158,7 +4832,7 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             #endregion
-
+            #>
             #region Host Pool Setup
             $RegistrationInfoExpirationTime = (Get-Date).ToUniversalTime().AddDays(1)
             #Microsoft Entra ID
@@ -5179,7 +4853,7 @@ function New-PsAvdPersonalHostPoolSetup {
                 HostPoolType                  = 'Personal'
                 PersonalDesktopAssignmentType = 'Automatic'
                 LoadBalancerType              = $CurrentHostPool.LoadBalancerType
-                PreferredAppGroupType         = 'Desktop'
+                PreferredAppGroupType         = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType]::Desktop
                 Location                      = $CurrentHostPool.Location
                 StartVMOnConnect              = $true
                 ExpirationTime                = $RegistrationInfoExpirationTime.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
@@ -5257,7 +4931,10 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             #region Workspace Setup
-            $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.IdentityProvider, $CurrentHostPool.ScalingPlan
+            $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.IdentityProvider
+            if ($CurrentHostPool.ScalingPlan) {
+                $Options += 'ScalinPlan'
+            }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Options += 'Azure Compte Gallery'
             }
@@ -5279,12 +4956,18 @@ function New-PsAvdPersonalHostPoolSetup {
             elseif ($CurrentHostPool.DiffDiskPlacement -eq [DiffDiskPlacement]::ResourceDisk) {
                 $Options += 'Ephemeral OS Disk: ResourceDisk'
             } 
+
             $FriendlyName = "{0} ({1})" -f $CurrentHostPool.GetAzAvdWorkSpaceName(), $($Options -join ', ')
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FriendlyName: $FriendlyName"
+
+            $ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ApplicationGroupReference: $($ApplicationGroupReference -join ', ')"
+
             $parameters = @{
                 Name                      = $CurrentHostPool.GetAzAvdWorkSpaceName()
                 FriendlyName              = $FriendlyName
                 ResourceGroupName         = $CurrentHostPoolResourceGroupName
-                ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
+                ApplicationGroupReference = $ApplicationGroupReference
                 Location                  = $CurrentHostPool.Location
                 #Verbose                   = $true
             }
@@ -5294,14 +4977,14 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             if ($CurrentHostPool.IsMicrosoftEntraIdJoined()) {
-                    #region Creating a dynamic device group for our AVD hosts
-                    $DisplayName = "{0} - Devices" -f $CurrentHostPool.Name
-                    $Description = "Dynamic device group for our AVD hosts for the {0} HostPool." -f $CurrentHostPool.Name
-                    $MailNickname = $($DisplayName -replace "\s").ToLower()
-                    $MembershipRule = "(device.displayName -startsWith ""$($CurrentHostPool.NamePrefix)-"")"
-                    #$AzADDeviceDynamicGroup = New-AzADGroup -DisplayName $DisplayName -Description $Description -MembershipRule $MembershipRule -MembershipRuleProcessingState "On" -GroupType "DynamicMembership" -MailNickname $MailNickname -SecurityEnabled
-                    $AzADDeviceDynamicGroup = New-MgBetaGroup -DisplayName $DisplayName -Description $Description -MembershipRule $MembershipRule -MembershipRuleProcessingState "On" -GroupTypes "DynamicMembership" -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
-                    #endregion
+                #region Creating a dynamic device group for our AVD hosts
+                $DisplayName = "{0} - Devices" -f $CurrentHostPool.Name
+                $Description = "Dynamic device group for our AVD hosts for the {0} HostPool." -f $CurrentHostPool.Name
+                $MailNickname = $($DisplayName -replace "\s").ToLower()
+                $MembershipRule = "(device.displayName -startsWith ""$($CurrentHostPool.NamePrefix)-"")"
+                #$AzADDeviceDynamicGroup = New-AzADGroup -DisplayName $DisplayName -Description $Description -MembershipRule $MembershipRule -MembershipRuleProcessingState "On" -GroupType "DynamicMembership" -MailNickname $MailNickname -SecurityEnabled
+                $AzADDeviceDynamicGroup = New-MgBetaGroup -DisplayName $DisplayName -Description $Description -MembershipRule $MembershipRule -MembershipRuleProcessingState "On" -GroupTypes "DynamicMembership" -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
+                #endregion
             }
 
             #region Adding Session Hosts to the Host Pool
@@ -5326,7 +5009,7 @@ function New-PsAvdPersonalHostPoolSetup {
             Invoke-Pester -Container $Container -Output Detailed -Verbose
             #endregion
 
-            $SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
             #endregion 
 
@@ -5427,12 +5110,12 @@ function New-PsAvdPersonalHostPoolSetup {
             #From https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.tracing.eventlevel?view=net-8.0
             #Levels : 1 = Critical, 2 = Error, 3 = Warning
             $EventLogs = @(
-                [PSCustomObject] @{EventLogName = 'Application'; Levels = 1,2,3 }
-                [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'; Levels = 1,2,3 }
-                [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin'; Levels = 1,2,3 }
-                [PSCustomObject] @{EventLogName = 'System'; Levels = 2,3 }
-                [PSCustomObject] @{EventLogName = 'Microsoft-FSLogix-Apps/Operational' ; Levels = 1,2,3 }
-                [PSCustomObject] @{EventLogName = 'Microsoft-FSLogix-Apps/Admin' ; Levels = 1,2,3 }
+                [PSCustomObject] @{EventLogName = 'Application'; Levels = 1, 2, 3 }
+                [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'; Levels = 1, 2, 3 }
+                [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin'; Levels = 1, 2, 3 }
+                [PSCustomObject] @{EventLogName = 'System'; Levels = 2, 3 }
+                [PSCustomObject] @{EventLogName = 'Microsoft-FSLogix-Apps/Operational' ; Levels = 1, 2, 3 }
+                [PSCustomObject] @{EventLogName = 'Microsoft-FSLogix-Apps/Admin' ; Levels = 1, 2, 3 }
             )
             #Building the XPath for each event log
             $XPathQuery = foreach ($CurrentEventLog in $EventLogs) {
@@ -5471,8 +5154,7 @@ function New-PsAvdPersonalHostPoolSetup {
             #Building and Hashtable for each Performance Counters where the key is the sample interval
             $PerformanceCountersHT = $PerformanceCounters | Group-Object -Property IntervalSeconds -AsHashTable -AsString
 
-            $PerformanceCounters = foreach ($CurrentKey in $PerformanceCountersHT.Keys)
-            {
+            $PerformanceCounters = foreach ($CurrentKey in $PerformanceCountersHT.Keys) {
                 $Name = "PerformanceCounters{0}" -f $CurrentKey
                 #Building the Performance Counter paths for each Performance Counter
                 $CounterSpecifier = foreach ($CurrentCounter in $PerformanceCountersHT[$CurrentKey]) {
@@ -5488,7 +5170,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $DataCollectionRuleName = "dcr-{0}" -f $LogAnalyticsWorkSpace.Name
             $DataFlow = New-AzDataFlowObject -Stream Microsoft-Perf, Microsoft-Event -Destination $LogAnalyticsWorkSpace.Name
             $DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
-            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Dataflow $DataFlow -DataSourcePerformanceCounter $PerformanceCounters -DataSourceWindowsEventLog $WindowsEventLogs -DestinationLogAnalytic $DestinationLogAnalytic #-DataCollectionEndpointId $DataCollectionEndpoint.Id
+            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounters -DataSourceWindowsEventLog $WindowsEventLogs -DestinationLogAnalytic $DestinationLogAnalytic #-DataCollectionEndpointId $DataCollectionEndpoint.Id
             #endregion
 
             #region Adding Data Collection Rule Association for every Session Host
@@ -5521,7 +5203,7 @@ function New-PsAvdPersonalHostPoolSetup {
 }
 
 function New-PsAvdPooledHostPoolSetup {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true, ValueFromPipeline = $true, ValueFromPipelineByPropertyName = $true)]
         [ValidateNotNullOrEmpty()]
@@ -5561,8 +5243,6 @@ function New-PsAvdPooledHostPoolSetup {
         $MSIXShareName = "msix"  
 
         $SKUName = "Standard_LRS"
-        $CurrentHostPoolStorageAccountNameMaxLength = 24
-        $CurrentHostPoolKeyVaultNameMaxLength = 24
 
         #From https://www.youtube.com/watch?v=lvBiLj7oAG4&t=2s
         $RedirectionsXMLFileContent = @'
@@ -5615,7 +5295,10 @@ function New-PsAvdPooledHostPoolSetup {
             #>
 
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; FSLogix = $Status[$CurrentHostPool.FSLogix]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]}
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; FSLogix = $Status[$CurrentHostPool.FSLogix]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot] }
+            if ($CurrentHostPool.$PreferredAppGroupType) {
+                $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
+            }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Tag['Image'] = 'Azure Compute Gallery'
                 $Tag['VMSourceImageId'] = $CurrentHostPool.VMSourceImageId
@@ -5710,7 +5393,6 @@ function New-PsAvdPooledHostPoolSetup {
                 #region FSLogix Storage Account Management
                 #region FSLogix Storage Account Name Setup
                 $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName()
-                $CurrentHostPoolStorageAccountName = $CurrentHostPoolStorageAccountName.Substring(0, [system.math]::min($CurrentHostPoolStorageAccountNameMaxLength, $CurrentHostPoolStorageAccountName.Length)).ToLower()
                 #endregion 
 
                 #region Dedicated Host Pool AD GPO Management (1 GPO per Host Pool for setting up the dedicated VHDLocations/CCDLocations value)
@@ -5838,7 +5520,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #region GPT.INI Management
                     $GPTINIGPOFilePath = "\\{0}\SYSVOL\{0}\Policies\{{{1}}}\GPT.INI" -f $DomainName, $($CurrentHostPoolFSLogixGPO.Id)
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$GPTINIGPOFilePath'"
-                    $result = Select-string -Pattern "(Version)=(\d+)" -AllMatches -Path $GPTINIGPOFilePath
+                    $result = Select-String -Pattern "(Version)=(\d+)" -AllMatches -Path $GPTINIGPOFilePath
                     #Getting current version
                     [int]$VersionNumber = $result.Matches.Groups[-1].Value
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Version Number: $VersionNumber"
@@ -5884,16 +5566,27 @@ function New-PsAvdPooledHostPoolSetup {
                         Stop-Transcript
                         Write-Error "The storage account name '$CurrentHostPoolStorageAccountName' is not available !" -ErrorAction Stop
                     }
-                    $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $ThisDomainControllerVirtualNetwork.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true
+                    $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $ThisDomainControllerVirtualNetwork.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
                 }
+
+                #region Adding The Storage Account Key1 in the dedicated Key Vault
+                if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Storing the Storage Account Key in the Azure Key Vault"
+                    $CurrentHostPoolStorageAccountKey1 = ($CurrentHostPoolStorageAccount | Get-AzStorageAccountKey | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                    $SecretValue = $(ConvertTo-SecureString -String $CurrentHostPoolStorageAccountKey1 -AsPlainText -Force) 
+                    $SecretName = "{0}-Key1" -f $CurrentHostPoolStorageAccountName
+                    $secret = Set-AzKeyVaultSecret -VaultName $CurrentHostPool.KeyVault.VaultName -Name $SecretName -SecretValue $SecretValue
+                }
+                #endregion
+
                 #Registering the Storage Account with your active directory environment under the target
                 if ($CurrentHostPool.IsActiveDirectoryJoined()) {
                     if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
                         if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
                             $AzFilesHybridZipName = 'AzFilesHybrid.zip'
                             $OutFile = Join-Path -Path $env:TEMP -ChildPath $AzFilesHybridZipName
-                            Start-BitsTransfer https://github.com/Azure-Samples/azure-files-samples/releases/latest/download/AzFilesHybrid.zip -destination $OutFile
+                            Start-BitsTransfer https://github.com/Azure-Samples/azure-files-samples/releases/latest/download/AzFilesHybrid.zip -Destination $OutFile
                             Expand-Archive -Path $OutFile -DestinationPath $env:TEMP\AzFilesHybrid -Force
                             Push-Location -Path $env:TEMP\AzFilesHybrid
                             .\CopyToPSPath.ps1
@@ -5901,10 +5594,11 @@ function New-PsAvdPooledHostPoolSetup {
                         }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
                         Import-Module AzFilesHybrid
-                        $null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
+                        #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"#
                         $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
+                        #Debug-AzStorageAccountAuth -StorageAccountName $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName -Verbose
+                        
                         #Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -EnableAzureActiveDirectoryKerberosForFile $true
-
                         #$KerbKeys = Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -ListKerbKey 
                     }
                     # Get the target storage account
@@ -5940,8 +5634,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #$NoMFAEntraIDGroup = Get-AzADGroup -SearchString $NoMFAEntraIDGroupName
                     $NoMFAEntraIDGroup = Get-MgBetaGroup -Filter "DisplayName eq '$NoMFAEntraIDGroupName'"
 
-                    if (-not($NoMFAEntraIDGroup))
-                    {
+                    if (-not($NoMFAEntraIDGroup)) {
                         Write-Warning -Message "'$NoMFAEntraIDGroupName' Entra ID group not found for disabling the MFA for the '$($ServicePrincipal.DisplayName)' Service Principal."
                         #Creating the No MFA Entra ID Group
                         $NoMFAEntraIDGroup = New-PsAvdNoMFAUserEntraIDGroup -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName
@@ -5970,11 +5663,38 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
                 }
 
-                $CurrentHostPoolStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }
 
-                # Save the password so the drive 
+                # Save the password so the drive will persist on reboot
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
-                Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$($CurrentHostPoolStorageAccountKey.Value)`""
+                #region Storage Account Key
+                if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
+                    #region Getting the Storage Account Key from the Azure Key Vault
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Azure Key Vault"
+                    $SecretName = "{0}-Key1" -f $CurrentHostPoolStorageAccountName
+                    $CurrentHostPoolStorageAccountKey = Get-AzKeyVaultSecret -VaultName $CurrentHostPool.KeyVault.VaultName -Name $SecretName -AsPlainText
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                    #endregion
+                } 
+                else {
+                    #region Getting the Storage Account Key from the Storage Account
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Azure Key Vault"
+                    $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                    #endregion
+                }
+
+                Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
+                #endregion
+
+                <#
+                #region AD User
+                $AzFileShareACEManagerUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerUserName -AsPlainText
+                $AzFileShareACEManagerPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerPassword).SecretValue
+                $AzFileShareACEManagerADUser = Get-ADUser -Identity $AzFileShareACEManagerUserName
+                $AzFileShareACEManagerCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($AzFileShareACEManagerADUser.userPrincipalName, $AzFileShareACEManagerPassword)
+                #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"$($AzFileShareACEManagerADUser.UserPrincipalName)`" /pass:`"$AzFileShareACEManagerPassword`"" -Wait -NoNewWindow
+                #endregion 
+                #>
 
                 #region Private endpoint for Storage Setup
                 #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
@@ -6030,16 +5750,94 @@ function New-PsAvdPooledHostPoolSetup {
                     $CurrentHostPoolShareName = $_
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
                     #Create a share for FSLogix
-                    #$CurrentHostPoolStorageAccountShare = New-AzRmStorageShare -ResourceGroupName $CurrentHostPoolResourceGroupName -StorageAccountName $CurrentHostPoolStorageAccountName -Name $CurrentHostPoolShareName -AccessTier Hot -QuotaGiB 200
-                    $CurrentHostPoolStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }
-                    $storageContext = New-AzStorageContext -StorageAccountName $CurrentHostPoolStorageAccountName -StorageAccountKey $CurrentHostPoolStorageAccountKey.Value
+                    #$CurrentHostPoolStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }
+                    #$storageContext = New-AzStorageContext -StorageAccountName $CurrentHostPoolStorageAccountName -StorageAccountKey $CurrentHostPoolStorageAccountKey.Value
+                    $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
 
+                    <#
+                    #region Azure File Share ACE Manager User Management
+                    #Adding the Azure File Share ACE Manager User in the AD (if not existing)
+                    $AzFileShareACEManagerADUser = Get-PsAvdAzFileShareACEManagerADUser -HostPool $CurrentHostPool
+                    #Adding the Azure File Share ACE Manager User in the roup with the "Storage File Data SMB Share Elevated Contributor" RBAC Role
+                    $CurrentHostPoolFSLogixElevatedContributorADGroup | Add-ADGroupMember -Members $AzFileShareACEManagerADUser.DistinguishedName
+                    #region Run a sync with Azure AD
+                    Start-MicrosoftEntraIDConnectSync
+                    #endregion 
+                    #endregion 
+                    #>
+                    #region RBAC Management
+                    #Constrain the scope to the target file share
+                    $SubscriptionId = $AzContext.Subscription.Id
+                    $Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/fileServices/default/fileshares/$CurrentHostPoolShareName"
+                    #$Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/$CurrentHostPoolShareName"
+
+                    #region Setting up the file share with right RBAC: FSLogix Contributor = "Storage File Data SMB Share Contributor"
+                    #Get the name of the custom role
+                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Contributor"
+                    #Assign the custom role to the target identity with the specified scope.
+                    Do {
+                        Start-MicrosoftEntraIDConnectSync
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                        $AzADGroup = $null
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixContributorADGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixContributorADGroupName'"
+                    } While (-not($AzADGroup.Id))
+                    #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
+                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixContributorADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
+                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                    }
+                    #endregion
+
+                    #region Setting up the file share with right RBAC: FSLogix Elevated Contributor = "Storage File Data SMB Share Elevated Contributor"
+                    #Get the name of the custom role
+                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Elevated Contributor"
+                    #Assign the custom role to the target identity with the specified scope.
+                    Do {
+                        Start-MicrosoftEntraIDConnectSync
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                        $AzADGroup = $null
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixElevatedContributorADGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixElevatedContributorADGroupName'"
+                    } While (-not($AzADGroup.Id))
+
+                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixElevatedContributorADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
+                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                    }
+                    #endregion
+
+                    #region Setting up the file share with right RBAC: FSLogix Reader = "Storage File Data SMB Share Reader"
+                    #Get the name of the custom role
+                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Reader"
+                    #Assign the custom role to the target identity with the specified scope.
+                    Do {
+                        Start-MicrosoftEntraIDConnectSync
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                        $AzADGroup = $null
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixReaderADGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixReaderADGroupName'"
+                    } While (-not($AzADGroup.Id))
+                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixReaderADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
+                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                    }
+                    #endregion
+
+                    #endregion
+
                     # Mount the share
-                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+                    Remove-PSDrive -Name Z -ErrorAction Ignore
+                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName" #-Credential $AzFileShareACEManagerCredential
+                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/k", "net use z: \\$CurrentHostPoolStorageAccountName.file.core.windows.net\profiles /user:$($AzFileShareACEManagerCredential.UserName) $($AzFileShareACEManagerCredential.GetNetworkCredential().Password)" -Wait
 
                     #region NTFS permissions for FSLogix
                     #From https://blue42.net/windows/changing-ntfs-security-permissions-using-powershell/
+                    #From https://learn.microsoft.com/en-us/fslogix/how-to-configure-storage-permissions#recommended-acls
                     #region Sample NTFS permissions for FSLogix
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting the ACL for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
                     $existingAcl = Get-Acl Z:
@@ -6115,73 +5913,12 @@ function New-PsAvdPooledHostPoolSetup {
 
                     # Unmount the share
                     Remove-PSDrive -Name Z
+                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
                     #endregion
 
                     #region Run a sync with Azure AD
                     Start-MicrosoftEntraIDConnectSync
                     #endregion 
-
-                    #region RBAC Management
-                    #Constrain the scope to the target file share
-                    $SubscriptionId = $AzContext.Subscription.Id
-                    $Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/fileServices/default/fileshares/$CurrentHostPoolShareName"
-
-                    #region Setting up the file share with right RBAC: FSLogix Contributor = "Storage File Data SMB Share Contributor"
-                    #Get the name of the custom role
-                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Contributor"
-                    #Assign the custom role to the target identity with the specified scope.
-                    Do {
-                        Start-MicrosoftEntraIDConnectSync
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
-                        $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixContributorADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixContributorADGroupName'"
-                    } While (-not($AzADGroup.Id))
-                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixContributorADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
-                    }
-                    #endregion
-
-                    #region Setting up the file share with right RBAC: FSLogix Elevated Contributor = "Storage File Data SMB Share Elevated Contributor"
-                    #Get the name of the custom role
-                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Elevated Contributor"
-                    #Assign the custom role to the target identity with the specified scope.
-                    Do {
-                        Start-MicrosoftEntraIDConnectSync
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
-                        $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixElevatedContributorADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixElevatedContributorADGroupName'"
-                    } While (-not($AzADGroup.Id))
-
-                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixElevatedContributorADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
-                    }
-                    #endregion
-
-                    #region Setting up the file share with right RBAC: FSLogix Reader = "Storage File Data SMB Share Reader"
-                    #Get the name of the custom role
-                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Reader"
-                    #Assign the custom role to the target identity with the specified scope.
-                    Do {
-                        Start-MicrosoftEntraIDConnectSync
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
-                        $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixReaderADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixReaderADGroupName'"
-                    } While (-not($AzADGroup.Id))
-                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixReaderADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
-                    }
-                    #endregion
-
-                    #endregion
                 }
                 #endregion
                 #endregion
@@ -6230,7 +5967,6 @@ function New-PsAvdPooledHostPoolSetup {
                 #region MSIX Storage Account Management
                 #region MSIX Storage Account Name Setup
                 $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetMSIXStorageAccountName()
-                $CurrentHostPoolStorageAccountName = $CurrentHostPoolStorageAccountName.Substring(0, [system.math]::min($CurrentHostPoolStorageAccountNameMaxLength, $CurrentHostPoolStorageAccountName.Length)).ToLower()
                 #endregion 
 
                 #region Dedicated Host Pool AD GPO Management (1 GPO per Host Pool for setting up the dedicated VHDLocations/CCDLocations value)
@@ -6282,15 +6018,26 @@ function New-PsAvdPooledHostPoolSetup {
                         Stop-Transcript
                         Write-Error "The storage account name '$CurrentHostPoolStorageAccountName' is not available !" -ErrorAction Stop
                     }
-                    $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $ThisDomainControllerVirtualNetwork.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true
+                    $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $ThisDomainControllerVirtualNetwork.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
                 }
+
+                #region Adding The Storage Account Key1 in the dedicated Key Vault
+                if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Storing the Storage Account Key in the Azure Key Vault"
+                    $CurrentHostPoolStorageAccountKey1 = ($CurrentHostPoolStorageAccount | Get-AzStorageAccountKey | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                    $SecretValue = $(ConvertTo-SecureString -String $CurrentHostPoolStorageAccountKey1 -AsPlainText -Force) 
+                    $SecretName = "{0}-Key1" -f $CurrentHostPoolStorageAccountName
+                    $secret = Set-AzKeyVaultSecret -VaultName $CurrentHostPool.KeyVault.VaultName -Name $SecretName -SecretValue $SecretValue
+                }
+                #endregion
+
                 #Registering the Storage Account with your active directory environment under the target
                 if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
                     if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
                         $AzFilesHybridZipName = 'AzFilesHybrid.zip'
                         $OutFile = Join-Path -Path $env:TEMP -ChildPath $AzFilesHybridZipName
-                        Start-BitsTransfer https://github.com/Azure-Samples/azure-files-samples/releases/latest/download/AzFilesHybrid.zip -destination $OutFile
+                        Start-BitsTransfer https://github.com/Azure-Samples/azure-files-samples/releases/latest/download/AzFilesHybrid.zip -Destination $OutFile
                         Expand-Archive -Path $OutFile -DestinationPath $env:TEMP\AzFilesHybrid -Force
                         Push-Location -Path $env:TEMP\AzFilesHybrid
                         .\CopyToPSPath.ps1
@@ -6298,8 +6045,14 @@ function New-PsAvdPooledHostPoolSetup {
                     }
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
                     Import-Module AzFilesHybrid
-                    $null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
+                    #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
                     $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
+
+                    # You can run the Debug-AzStorageAccountAuth cmdlet to conduct a set of basic checks on your AD configuration 
+                    # with the logged on AD user. This cmdlet is supported on AzFilesHybrid v0.1.2+ version. For more details on 
+                    # the checks performed in this cmdlet, see Azure Files Windows troubleshooting guide.
+                    #Debug-AzStorageAccountAuth -StorageAccountName $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName
+
                     #$KerbKeys = Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -ListKerbKey 
                 }
 
@@ -6312,12 +6065,39 @@ function New-PsAvdPooledHostPoolSetup {
                 # List the directory domain information if the storage account has enabled AD authentication for file shares
                 #$CurrentHostPoolStorageAccount.AzureFilesIdentityBasedAuth.ActiveDirectoryProperties
 
-                $CurrentHostPoolStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }
 
-                # Save the password so the drive 
+                # Save the password so the drive will persist on reboot
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
-                Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$($CurrentHostPoolStorageAccountKey.Value)`""
+                #region Storage Account Key
 
+                #region Storage Account Key
+                if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
+                    #region Getting the Storage Account Key from the Azure Key Vault
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Azure Key Vault"
+                    $SecretName = "{0}-Key1" -f $CurrentHostPoolStorageAccountName
+                    $CurrentHostPoolStorageAccountKey = Get-AzKeyVaultSecret -VaultName $CurrentHostPool.KeyVault.VaultName -Name $SecretName -AsPlainText
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                    #endregion 
+                } 
+                else {
+                    #region Getting the Storage Account Key from the Storage Account
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Storage Account"
+                    $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                    #endregion 
+                }
+                Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
+                #endregion 
+
+                <#
+                #region AD User
+                $AzFileShareACEManagerUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerUserName -AsPlainText
+                $AzFileShareACEManagerPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerPassword).SecretValue
+                $AzFileShareACEManagerADUser = Get-ADUser -Identity $AzFileShareACEManagerUserName
+                $AzFileShareACEManagerCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($AzFileShareACEManagerADUser.userPrincipalName, $AzFileShareACEManagerPassword)
+                #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"$($AzFileShareACEManagerADUser.UserPrincipalName)`" /pass:`"$AzFileShareACEManagerPassword`"" -Wait -NoNewWindow
+                #endregion 
+                #>
                 #region Private endpoint for Storage Setup
                 #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
                 #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
@@ -6373,17 +6153,89 @@ function New-PsAvdPooledHostPoolSetup {
                     $CurrentHostPoolShareName = $_
                     #Create a share for MSIX
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                    #$CurrentHostPoolStorageShare = New-AzRmStorageShare -ResourceGroupName $CurrentHostPoolResourceGroupName -StorageAccountName $CurrentHostPoolStorageAccountName -Name $CurrentHostPoolShareName -AccessTier Hot -QuotaGiB 200
-                    $CurrentHostPoolStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }
-                    $storageContext = New-AzStorageContext -StorageAccountName $CurrentHostPoolStorageAccountName -StorageAccountKey $CurrentHostPoolStorageAccountKey.Value
+                    #$CurrentHostPoolStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }
+                    #$storageContext = New-AzStorageContext -StorageAccountName $CurrentHostPoolStorageAccountName -StorageAccountKey $CurrentHostPoolStorageAccountKey.Value
+                    $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
 
                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
-                    # Mount the share
-                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+                    <#
+                    #region Azure File Share ACE Manager User Management
+                    #Adding the Azure File Share ACE Manager User in the AD (if not existing)
+                    $AzFileShareACEManagerADUser = Get-PsAvdAzFileShareACEManagerADUser -HostPool $CurrentHostPool
+                    #Adding the Azure File Share ACE Manager User in the roup with the "Storage File Data SMB Share Elevated Contributor" RBAC Role
+                    $CurrentHostPoolMSIXShareAdminsADGroup | Add-ADGroupMember -Members $AzFileShareACEManagerADUser.DistinguishedName
+                    #region Run a sync with Azure AD
+                    Start-MicrosoftEntraIDConnectSync
+                    #endregion 
+                    #endregion 
+                    #>
+                    #region RBAC Management
+                    #Constrain the scope to the target file share
+                    $SubscriptionId = $AzContext.Subscription.Id
+                    $Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/fileServices/default/fileshares/$CurrentHostPoolShareName"
+                    #$Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/$CurrentHostPoolShareName"
 
+                    #region Setting up the file share with right RBAC: MSIX Hosts & MSIX Users = "Storage File Data SMB Share Contributor" + MSIX Share Admins = Storage File Data SMB Share Elevated Contributor
+                    #https://docs.microsoft.com/en-us/azure/virtual-desktop/app-attach-file-share#how-to-set-up-the-file-share
+                    #Get the name of the custom role
+                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Contributor"
+                    #Assign the custom role to the target identity with the specified scope.
+                    Do {
+                        Start-MicrosoftEntraIDConnectSync
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                        $AzADGroup = $null
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXHostsADGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXHostsADGroupName'"
+                    } While (-not($AzADGroup.Id))
+                    #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
+                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolMSIXHostsADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                    }
+                    #Assign the custom role to the target identity with the specified scope.
+                    Do {
+                        Start-MicrosoftEntraIDConnectSync
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                        $AzADGroup = $null
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXUsersADGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXUsersADGroupName'"
+                    } While (-not($AzADGroup.Id))
+                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to 'CurrentPooledHostPoolMSIXUsersADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName'  (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                    }
+                    #endregion
+
+                    #region Setting up the file share with right RBAC
+                    #Get the name of the custom role
+                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Elevated Contributor"
+                    #Assign the custom role to the target identity with the specified scope.
+                    Do {
+                        Start-MicrosoftEntraIDConnectSync
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                        $AzADGroup = $null
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXShareAdminsADGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXShareAdminsADGroupName'"
+                    } While (-not($AzADGroup.Id))
+                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolMSIXShareAdminsADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                    }
+                    #endregion
+
+                    #endregion
+
+                    # Mount the share
+                    Remove-PSDrive -Name Z -ErrorAction Ignore
+                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName" #-Credential $AzFileShareACEManagerCredential
+                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/k", "net use z: \\$CurrentHostPoolStorageAccountName.file.core.windows.net\profiles /user:$($AzFileShareACEManagerCredential.UserName) $($AzFileShareACEManagerCredential.GetNetworkCredential().Password)" -Wait
+                    
                     #region NTFS permissions for MSIX
                     #From https://docs.microsoft.com/en-us/azure/virtual-desktop/app-attach-file-share#how-to-set-up-the-file-share
                     #From https://blue42.net/windows/changing-ntfs-security-permissions-using-powershell/
@@ -6446,65 +6298,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                     # Unmount the share
                     Remove-PSDrive -Name Z
-
-                    #region RBAC Management
-                    #Constrain the scope to the target file share
-                    $SubscriptionId = $AzContext.Subscription.Id
-                    $Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/fileServices/default/fileshares/$CurrentHostPoolShareName"
-
-                    #region Setting up the file share with right RBAC: MSIX Hosts & MSIX Users = "Storage File Data SMB Share Contributor" + MSIX Share Admins = Storage File Data SMB Share Elevated Contributor
-                    #https://docs.microsoft.com/en-us/azure/virtual-desktop/app-attach-file-share#how-to-set-up-the-file-share
-                    #Get the name of the custom role
-                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Contributor"
-                    #Assign the custom role to the target identity with the specified scope.
-                    Do {
-                        Start-MicrosoftEntraIDConnectSync
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
-                        $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXHostsADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXHostsADGroupName'"
-                    } While (-not($AzADGroup.Id))
-
-                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolMSIXHostsADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
-                    }
-
-                    #Assign the custom role to the target identity with the specified scope.
-                    Do {
-                        Start-MicrosoftEntraIDConnectSync
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
-                        $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXUsersADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXUsersADGroupName'"
-                    } While (-not($AzADGroup.Id))
-                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to 'CurrentPooledHostPoolMSIXUsersADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName'  (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
-                    }
-                    #endregion
-
-                    #region Setting up the file share with right RBAC
-                    #Get the name of the custom role
-                    $FileShareContributorRole = Get-AzRoleDefinition "Storage File Data SMB Share Elevated Contributor"
-                    #Assign the custom role to the target identity with the specified scope.
-                    Do {
-                        Start-MicrosoftEntraIDConnectSync
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
-                        $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXShareAdminsADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXShareAdminsADGroupName'"
-                    } While (-not($AzADGroup.Id))
-                    if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolMSIXShareAdminsADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
-                    }
-                    #endregion
-
-                    #endregion
+                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
                 }
                 #endregion
                 #endregion
@@ -6562,11 +6356,11 @@ function New-PsAvdPooledHostPoolSetup {
             }
             #endregion 
 
+            New-PsAvdHostPoolCredentialKeyVault -HostPool $CurrentHostPool
+            <#
             #region Key Vault
             #region Key Vault Name Setup
             $CurrentHostPoolKeyVaultName = $CurrentHostPool.GetKeyVaultName()
-            $CurrentHostPoolKeyVaultName = $CurrentHostPoolKeyVaultName.Substring(0, [system.math]::min($CurrentHostPoolKeyVaultNameMaxLength, $CurrentHostPoolKeyVaultName.Length)).ToLower()
-            $CurrentHostPoolKeyVaultName = $CurrentHostPoolKeyVaultName.ToLower()
             #endregion 
 
             #region Dedicated Key Vault Setup
@@ -6577,7 +6371,7 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Error "The key vault name '$CurrentHostPoolKeyVaultName' is not available !" -ErrorAction Stop
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolKeyVaultName' Key Vault (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $CurrentHostPoolKeyVault = New-AzKeyVault -ResourceGroupName $CurrentHostPoolResourceGroupName -VaultName $CurrentHostPoolKeyVaultName -Location $ThisDomainControllerVirtualNetwork.Location -EnabledForDiskEncryption -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
+                $CurrentHostPoolKeyVault = New-AzKeyVault -ResourceGroupName $CurrentHostPoolResourceGroupName -VaultName $CurrentHostPoolKeyVaultName -Location $ThisDomainControllerVirtualNetwork.Location -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
             }
             #endregion
 
@@ -6624,6 +6418,7 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
             #endregion
+            #>
 
             #Microsoft Entra ID
             if ($CurrentHostPool.IsMicrosoftEntraIdJoined()) {
@@ -6645,7 +6440,7 @@ function New-PsAvdPooledHostPoolSetup {
                 ResourceGroupName     = $CurrentHostPoolResourceGroupName
                 HostPoolType          = 'Pooled'
                 LoadBalancerType      = $CurrentHostPool.LoadBalancerType
-                PreferredAppGroupType = 'Desktop'
+                PreferredAppGroupType = $CurrentHostPool.PreferredAppGroupType
                 MaxSessionLimit       = $CurrentHostPool.MaxSessionLimit
                 Location              = $CurrentHostPool.Location
                 StartVMOnConnect      = $true
@@ -6761,8 +6556,6 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
             #region Workspace Setup
-            $ApplicationGroupReference = $CurrentAzRemoteApplicationGroup.Id, $CurrentAzDesktopApplicationGroup.Id
-
             $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.IdentityProvider
             if ($CurrentHostPool.VMSourceImageId) {
                 $Options += 'Azure Compte Gallery'
@@ -6788,7 +6581,18 @@ function New-PsAvdPooledHostPoolSetup {
             elseif ($CurrentHostPool.DiffDiskPlacement -eq [DiffDiskPlacement]::ResourceDisk) {
                 $Options += 'Ephemeral OS Disk: ResourceDisk'
             } 
+
             $FriendlyName = "{0} ({1})" -f $CurrentHostPool.GetAzAvdWorkSpaceName(), $($Options -join ', ')
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FriendlyName: $FriendlyName"
+
+            if ($CurrentHostPool.PreferredAppGroupType -eq [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType]::Desktop) {
+                $ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
+            }
+            else {
+                $ApplicationGroupReference = $CurrentAzRemoteApplicationGroup.Id
+            }
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ApplicationGroupReference: $($ApplicationGroupReference -join ', ')"
+
             $parameters = @{
                 Name                      = $CurrentHostPool.GetAzAvdWorkSpaceName()
                 FriendlyName              = $FriendlyName
@@ -6841,7 +6645,7 @@ function New-PsAvdPooledHostPoolSetup {
             Invoke-Pester -Container $Container -Output Detailed -Verbose
             #endregion
 
-            $SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
             #endregion 
 
@@ -6883,24 +6687,28 @@ function New-PsAvdPooledHostPoolSetup {
                         #region AVD Global Settings FSLogix
                         #region AVD Global Settings FSLogix - Registry
                         # Run PowerShell script on the VM
-                        $URI = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20Virtual%20Desktop/Setup/Set-AVDRegistryItemProperty.ps1"
-                        $ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
+                        #$URI = "https://raw.githubusercontent.com/lavanack/PSAzureVirtualDesktop/master/src/PSAzureVirtualDesktop/HelperScripts/Set-AVDRegistryItemProperty.ps1"
+                        #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
+                        $ModuleBase = Get-ModuleBase
+                        $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-AVDRegistryItemProperty.ps1"
                         Invoke-WebRequest -Uri $URI -UseBasicParsing -OutFile $ScriptPath
                         $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath
                         Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptPath, ($Result | Out-String))
-                        Remove-Item -Path $ScriptPath -Force
+                        #Remove-Item -Path $ScriptPath -Force
                         #endregion
                         #endregion
 
                         #region Configure FSLogix
                         #region Configure FSLogix - Registry
                         # Run PowerShell script on the VM
-                        $URI = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20Virtual%20Desktop/Setup/Set-FSLogixRegistryItemProperty.ps1"
-                        $ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
+                        #$URI = "https://raw.githubusercontent.com/lavanack/PSAzureVirtualDesktop/master/src/PSAzureVirtualDesktop/HelperScripts/Set-FSLogixRegistryItemProperty.ps1"
+                        #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
+                        $ModuleBase = Get-ModuleBase
+                        $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixRegistryItemProperty.ps1"
                         Invoke-WebRequest -Uri $URI -UseBasicParsing -OutFile $ScriptPath
-                        $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{CurrentHostPoolStorageAccountName = $CurrentHostPoolStorageAccountName }
+                        $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{HostPoolStorageAccountName = $CurrentHostPoolStorageAccountName }
                         Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptPath, ($Result | Out-String))
-                        Remove-Item -Path $ScriptPath -Force
+                        #Remove-Item -Path $ScriptPath -Force
                         #endregion
                         #endregion
 
@@ -6921,34 +6729,6 @@ function New-PsAvdPooledHostPoolSetup {
                     #From https://incas-training.de/blog/azure-virtual-desktop-teil-3-user-profil-management-mit-fslogix-konfiguration/
                     #From https://github.com/microsoftgraph/powershell-intune-samples/tree/master/DeviceConfiguration
 
-                    <#
-                    #region Intune Configuration Profile - Administrative Templates
-
-                    #region AVD Global Settings FSLogix - Intune Configuration Profile - Administrative Templates
-                    #region AVD Global Settings FSLogix - ADMX/ADML
-                    foreach ($CurrentSessionHostName in $SessionHostNames) {
-                        $ScriptBlock = [scriptblock]::Create("Function Get-CallerPreference { ${Function:Get-CallerPreference} }; Function Install-PsAvdAvdGpoSettings { ${Function:Install-PsAvdAvdGpoSettings} }; Install-PsAvdAvdGpoSettings -Force")
-                        $null = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock
-                    }
-                    #endregion
-                    
-                    New-AvdIntuneAdministrativeTemplateConfigurationPolicyViaCmdlet -HostPoolName $CurrentHostPool.Name
-                    #endregion
-
-                    #region Configure FSLogix - Intune Configuration Profile - Administrative Templates
-                    #region Configure FSLogix - ADMX/ADML
-                    foreach ($CurrentSessionHostName in $SessionHostNames) {
-                        $ScriptBlock = [scriptblock]::Create("Function Get-CallerPreference { ${Function:Get-CallerPreference} }; Function Install-PsAvdFSLogixGpoSettings { ${Function:Install-PsAvdFSLogixGpoSettings} }; Install-PsAvdFSLogixGpoSettings -Force")
-                        $null = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock
-                    }
-                    #endregion
-
-                    New-PsAvdFSLogixIntuneAdministrativeTemplateConfigurationPolicyViaCmdlet -CurrentHostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name
-                    #endregion
-
-                    #endregion
-                    #>
-
                     #region Intune Configuration Profile - Settings Catalog
                     #region AVD Global Settings FSLogix - Intune Configuration Profile - Settings Catalog
                     New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name
@@ -6959,8 +6739,14 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
                     #endregion
 
+                    <#
+                    #If you use Windows 10, version 1809 or later or Windows Server 2019 or later, you won't need to enable the registry key.
                     #Enabling New Performance Counters
-                    New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptURI 'https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20Virtual%20Desktop/Setup/Enable-NewPerformanceCounter.ps1' -HostPoolName $CurrentHostPool.Name
+                    #New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptURI 'https://raw.githubusercontent.com/lavanack/PSAzureVirtualDesktop/master/src/PSAzureVirtualDesktop/HelperScripts/Enable-NewPerformanceCounter.ps1' -HostPoolName $CurrentHostPool.Name
+                    $ModuleBase = Get-ModuleBase
+                    $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Enable-NewPerformanceCounter.ps1"
+                    New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptPath $ScriptPath -HostPoolName $CurrentHostPool.Name
+                    #>
                 }
             }
 
@@ -7056,6 +6842,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #$Name = $CurrentAzWvdStartMenuItem.Name -replace "(.*)/"
                 $Name = $CurrentAzWvdStartMenuItem.Name -replace "$($CurrentAzRemoteApplicationGroup.Name)/"
                 try {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$($CurrentAzRemoteApplicationGroup.Name)' Start Menu applications (for RemoteApp) in the '$($CurrentAzRemoteApplicationGroup.Name)' Application Group"
                     New-AzWvdApplication -AppAlias $CurrentAzWvdStartMenuItem.appAlias -GroupName $CurrentAzRemoteApplicationGroup.Name -Name $Name -ResourceGroupName $CurrentHostPoolResourceGroupName -CommandLineSetting DoNotAllow
                 }
                 catch {
@@ -7142,12 +6929,12 @@ function New-PsAvdPooledHostPoolSetup {
             #region Event Logs
             #Levels : 1 = Critical, 2 = Error, 3 = Warning
             $EventLogs = @(
-                @{EventLogName = 'Application'; Levels = 1,2,3 }
-                @{EventLogName = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'; Levels = 1,2,3 }
-                @{EventLogName = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin'; Levels = 1,2,3 }
-                @{EventLogName = 'System'; Levels = 2,3 }
-                @{EventLogName = 'Microsoft-FSLogix-Apps/Operational' ; Levels = 1,2,3 }
-                @{EventLogName = 'Microsoft-FSLogix-Apps/Admin' ; Levels = 1,2,3 }
+                @{EventLogName = 'Application'; Levels = 1, 2, 3 }
+                @{EventLogName = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'; Levels = 1, 2, 3 }
+                @{EventLogName = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin'; Levels = 1, 2, 3 }
+                @{EventLogName = 'System'; Levels = 2, 3 }
+                @{EventLogName = 'Microsoft-FSLogix-Apps/Operational' ; Levels = 1, 2, 3 }
+                @{EventLogName = 'Microsoft-FSLogix-Apps/Admin' ; Levels = 1, 2, 3 }
             )
             #Building the XPath for each event log
             $XPathQuery = foreach ($CurrentEventLog in $EventLogs) {
@@ -7186,8 +6973,7 @@ function New-PsAvdPooledHostPoolSetup {
             #Building and Hashtable for each Performance Counters where the key is the sample interval
             $PerformanceCountersHT = $PerformanceCounters | Group-Object -Property IntervalSeconds -AsHashTable -AsString
 
-            $PerformanceCounters = foreach ($CurrentKey in $PerformanceCountersHT.Keys)
-            {
+            $PerformanceCounters = foreach ($CurrentKey in $PerformanceCountersHT.Keys) {
                 $Name = "PerformanceCounters{0}" -f $CurrentKey
                 #Building the Performance Counter paths for each Performance Counter
                 $CounterSpecifier = foreach ($CurrentCounter in $PerformanceCountersHT[$CurrentKey]) {
@@ -7203,7 +6989,7 @@ function New-PsAvdPooledHostPoolSetup {
             $DataCollectionRuleName = "dcr-{0}" -f $LogAnalyticsWorkSpace.Name
             $DataFlow = New-AzDataFlowObject -Stream Microsoft-Perf, Microsoft-Event -Destination $LogAnalyticsWorkSpace.Name
             $DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
-            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Dataflow $DataFlow -DataSourcePerformanceCounter $PerformanceCounters -DataSourceWindowsEventLog $WindowsEventLogs -DestinationLogAnalytic $DestinationLogAnalytic #-DataCollectionEndpointId $DataCollectionEndpoint.Id
+            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounters -DataSourceWindowsEventLog $WindowsEventLogs -DestinationLogAnalytic $DestinationLogAnalytic #-DataCollectionEndpointId $DataCollectionEndpoint.Id
             #endregion
 
             #region Adding Data Collection Rule Association for every Session Host
@@ -7236,7 +7022,7 @@ function New-PsAvdPooledHostPoolSetup {
 }
 
 function New-PsAvdHostPoolSetup {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -7264,6 +7050,8 @@ function New-PsAvdHostPoolSetup {
         $AzureKeyVaultDnsSuffix2 = "vaultcore.azure.net"
         $DnsServerConditionalForwarderZones = $StorageEndpointSuffix, $AzureKeyVaultDnsSuffix, $AzureKeyVaultDnsSuffix2
         #>
+
+        #Update-PsAvdSystemAssignedAzVM
 
         #region Pester Tests for Host Pool - Class Instantiation
         $ModuleBase = Get-ModuleBase
@@ -7308,7 +7096,6 @@ function New-PsAvdHostPoolSetup {
         #endregion
 
         #region AVD OU Management
-
         $DefaultNamingContext = (Get-ADRootDSE).defaultNamingContext
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
@@ -7320,6 +7107,7 @@ function New-PsAvdHostPoolSetup {
         }
         #Blocking Inheritance
         $null = $AVDRootOU | Set-GPInheritance -IsBlocked Yes
+
         #endregion
 
         #region AVD GPO Management
@@ -7391,10 +7179,10 @@ function New-PsAvdHostPoolSetup {
         catch {
             <#
             Write-Warning "The required starter GPOs are not installed. Please click on the 'Create Starter GPOs Folder' under Group Policy Management / Forest / Domains / $DomainName / Starter GPOs before continuing"
-            Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "gpmc.msc" -Wait
+            Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "gpmc.msc" -Wait -NoNewWindow
             #>
             $OutFile = Join-Path -Path $env:Temp -ChildPath StarterGPOs.zip
-            Invoke-WebRequest -Uri https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20Virtual%20Desktop/Setup/StarterGPOs.zip -UseBasicParsing -OutFile $OutFile
+            Invoke-WebRequest -Uri https://raw.githubusercontent.com/lavanack/PSAzureVirtualDesktop/master/StarterGPOs.zip -UseBasicParsing -OutFile $OutFile
             #$DomainName = (Get-ADDomain).DNSRoot
             #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
             $DestinationPath = "\\{0}\SYSVOL\{0}" -f $DomainName
@@ -7475,6 +7263,7 @@ function New-PsAvdHostPoolSetup {
                 Function New-PsAvdMFAForAllUsersConditionalAccessPolicy { ${Function:New-PsAvdMFAForAllUsersConditionalAccessPolicy} }
                 Function Get-MgGraphObject { ${Function:Get-MgGraphObject} }
                 Function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI { ${Function:New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI} }   
+                Function New-PsAvdHostPoolCredentialKeyVault { ${Function:New-PsAvdHostPoolCredentialKeyVault} }
 "@)
             $Jobs = @()
             $Jobs += foreach ($CurrentPooledHostPool in $PooledHostPools) {
@@ -7559,6 +7348,7 @@ function New-PsAvdHostPoolSetup {
         Invoke-Pester -Container $Container -Output Detailed -Verbose
         #endregion
 
+
         $EndTime = Get-Date
         $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
         Write-Host -Object "Overall HostPool Setup Processing Time: $($TimeSpan.ToString())"
@@ -7567,13 +7357,13 @@ function New-PsAvdHostPoolSetup {
 }
 
 function Invoke-PsAvdErrorLogFilePester {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param (
         [Parameter(Mandatory = $true)]
-        [ValidateScript({Test-Path -Path $_ -PathType Container})]
+        [ValidateScript({ Test-Path -Path $_ -PathType Container })]
         [string] $LogDir
     )
-   Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     #region Pester Tests Errors - Log Files
@@ -7590,7 +7380,7 @@ function Invoke-PsAvdErrorLogFilePester {
 }
 
 function Restart-PsAvdSessionHost {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -7602,14 +7392,15 @@ function Restart-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
-    $SessionHostNames = foreach ($CurrentHostPool in $HostPool) { (Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName() -ErrorAction Ignore).ResourceId -replace ".*/" | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_)) } }
+    $SessionHostNames = foreach ($CurrentHostPool in $HostPool) {
+ (Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName() -ErrorAction Ignore).ResourceId -replace ".*/" | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_)) } 
+    }
 
     $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
         Write-Host -Object "Restarting '$CurrentSessionHostName' Azure VM"
         Get-AzVM -Name $CurrentSessionHostName | Restart-AzVM -AsJob
     }
-    if ($Wait)
-    {
+    if ($Wait) {
         Write-Host -Object "Waiting for all restarts"
         $Jobs | Wait-Job | Out-Null
         Write-Host -Object "All restarts complete"
@@ -7619,7 +7410,7 @@ function Restart-PsAvdSessionHost {
 }
 
 function New-PsAvdHostPoolBackup {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param
     (
         [Parameter(Mandatory = $true)]
@@ -7643,7 +7434,7 @@ function New-PsAvdHostPoolBackup {
 
 #Use the AD OU for generating the RDG file. Had to be called after the AD Object creation (at the end of the processing)
 function New-PsAvdRdcMan {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param
     (
         [Parameter(Mandatory = $false)]
@@ -7813,7 +7604,7 @@ function New-PsAvdRdcMan {
         #$Machines = Get-ADComputer -SearchBase $CurrentOU -Properties DNSHostName -Filter 'DNSHostName -like "*"' -SearchScope OneLevel
         $Machines = Get-ADComputer -SearchBase $CurrentOU -Properties DNSHostName -Filter 'DNSHostName -like "*"' -SearchScope OneLevel | Select-Object -Property Name
         if ($null -eq $Machines) {
-            $SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
+            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
             if ($null -ne $SessionHosts) {
                 $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
                 $Machines = foreach ($CurrentSessionHostName in $SessionHostNames) {
@@ -7856,7 +7647,7 @@ function New-PsAvdRdcMan {
         Remove-Item -Path $OutFile -Force
         if ($Open) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Opening RDC Manager"
-            #Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "rdcman ""$FullName"""
+            #Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "rdcman ""$FullName""" -Wait -NoNewWindow
             Start-Process -FilePath "rdcman" -ArgumentList """$FullName"""
         }
     }
@@ -7866,9 +7657,9 @@ function New-PsAvdRdcMan {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
-#Use the HostPool properties for generating the RDG file. Doesn't required to be called after the AD Object creation. Can be called at the start of the processing.
+#Use the HostPool properties for generating the RDG file. Doesn't required to be called after the AD Object creation. 
 function New-PsAvdRdcManV2 {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param
     (
         [Parameter(Mandatory = $false)]
@@ -8037,7 +7828,7 @@ function New-PsAvdRdcManV2 {
             "{0}-{1}" -f $CurrentHostPool.NamePrefix, $index
         }
         if ($null -eq $Machines) {
-            $SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
+            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
             if ($null -ne $SessionHosts) {
                 $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
                 $Machines = foreach ($CurrentSessionHostName in $SessionHostNames) {
@@ -8080,7 +7871,7 @@ function New-PsAvdRdcManV2 {
         Remove-Item -Path $OutFile -Force
         if ($Open) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Opening RDC Manager"
-            #Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "rdcman ""$FullName"""
+            #Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "rdcman ""$FullName""" -Wait -NoNewWindow
             Start-Process -FilePath "rdcman" -ArgumentList """$FullName"""
         }
     }
@@ -8091,7 +7882,7 @@ function New-PsAvdRdcManV2 {
 }
 
 function Get-PsAvdFSLogixProfileShare {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -8106,9 +7897,9 @@ function Get-PsAvdFSLogixProfileShare {
             $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
             # Get the list of file shares in the storage account
             $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
-            $CurrentHostPoolProfilesStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript {$_.Name -eq "profiles"}
+            $CurrentHostPoolProfilesStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "profiles" }
             if ($null -ne $CurrentHostPoolProfilesStorageShare) {
-                start $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolProfilesStorageShare.context.StorageAccountName, ($CurrentHostPoolProfilesStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolProfilesStorageShare.Name)
+                Start-Process $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolProfilesStorageShare.context.StorageAccountName, ($CurrentHostPoolProfilesStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolProfilesStorageShare.Name)
             }
         }
     }
@@ -8126,7 +7917,7 @@ function Get-PsAvdFSLogixProfileShare {
 }
 
 function Get-PsAvdMSIXProfileShare {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -8141,9 +7932,9 @@ function Get-PsAvdMSIXProfileShare {
             $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
             # Get the list of file shares in the storage account
             $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
-            $CurrentHostPoolMSIXStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript {$_.Name -eq "msix"}
+            $CurrentHostPoolMSIXStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "msix" }
             if ($null -ne $CurrentHostPoolMSIXStorageShare) {
-                start $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolMSIXStorageShare.context.StorageAccountName, ($CurrentHostPoolMSIXStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolMSIXStorageShare.Name)
+                Start-Process $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolMSIXStorageShare.context.StorageAccountName, ($CurrentHostPoolMSIXStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolMSIXStorageShare.Name)
             }
         }
     }
@@ -8162,7 +7953,7 @@ function Get-PsAvdMSIXProfileShare {
 
 #From https://learn.microsoft.com/en-us/azure/virtual-desktop/autoscale-scaling-plan?tabs=powershell
 function New-PsAvdScalingPlan {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -8172,7 +7963,7 @@ function New-PsAvdScalingPlan {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
-    $HostPoolWithScalingPlan = $HostPool | Where-Object -FilterScript { $_.ScalingPlan}
+    $HostPoolWithScalingPlan = $HostPool | Where-Object -FilterScript { $_.ScalingPlan }
     foreach ($CurrentHostPoolWithScalingPlan in $HostPoolWithScalingPlan) {
         #region Sclaing Plan
         $AzWvdHostPool = (Get-AzWvdHostPool | Where-Object -FilterScript { $_.Name -eq $($CurrentHostPoolWithScalingPlan.Name) })
@@ -8288,19 +8079,19 @@ function New-PsAvdScalingPlan {
 }
 
 function Import-PsAvdWorkbook {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
     )
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     $WorkBooks = @{
-        #Feom https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
-        "Deep Insights Workbook - AVD Accelerator" = "https://raw.githubusercontent.com/Azure/avdaccelerator/main/workload/workbooks/deepInsightsWorkbook/deepInsights.workbook"
+        #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
+        "Deep Insights Workbook - AVD Accelerator"      = "https://raw.githubusercontent.com/Azure/avdaccelerator/main/workload/workbooks/deepInsightsWorkbook/deepInsights.workbook"
         #From https://github.com/scautomation/Azure-Inventory-Workbook/tree/master/galleryTemplate
         "Windows Virtual Desktop Workbook - Billy York" = "https://raw.githubusercontent.com/scautomation/WVD-Workbook/master/galleryTemplate/template.json"
         #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
-        "AVD - Deep-Insights - ITProCloud" = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json"
+        "AVD - Deep-Insights - ITProCloud"              = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json"
         #From https://github.com/microsoft/Application-Insights-Workbooks/tree/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights
         "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
     }
@@ -8327,8 +8118,7 @@ function Import-PsAvdWorkbook {
     }
 
     #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
-    foreach ($DisplayName in $WorkBooks.Keys)
-    {
+    foreach ($DisplayName in $WorkBooks.Keys) {
         if ($null -eq (Get-AzApplicationInsightsWorkbook -Category 'workbook' -ResourceGroupName $ResourceGroupName | Where-Object -FilterScript { $_.DisplayName -eq $DisplayName })) {
             $URI = $WorkBooks[$DisplayName]
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Workbook in the '$Location' Location from '$$URI'"
@@ -8351,7 +8141,7 @@ function Import-PsAvdWorkbook {
 }
 
 function Get-ModuleBase {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
     )
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -8360,7 +8150,7 @@ function Get-ModuleBase {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Global:ModuleBase: $Global:ModuleBase"
         $ModuleBase = $Global:ModuleBase
     }
-    else  {
+    else {
         $ModuleBase = (Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
