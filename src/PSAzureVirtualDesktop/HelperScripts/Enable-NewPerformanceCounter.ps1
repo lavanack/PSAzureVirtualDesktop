@@ -25,7 +25,7 @@ param(
 Clear-Host
 
 #region Enabling and using the new performance counters
-#From https://learn.microsoft.com/en-us/training/modules/install-configure-apps-session-host/10-troubleshoot-application-issues-user-input-delay
+#From https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/rds-rdsh-performance-counters#enable-and-use-the-new-performance-counters
 Write-Verbose -Message "Setting some 'Performance Counters' related registry values ..."
 $null = New-Item -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Force
 Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "EnableLagCounter" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
