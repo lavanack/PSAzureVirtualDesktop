@@ -13,7 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2024-09-27 - Updated CHANGELOG.md
 - 2024-09-05 - Created CHANGELOG.md
+
+## [1.0.1] - 2024-09-06
+
+### Changed
+
+- Minor update
   
 ## [1.0.0] - 2024-09-05
 
