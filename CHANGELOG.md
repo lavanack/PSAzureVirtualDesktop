@@ -6,8 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Change log for PSAzureVirtualDesktop](#change-log-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
-  - [\[1.0.0\] - 2024-09-05](#100---2024-09-05)
+  - [\[1.0.1\] - 2024-09-06](#101---2024-09-06)
     - [Changed](#changed-1)
+  - [\[1.0.0\] - 2024-09-05](#100---2024-09-05)
+    - [Changed](#changed-2)
+
   
 ## [Unreleased]
 
