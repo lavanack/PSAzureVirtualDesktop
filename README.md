@@ -3,6 +3,7 @@
 - [PSAzureVirtualDesktop](#psazurevirtualdesktop)
   - [Release Notes](#release-notes)
   - [Change log](#change-log)
+  - [What's Next](#whats-next)
   - [Introduction](#introduction)
   - [Requirements](#requirements)
     - [PowerShell Modules](#powershell-modules)
@@ -86,6 +87,7 @@ To install from the PowerShell gallery using PowerShellGet (in PowerShell 5.0) r
 ```powershell
 Find-Module -Name PSAzureVirtualDesktop -Repository PSGallery | Install-Module
 ```
+
 To confirm installation, run the below command:
 
 ```powershell
