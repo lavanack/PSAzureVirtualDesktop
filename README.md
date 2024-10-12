@@ -21,6 +21,10 @@
 
 A full list of changes in each version can be found in the [change log](CHANGELOG.md).
 
+## What's Next
+
+A list of potential changes or evolutions can be found in the [What's next log](Whatsnext.md).
+
 ## Introduction
 
 This GitHub repository is the home of the PowerShell module [PSAzureVirtualDesktop](https://www.powershellgallery.com/packages/PSAzureVirtualDesktop). This module is a collection of PowerShell classes and functions that can be used to quickly deploy Azure Virtual Desktop (AVD) Proof-Of-Concepts. FSLogix, MSIX, AppAttach, Intune, ADDS or Entra joined VMs, Scaling Plan, Hibernation, OS Ephemeral Disks are some of the supported options available.
