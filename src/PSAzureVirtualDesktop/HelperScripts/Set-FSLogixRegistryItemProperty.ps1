@@ -22,7 +22,7 @@ of the Sample Code.
 param(
     [Parameter(Mandatory = $true)]
     [alias('StorageAccountName')]
-    [string] $CurrentHostPoolStorageAccountName,
+    [string] $HostPoolStorageAccountName,
 
     [Parameter(Mandatory = $false)]
     [string] $StorageEndpointSuffix = 'core.windows.net'
@@ -51,9 +51,9 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'VolumeType' -Typ
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'LogFileKeepingPeriod' -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 10
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'IsDynamic' -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
 
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'VHDLocations' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'VHDLocations' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
 #Use Redirections.xml. Be careful : https://twitter.com/JimMoyle/status/1247843511413755904w
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'RedirXMLSourceFolder' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'RedirXMLSourceFolder' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
 
 #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#disable-automatic-updates
 #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.WindowsUpdate::AutoUpdateCfg
@@ -89,15 +89,15 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclu
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys' -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
 Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name '%ProgramFiles%\FSLogix\Apps\frxccd.sys' -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
 
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.lock" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.meta" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.metadata" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.lock" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.meta" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.metadata" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.CIM" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.lock" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.meta" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHD.metadata" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.lock" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.meta" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.metadata" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -Name "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.CIM" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
 
 #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.WindowsDefender::Exclusions_Processes
 $null = New-Item -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Processes' -Force
@@ -110,8 +110,8 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender\Exclu
 
 <#
 Write-Verbose -Message "Setting some 'FSLogix' related registry values ..."
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'VHDLocations' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'VHDLocations' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
 #Use Redirections.xml. Be careful : https://twitter.com/JimMoyle/status/1247843511413755904w
-Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'RedirXMLSourceFolder' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'RedirXMLSourceFolder' -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
 #>
 #endregion

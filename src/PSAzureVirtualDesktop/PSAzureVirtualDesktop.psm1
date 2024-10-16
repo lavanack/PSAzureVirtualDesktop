@@ -40,7 +40,7 @@ Class HostPool {
     static [hashtable] $AzLocationShortNameHT = $null     
     static [hashtable] $AzEphemeralOsDiskSkuHT = @{}
     static [uint16] $VMProfileOsdiskSizeGb = 127
-    static [boolean] $UseKeyVaultForStorageAccountKey_ = $false
+    #static [boolean] $UseKeyVaultForStorageAccountKey_ = $false
     
     hidden static BuildAzureLocationSortNameHashtable() {
         $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
@@ -74,6 +74,7 @@ Class HostPool {
         [HostPool]::AzEphemeralOsDiskSkuHT[$Location] = $EphemeralOsDisk 
     }
 
+    <#
     static UseKeyVaultForStorageAccountKey([boolean] $UseKeyVaultForStorageAccountKey) {
         [HostPool]::UseKeyVaultForStorageAccountKey_ = $UseKeyVaultForStorageAccountKey
     }
@@ -82,6 +83,7 @@ Class HostPool {
         #[HostPool]::UseKeyVaultForStorageAccountKey_ = $true
         [HostPool]::UseKeyVaultForStorageAccountKey($true)
     }
+    #>
 
     static [array] GetAzureEphemeralOsDiskSku([String] $Location) {
         if (($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) -or (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($Location)))) {
@@ -320,6 +322,7 @@ class PooledHostPool : HostPool {
     [ValidateRange(0, 10)] [uint16] $MaxSessionLimit
     [ValidateNotNullOrEmpty()] [boolean] $FSlogix
     [ValidateNotNullOrEmpty()] [boolean] $MSIX
+    [ValidateNotNullOrEmpty()] [boolean] $AppAttach
     [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType] $PreferredAppGroupType  
 
 
@@ -332,6 +335,7 @@ class PooledHostPool : HostPool {
         $this.ImageSku = "win11-23h2-avd-m365"
         $this.FSlogix = $true
         $this.MSIX = $true
+        $this.AppAttach = $false
         $this.LoadBalancerType = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.LoadBalancerType]::BreadthFirst
         $this.PreferredAppGroupType = [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType]::Desktop
         $this.RefreshNames()
@@ -362,7 +366,7 @@ class PooledHostPool : HostPool {
     }
 
     [string] GetMSIXStorageAccountName() {
-        if ($this.MSIX) {
+        if (($this.MSIX) -or ($this.AppAttach)) {
             $StorageAccountNameMaxLength = 24
             $StorageAccountName = "msix{0}" -f $($this.Name.ToLower() -replace "\W")
             $StorageAccountName = $StorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $StorageAccountName.Length)).ToLower()
@@ -399,6 +403,19 @@ class PooledHostPool : HostPool {
         return $this
     }
 
+    [PooledHostPool]DisableAppAttach() {
+        $this.AppAttach = $false
+        return $this
+    }
+
+    [PooledHostPool]EnableAppAttach() {
+        if (-not($this.IsMicrosoftEntraIdJoined())) {
+            $this.AppAttach = $true
+            $this.DisableMSIX()
+        }
+        return $this
+    }
+
     [PooledHostPool]DisableMSIX() {
         $this.MSIX = $false
         return $this
@@ -407,6 +424,7 @@ class PooledHostPool : HostPool {
     [PooledHostPool]EnableMSIX() {
         if (-not($this.IsMicrosoftEntraIdJoined())) {
             $this.MSIX = $true
+            $this.DisableAppAttach()
         }
         return $this
     }
@@ -616,8 +634,8 @@ function Connect-PsAvdAzure {
         $null = Get-AzAccessToken -ErrorAction Stop
     }
     catch {
-        Connect-AzAccount -UseDeviceAuthentication
-        Get-AzSubscription | Out-GridView -OutputMode Single | Select-AzSubscription
+        Connect-AzAccount #-UseDeviceAuthentication
+        #Get-AzSubscription | Out-GridView -OutputMode Single | Select-AzSubscription
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Account : $((Get-AzContext).Account)"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Subscription : $((Get-AzContext).Subscription.Name)"
     }
@@ -713,7 +731,7 @@ function Install-PsAvdFSLogixGpoSettings {
         }
         catch {
             Write-Warning -Message "'https://aka.ms/fslogix-latest' raised an error. We're using an hard-coded version URI (June 2024)"
-            #Version: June 2024
+            #Version: October 2024
             $FSLogixLatestURI = "https://download.microsoft.com/download/e/c/4/ec4b55b3-d2f3-4610-aebd-56478eb0d582/FSLogix_Apps_2.9.8884.27471.zip"
         }
         $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
@@ -2739,7 +2757,7 @@ function Test-PsAvdStorageAccountNameAvailability {
 
     $result = $true
     foreach ($CurrentHostPool in $HostPool) {
-        if ($CurrentHostPool.MSIX) {
+        if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
             $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetMSIXStorageAccountName()
             if (-not(Get-AzStorageAccountNameAvailability -Name $CurrentHostPoolStorageAccountName).NameAvailable) {
                 Write-Error -Message "The '$CurrentHostPoolStorageAccountName' Storage Account Name is NOT available"
@@ -2800,10 +2818,6 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
         [PSCredential] $LocalAdminCredential,
         [Parameter(Mandatory = $false)]
         [PSCredential] $ADJoinCredential
-        <#
-        [Parameter(Mandatory = $false)]
-        [PSCredential] $AzFileShareACEManagerCredential
-        #>
     )
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -2882,39 +2896,15 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretPassword -SecretValue $SecurePassword
     #endregion
 
-    <#
-    #region Defining Azure File Share ACE Manager credential(s)
-    if ($AzFileShareACEManagerCredential) {
-        $SecureUserName = $(ConvertTo-SecureString -String $AzFileShareACEManagerCredential.UserName -AsPlainText -Force) 
-        $SecurePassword = $AzFileShareACEManagerCredential.Password
-    }
-    else {
-        $UserName = "azfFileshareacemgr"
-        $SecureUserName = $(ConvertTo-SecureString -String $UserName -AsPlainText -Force) 
-        Write-Host "UserName: $UserName"
-        $SecurePassword = New-RandomPassword -AsSecureString
-    }
-
-    $SecretUserName = "AzFileShareACEManagerUserName"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating a secret in $KeyVaultName called '$SecretUserName'"
-    $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretUserName -SecretValue $SecureUserName
-
-    $SecretPassword = "AzFileShareACEManagerPassword"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating a secret in $KeyVaultName called '$SecretPassword'"
-    $secret = Set-AzKeyVaultSecret -VaultName $KeyVaultName -Name $SecretPassword -SecretValue $SecurePassword
-    #endregion
-    #>
+    #region Getting this Azure VM and the related Virtual Network
     $ThisDomainController = Get-AzVMCompute | Get-AzVM
-    # Get the VM's network interface
-    $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
-    $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
-    # Get the subnet ID
-    $ThisDomainControllerSubnetId = $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id
-    $ThisDomainControllerSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $ThisDomainControllerSubnetId
-    # Get the vnet ID
-    $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
-    $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
-    
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
+    #$ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
+    #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    #endregion
+
     #region Private endpoint for Key Vault Setup
     #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
     #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
@@ -2923,7 +2913,7 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $KeyVault.ResourceId).GroupId
     $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $KeyVault.ResourceId -GroupId $GroupId
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Key Vault '$KeyVaultName' (in the '$ResourceGroupName' Resource Group)"
-    $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerSubnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
+    $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerVirtualNetwork.Subnets[0] -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
 
     ## Create the private DNS zone. ##
     $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
@@ -2974,16 +2964,14 @@ function New-PsAvdHostPoolCredentialKeyVault {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
+    #region Getting this Azure VM and the related Virtual Network
     $ThisDomainController = Get-AzVMCompute | Get-AzVM
-    # Get the VM's network interface
-    $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
-    $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
-    # Get the subnet ID
-    $ThisDomainControllerSubnetId = $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id
-    $ThisDomainControllerSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $ThisDomainControllerSubnetId
-    # Get the vnet ID
-    $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
-    $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
+    #$ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
+    #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    #endregion
 
     #region Key Vault
     #region Key Vault Name Setup
@@ -3012,7 +3000,7 @@ function New-PsAvdHostPoolCredentialKeyVault {
     $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $HostPoolKeyVault.ResourceId).GroupId
     $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $HostPoolKeyVault.ResourceId -GroupId $GroupId
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Key Vault '$HostPoolKeyVaultName' (in the '$HostPoolResourceGroupName' Resource Group)"
-    $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $HostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerSubnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
+    $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $HostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerVirtualNetwork.Subnets[0] -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
 
     ## Create the private DNS zone. ##
     $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
@@ -3377,60 +3365,22 @@ function Grant-PsAvdADJoinPermission {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
-Function Get-PsAvdAzFileShareACEManagerADUser { 
-    [CmdletBinding(PositionalBinding = $false)]
-    Param(
-        [Parameter(Mandatory = $true)]
-        [HostPool]$HostPool
-    )
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-
-    $AzFileShareACEManagerUserName = $HostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerUserName -AsPlainText
-    $AzFileShareACEManagerPassword = ($HostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerPassword).SecretValue
-    #$ADUser = Get-ADUser -Filter "SamAccountName -eq '$($Credential.UserName)'"
-    $ADUser = Get-ADUser -Identity $AzFileShareACEManagerUserName -ErrorAction Ignore
-    #If the user doesn't exist, we create it
-    if (-not($ADUser)) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$AzFileShareACEManagerUserName' AD User (for adding Azure VM to ADDS)"
-        #$DomainName = (Get-ADDomain).DNSRoot
-        $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
-        #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Forest.Name
-
-        #region AVD OU Management
-        $DefaultNamingContext = (Get-ADRootDSE).defaultNamingContext
-        #$DomainName = (Get-ADDomain).DNSRoot
-        $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
-        $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
-        #endregion
-
-        $ADUser = New-ADUser -Name $AzFileShareACEManagerUserName -AccountPassword $AzFileShareACEManagerPassword -PasswordNeverExpires $true -Enabled $true -Description "Created by PowerShell Script for setting up ACE on The MSIX/FSLogix Azure file shares" -UserPrincipalName $("{0}@{1}" -f $AzFileShareACEManagerUserName, $DomainName) -Path $AVDRootOU -PassThru
-    }
-    $ADUser
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-}
-
 #From https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
 function New-AzureComputeGallery {
-    [CmdletBinding(PositionalBinding = $false)]
+    [CmdletBinding()]
     Param(
         [Parameter(Mandatory = $false)]
         [string]$Location = "EastUS",
         [Parameter(Mandatory = $false)]
-        [string[]]$targetRegions = @($Location, "EastUS2"),
+        [string[]]$TargetRegions = @($Location),
         [Parameter(Mandatory = $false)]
         [int]$ReplicaCount = 1
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-
-    $StartTime = Get-Date
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
     $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
     $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
-    $AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+    $shortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
     #endregion
 
     #region Set up the environment and variables
@@ -3444,24 +3394,24 @@ function New-AzureComputeGallery {
     $ResourceGroupPrefix = "rg"
 
     # Location (see possible locations in the main docs)
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Location: $Location"
-    $LocationShortName = $AzLocationShortNameHT[$Location].shortName
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$LocationShortName: $LocationShortName"
-    if ($Location -notin $targetRegions) {
-        $targetRegions += $Location
+    Write-Verbose -Message "`$Location: $Location"
+    $LocationShortName = $shortNameHT[$Location].shortName
+    Write-Verbose -Message "`$LocationShortName: $LocationShortName"
+    if ($Location -notin $TargetRegions) {
+        $TargetRegions += $Location
     }
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$targetRegions: $($targetRegions -join ', ')"
-    [array] $targetRegionSettings = foreach ($CurrentTargetRegion in $targetRegions) {
+    Write-Verbose -Message "`$TargetRegions: $($TargetRegions -join ', ')"
+    [array] $TargetRegionsettings = foreach ($CurrentTargetRegion in $TargetRegions) {
         @{"name" = $CurrentTargetRegion; "replicaCount" = $ReplicaCount; "storageAccountType" = "Premium_LRS" }
     }
 
     $Project = "avd"
     $Role = "aib"
     #Timestamp
-    $timeInt = (Get-Date $([Datetime]::UtcNow) -UFormat "%s").Split(".")[0]
+    $timeInt = (Get-Date $([datetime]::UtcNow) -UFormat "%s").Split(".")[0]
     $ResourceGroupName = "{0}-{1}-{2}-{3}-{4}" -f $ResourceGroupPrefix, $Project, $Role, $LocationShortName, $TimeInt 
     $ResourceGroupName = $ResourceGroupName.ToLower()
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ResourceGroupName: $ResourceGroupName"
+    Write-Verbose -Message "`$ResourceGroupName: $ResourceGroupName"
 
 
     # Image template and definition names
@@ -3471,10 +3421,10 @@ function New-AzureComputeGallery {
     #AVD MultiSession + Microsoft 365 Market Place Image + customizations: VSCode
     $imageDefName02 = "win11-23h2-ent-avd-m365-vscode"
     $imageTemplateName02 = $imageDefName02 + "-template-" + $timeInt
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$imageDefName01: $imageDefName01"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$imageTemplateName01: $imageTemplateName01"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$imageDefName02: $imageDefName02"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$imageTemplateName02: $imageTemplateName02"
+    Write-Verbose -Message "`$imageDefName01: $imageDefName01"
+    Write-Verbose -Message "`$imageTemplateName01: $imageTemplateName01"
+    Write-Verbose -Message "`$imageDefName02: $imageDefName02"
+    Write-Verbose -Message "`$imageTemplateName02: $imageTemplateName02"
 
     # Distribution properties object name (runOutput). Gives you the properties of the managed image on completion
     $runOutputName01 = "cgOutput01"
@@ -3487,22 +3437,22 @@ function New-AzureComputeGallery {
 
     # Create resource group
     if (Get-AzResourceGroup -Name $ResourceGroupName -Location $location -ErrorAction Ignore) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$ResourceGroupName' Resource Group Name"
+        Write-Verbose -Message "Removing '$ResourceGroupName' Resource Group Name ..."
         Remove-AzResourceGroup -Name $ResourceGroupName -Force
     }
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group Name"
+    Write-Verbose -Message "Creating '$ResourceGroupName' Resource Group Name ..."
     $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $location -Force
 
     #region Permissions, user identity, and role
     # setup role def names, these need to be unique
     $imageRoleDefName = "Azure Image Builder Image Def - $timeInt"
     $identityName = "aibIdentity-$timeInt"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$imageRoleDefName: $imageRoleDefName"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$identityName: $identityName"
+    Write-Verbose -Message "`$imageRoleDefName: $imageRoleDefName"
+    Write-Verbose -Message "`$identityName: $identityName"
 
 
     # Create the identity
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating User Assigned Identity '$identityName'"
+    Write-Verbose -Message "Creating User Assigned Identity '$identityName' ..."
     $AssignedIdentity = New-AzUserAssignedIdentity -ResourceGroupName $ResourceGroupName -Name $identityName -Location $location
 
     #$aibRoleImageCreationUrl="https://raw.githubusercontent.com/PeterR-msft/M365AVDWS/master/Azure%20Image%20Builder/aibRoleImageCreation.json"
@@ -3513,23 +3463,23 @@ function New-AzureComputeGallery {
     $aibRoleImageCreationPath = Join-Path -Path $env:TEMP -ChildPath $(Split-Path $aibRoleImageCreationUrl -Leaf)
     #Generate a unique file name 
     $aibRoleImageCreationPath = $aibRoleImageCreationPath -replace ".json$", "_$timeInt.json"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$aibRoleImageCreationPath: $aibRoleImageCreationPath"
+    Write-Verbose -Message "`$aibRoleImageCreationPath: $aibRoleImageCreationPath"
 
     # Download the config
-    Invoke-WebRequest -Uri $aibRoleImageCreationUrl -UseBasicParsing -OutFile $aibRoleImageCreationPath
+    Invoke-WebRequest -Uri $aibRoleImageCreationUrl -OutFile $aibRoleImageCreationPath -UseBasicParsing
 
     ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $aibRoleImageCreationPath
     ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $aibRoleImageCreationPath
     ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace 'Azure Image Builder Service Image Creation Role', $imageRoleDefName) | Set-Content -Path $aibRoleImageCreationPath
 
     # Create a role definition
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$imageRoleDefName' Role Definition"
+    Write-Verbose -Message "Creating '$imageRoleDefName' Role Definition ..."
     $RoleDefinition = New-AzRoleDefinition -InputFile $aibRoleImageCreationPath
 
     # Grant the role definition to the VM Image Builder service principal
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning '$($RoleDefinition.Name)' Role to '$($AssignedIdentity.Name)'"
+    Write-Verbose -Message "Assigning '$($RoleDefinition.Name)' Role to '$($AssignedIdentity.Name)' ..."
     Do {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
+        Write-Verbose -Message "Sleeping 10 seconds ..."
         Start-Sleep -Seconds 10
         $RoleAssignment = New-AzRoleAssignment -ObjectId $AssignedIdentity.PrincipalId -RoleDefinitionName $RoleDefinition.Name -Scope $ResourceGroup.ResourceId -ErrorAction Ignore #-Debug
     } While ($null -eq $RoleAssignment)
@@ -3538,17 +3488,17 @@ function New-AzureComputeGallery {
 
     #region Create an Azure Compute Gallery
     $GalleryName = "{0}_{1}_{2}_{3}" -f $AzureComputeGalleryPrefix, $Project, $LocationShortName, $timeInt
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$GalleryName: $GalleryName"
+    Write-Verbose -Message "`$GalleryName: $GalleryName"
 
     # Create the gallery
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Compute Gallery '$GalleryName'"
+    Write-Verbose -Message "Creating Azure Compute Gallery '$GalleryName' ..."
     $Gallery = New-AzGallery -GalleryName $GalleryName -ResourceGroupName $ResourceGroupName -Location $location
     #endregion
 
     #region Template #1 via a customized JSON file
     #Based on https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
     # Create the gallery definition
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Compute Gallery Image Definition '$imageDefName01' (From Customized JSON)..."
+    Write-Verbose -Message "Creating Azure Compute Gallery Image Definition '$imageDefName01' (From Customized JSON)..."
     $GalleryImageDefinition01 = New-AzGalleryImageDefinition -GalleryName $GalleryName -ResourceGroupName $ResourceGroupName -Location $location -Name $imageDefName01 -OsState generalized -OsType Windows -Publisher 'Contoso' -Offer 'Windows' -Sku 'avd-win11-custom' -HyperVGeneration V2
 
     #region Download and configure the template
@@ -3558,9 +3508,9 @@ function New-AzureComputeGallery {
     $templateFilePath = Join-Path -Path $env:TEMP -ChildPath $(Split-Path $templateUrl -Leaf)
     #Generate a unique file name 
     $templateFilePath = $templateFilePath -replace ".json$", "_$timeInt.json"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$templateFilePath: $templateFilePath "
+    Write-Verbose -Message "`$templateFilePath: $templateFilePath  ..."
 
-    Invoke-WebRequest -Uri $templateUrl -UseBasicParsing -OutFile $templateFilePath
+    Invoke-WebRequest -Uri $templateUrl -OutFile $templateFilePath -UseBasicParsing
 
     ((Get-Content -Path $templateFilePath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $templateFilePath
     ((Get-Content -Path $templateFilePath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $templateFilePath
@@ -3569,17 +3519,17 @@ function New-AzureComputeGallery {
 
     ((Get-Content -Path $templateFilePath -Raw) -replace '<imageDefName>', $imageDefName01) | Set-Content -Path $templateFilePath
     ((Get-Content -Path $templateFilePath -Raw) -replace '<sharedImageGalName>', $GalleryName) | Set-Content -Path $templateFilePath
-    ((Get-Content -Path $templateFilePath -Raw) -replace '<targetRegions>', $($targetRegionSettings | ConvertTo-Json)) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<TargetRegions>', $(ConvertTo-Json -InputObject $TargetRegionsettings)) | Set-Content -Path $templateFilePath
     ((Get-Content -Path $templateFilePath -Raw) -replace '<imgBuilderId>', $AssignedIdentity.Id) | Set-Content -Path $templateFilePath
     ((Get-Content -Path $templateFilePath -Raw) -replace '<version>', $version) | Set-Content -Path $templateFilePath
     #endregion
 
     #region Submit the template
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Starting Resource Group Deployment from '$templateFilePath'"
+    Write-Verbose -Message "Starting Resource Group Deployment from '$templateFilePath' ..."
     $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $templateFilePath -TemplateParameterObject @{"api-Version" = "2022-07-01"; "imageTemplateName" = $imageTemplateName01; "svclocation" = $location }
 
     #region Build the image
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Starting Image Builder Template from '$imageTemplateName01' (As Job)"
+    Write-Verbose -Message "Starting Image Builder Template from '$imageTemplateName01' (As Job) ..."
     $Jobs += Start-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateName01 -AsJob
     #endregion
     #endregion
@@ -3599,7 +3549,7 @@ function New-AzureComputeGallery {
         Sku               = 'avd-win11-m365'
         HyperVGeneration  = 'V2'
     }
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Compute Gallery Image Definition '$imageDefName02' (From A Market Place Image)..."
+    Write-Verbose -Message "Creating Azure Compute Gallery Image Definition '$imageDefName02' (From A Market Place Image)..."
     $GalleryImageDefinition02 = New-AzGalleryImageDefinition @GalleryParams
 
     $SrcObjParams = @{
@@ -3609,7 +3559,7 @@ function New-AzureComputeGallery {
         Sku                 = 'win11-23h2-avd-m365'  
         Version             = 'latest'
     }
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Image Builder Template Source Object "
+    Write-Verbose -Message "Creating Azure Image Builder Template Source Object  ..."
     $srcPlatform = New-AzImageBuilderTemplateSourceObject @SrcObjParams
 
     $disObjParams = @{
@@ -3621,12 +3571,12 @@ function New-AzureComputeGallery {
         #ReplicationRegion = $location
 
         # 2. Uncomment following line if the custom image should be replicated to another region(s).
-        TargetRegion           = $targetRegionSettings
+        TargetRegion           = $TargetRegionsettings
 
         RunOutputName          = $runOutputName02
         ExcludeFromLatest      = $false
     }
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Image Builder Template Distributor Object "
+    Write-Verbose -Message "Creating Azure Image Builder Template Distributor Object  ..."
     $disSharedImg = New-AzImageBuilderTemplateDistributorObject @disObjParams
 
     $ImgTimeZoneRedirectionPowerShellCustomizerParams = @{  
@@ -3637,7 +3587,7 @@ function New-AzureComputeGallery {
         ScriptUri            = 'https://raw.githubusercontent.com/Azure/RDS-Templates/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2023-07-31/TimezoneRedirection.ps1'
     }
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgTimeZoneRedirectionPowerShellCustomizerParams.Name)'"
+    Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgTimeZoneRedirectionPowerShellCustomizerParams.Name)' ..."
     $TimeZoneRedirectionCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgTimeZoneRedirectionPowerShellCustomizerParams 
 
     $ImgVSCodePowerShellCustomizerParams = @{  
@@ -3648,10 +3598,10 @@ function New-AzureComputeGallery {
         ScriptUri            = 'https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20Virtual%20Desktop/Azure%20Image%20Builder/Install-VSCode.ps1'
     }
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgVSCodePowerShellCustomizerParams.Name)'"
+    Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgVSCodePowerShellCustomizerParams.Name)' ..."
     $VSCodeCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgVSCodePowerShellCustomizerParams 
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Image Builder Template WindowsUpdate Customizer Object"
+    Write-Verbose -Message "Creating Azure Image Builder Template WindowsUpdate Customizer Object ..."
     $WindowsUpdateCustomizer = New-AzImageBuilderTemplateCustomizerObject -WindowsUpdateCustomizer -Name 'WindowsUpdate' -Filter @('exclude:$_.Title -like ''*Preview*''', 'include:$true') -SearchCriterion "IsInstalled=0" -UpdateLimit 40
 
     $ImgDisableAutoUpdatesPowerShellCustomizerParams = @{  
@@ -3662,7 +3612,7 @@ function New-AzureComputeGallery {
         ScriptUri            = 'https://raw.githubusercontent.com/Azure/RDS-Templates/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2023-07-31/TimezoneRedirection.ps1'
     }
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgDisableAutoUpdatesPowerShellCustomizerParams.Name)'"
+    Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgDisableAutoUpdatesPowerShellCustomizerParams.Name)' ..."
     $DisableAutoUpdatesCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgDisableAutoUpdatesPowerShellCustomizerParams 
 
     #Create an Azure Image Builder template and submit the image configuration to the Azure VM Image Builder service:
@@ -3676,36 +3626,40 @@ function New-AzureComputeGallery {
         Location               = $location
         UserAssignedIdentityId = $AssignedIdentity.Id
         VMProfileVmsize        = "Standard_D4s_v5"
-        VMProfileOsdiskSizeGb  = [HostPool]::VMProfileOsdiskSizeGb
+        VMProfileOsdiskSizeGb  = 127
     }
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Azure Image Builder Template from '$imageTemplateName02' Image Template Name"
+    Write-Verbose -Message "Creating Azure Image Builder Template from '$imageTemplateName02' Image Template Name ..."
     $ImageBuilderTemplate = New-AzImageBuilderTemplate @ImgTemplateParams
 
     #region Build the image
     #Start the image building process using Start-AzImageBuilderTemplate cmdlet:
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Starting Image Builder Template from '$imageTemplateName02' (As Job)"
+    Write-Verbose -Message "Starting Image Builder Template from '$imageTemplateName02' (As Job) ..."
     $Jobs += Start-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateName02 -AsJob
     #endregion
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for 'Start-AzImageBuilderTemplate' jobs to complete"
+    #endregion
+	
+    Write-Verbose -Message "Waiting for jobs to complete ..."
     $Jobs | Wait-Job | Out-Null
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Waiting is over for the 'Start-AzImageBuilderTemplate' job"
+`	
 
     #region imageTemplateName01 status 
     #To determine whenever or not the template upload process was successful, run the following command.
     $getStatus01 = Get-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateName01
     # Optional - if you have any errors running the preceding command, run:
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName01' ProvisioningErrorCode: $($getStatus01.ProvisioningErrorCode) "
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName01' ProvisioningErrorMessage: $($getStatus01.ProvisioningErrorMessage) "
+    Write-Verbose -Message "'$imageTemplateName01' ProvisioningErrorCode: $($getStatus01.ProvisioningErrorCode) "
+    Write-Verbose -Message "'$imageTemplateName01' ProvisioningErrorMessage: $($getStatus01.ProvisioningErrorMessage) "
     # Shows the status of the build
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName01' LastRunStatusRunState: $($getStatus01.LastRunStatusRunState) "
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName01' LastRunStatusMessage: $($getStatus01.LastRunStatusMessage) "
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName01' LastRunStatusRunSubState: $($getStatus01.LastRunStatusRunSubState) "
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Azure Image Builder Template for '$imageTemplateName01'"
+    Write-Verbose -Message "'$imageTemplateName01' LastRunStatusRunState: $($getStatus01.LastRunStatusRunState) "
+    Write-Verbose -Message "'$imageTemplateName01' LastRunStatusMessage: $($getStatus01.LastRunStatusMessage) "
+    Write-Verbose -Message "'$imageTemplateName01' LastRunStatusRunSubState: $($getStatus01.LastRunStatusRunSubState) "
+    if ($getStatus01.LastRunStatusRunState -eq "Failed") {
+        Write-Error -Message "The Image Builder Template for '$imageTemplateName01' has failed:\r\n$($getStatus01.LastRunStatusMessage)"
+    }
+    Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateName01' ..."
     #$Jobs += $getStatus01 | Remove-AzImageBuilderTemplate -AsJob
     $getStatus01 | Remove-AzImageBuilderTemplate -NoWait
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$aibRoleImageCreationPath'"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$templateFilePath'"
+    Write-Verbose -Message "Removing '$aibRoleImageCreationPath' ..."
+    Write-Verbose -Message "Removing '$templateFilePath' ..."
     Remove-Item -Path $aibRoleImageCreationPath, $templateFilePath -Force
     #endregion
 
@@ -3713,15 +3667,16 @@ function New-AzureComputeGallery {
     #To determine whenever or not the template upload process was successful, run the following command.
     $getStatus02 = Get-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateName02
     # Optional - if you have any errors running the preceding command, run:
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName02' ProvisioningErrorCode: $($getStatus02.ProvisioningErrorCode) "
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName02' ProvisioningErrorMessage: $($getStatus02.ProvisioningErrorMessage) "
+    Write-Verbose -Message "'$imageTemplateName02' ProvisioningErrorCode: $($getStatus02.ProvisioningErrorCode) "
+    Write-Verbose -Message "'$imageTemplateName02' ProvisioningErrorMessage: $($getStatus02.ProvisioningErrorMessage) "
     # Shows the status of the build
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName02' LastRunStatusRunState: $($getStatus02.LastRunStatusRunState) "
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName02' LastRunStatusMessage: $($getStatus02.LastRunStatusMessage) "
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$imageTemplateName02' LastRunStatusRunSubState: $($getStatus02.LastRunStatusRunSubState) "
-    #endregion
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Azure Image Builder Template for '$imageTemplateName02'"
+    Write-Verbose -Message "'$imageTemplateName02' LastRunStatusRunState: $($getStatus02.LastRunStatusRunState) "
+    Write-Verbose -Message "'$imageTemplateName02' LastRunStatusMessage: $($getStatus02.LastRunStatusMessage) "
+    Write-Verbose -Message "'$imageTemplateName02' LastRunStatusRunSubState: $($getStatus02.LastRunStatusRunSubState) "
+    if ($getStatus02.LastRunStatusRunState -eq "Failed") {
+        Write-Error -Message "The Image Builder Template for '$imageTemplateName02' has failed:\r\n$($getStatus02.LastRunStatusMessage)"
+    }
+    Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateName02' ..."
     #$Jobs += $getStatus02 | Remove-AzImageBuilderTemplate -AsJob
     $getStatus02 | Remove-AzImageBuilderTemplate -NoWait
     #endregion
@@ -3738,14 +3693,8 @@ function New-AzureComputeGallery {
     #endregion
   
     $Jobs | Wait-Job | Out-Null
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing jobs"
+    Write-Verbose -Message "Removing jobs ..."
     $Jobs | Remove-Job -Force
-
-    $EndTime = Get-Date
-    $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
-    Write-Host -Object "Overall Azure Compute Gallery Setup Processing Time: $($TimeSpan.ToString())"
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $Gallery
 }
 
@@ -3773,6 +3722,33 @@ function Update-PsAvdSystemAssignedAzVM {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+#Get The Virtual Network Object for the VM executing this function
+function Get-AzVMVirtualNetwork {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Microsoft.Azure.Commands.Compute.Models.PSVirtualMachine] $VM = $(Get-AzVMCompute | Get-AzVM)
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    # Get the VM's network interface
+    $VMNetworkInterfaceId = $VM.NetworkProfile.NetworkInterfaces[0].Id
+    $VMNetworkInterface = Get-AzNetworkInterface -ResourceId $VMNetworkInterfaceId
+    # Get the subnet ID
+    $VMSubnetId = $VMNetworkInterface.IpConfigurations[0].Subnet.Id
+    $VMSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $VMSubnetId
+    # Get the vnet ID
+    $VMVirtualNetworkId = $VMSubnetId -replace "/subnets/.*$"
+    $VMVirtualNetwork = Get-AzResource -ResourceId $VMVirtualNetworkId | Get-AzVirtualNetwork
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$VMVirtualNetwork:`r`n$($VMVirtualNetwork | Out-String)"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    return $VMVirtualNetwork
+}
+
+
+
+
 #Get The Azure VM Compute Object for the VM executing this function
 function Get-AzVMCompute {
     [CmdletBinding(PositionalBinding = $false)]
@@ -3787,6 +3763,7 @@ function Get-AzVMCompute {
     try {
         $response = Invoke-RestMethod -Uri $uri -Headers @{"Metadata" = "true" } -Method GET -TimeoutSec 5
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] VM Compute Object:`r`n$($response.compute | Out-String)"
         return $response.compute
     }
     catch {
@@ -3839,7 +3816,16 @@ function New-PsAvdSessionHost {
     $OSDiskType = "Premium_LRS"
 
     Import-Module -Name Az.Compute
+
+    #region Getting this Azure VM and the related Virtual Network
     $ThisDomainController = Get-AzVMCompute | Get-AzVM
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
+    #$ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
+    #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    #endregion
+
     # Get the VM's network interface
     $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
     $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
@@ -3849,6 +3835,8 @@ function New-PsAvdSessionHost {
     # Get the vnet ID
     $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
     $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $ThisDomainControllerVirtualNetwork"
 
     if ($null -eq (Get-AzVMSize -Location $ThisDomainControllerVirtualNetwork.Location | Where-Object -FilterScript { $_.Name -eq $VMSize })) {
         Stop-Transcript
@@ -3864,7 +3852,7 @@ function New-PsAvdSessionHost {
     #$DataDiskName = "$VMName-DataDisk01"
 
     #Create Network Interface Card 
-    $NIC = New-AzNetworkInterface -Name $NICName -ResourceGroupName $ResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -SubnetId $ThisDomainControllerSubnet.Id -Force
+    $NIC = New-AzNetworkInterface -Name $NICName -ResourceGroupName $ResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -SubnetId $ThisDomainControllerVirtualNetwork.Subnets[0].Id -Force
 
     if ($Spot) {
         #Create a virtual machine configuration file (As a Spot Intance for saving costs . DON'T DO THAT IN A PRODUCTION ENVIRONMENT !!!)
@@ -4004,8 +3992,8 @@ function New-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Result: `r`n$($result | Out-String)"
     #>
 
-    #URI updated on : 07/24/2024
-    $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02748.388.zip"
+    #URI updated on : 10/16/2024
+    $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02797.442.zip"
     #$avdExtensionName = "DSC_{0:yyyyMMddHHmmss}" -f (Get-Date)
     $avdExtensionName = "DSC"
     $avdExtensionPublisher = "Microsoft.Powershell"
@@ -4213,6 +4201,7 @@ function Add-PsAvdSessionHost {
             #From https://stackoverflow.com/questions/76844912/how-to-call-a-class-object-in-powershell-jobs
             $ExportedFunctions = [scriptblock]::Create(@"
             Function New-PsAvdSessionHost { ${Function:New-PsAvdSessionHost} }          
+            Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }          
             Function Get-AzVMCompute { ${Function:Get-AzVMCompute} }
             Function Get-CallerPreference { ${Function:Get-CallerPreference} }
 "@)
@@ -4244,6 +4233,97 @@ function Add-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+function Get-GitFile {
+    [CmdletBinding(PositionalBinding = $false)]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [ValidatePattern("^https://api.github.com/repos/.*|^https://(www\.)?github.com/")] 
+        [string]$URI,
+        [Parameter(Mandatory = $true)]
+        [string]$FileRegExPattern,
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )   
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    #region URI transformation (in case of the end-user doesn't give an https://api.github.com/repos/... URI
+    if ($URI -match "^https://(www\.)?github.com/(?<organisation>[^/]+)/(?<repository>[^/]+)/tree/master/(?<contents>.*)") {
+        #https://github.com/lavanack/laurentvanacker.com/tree/master/Azure/Azure%20Virtual%20Desktop/MSIX
+        #"https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
+        $Organisation = $Matches["organisation"]
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Organisation: $Organisation"
+        $Repository = $Matches["repository"]
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Repository: $Repository"
+        $Contents = $Matches["contents"]
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Contents: $Contents"
+        $GitHubURI = "https://api.github.com/repos/$Organisation/$Repository/contents/$Contents"
+    }
+    else {
+        $GitHubURI = $URI
+    }
+    #endregion
+    #region Getting all request files
+    $Response = Invoke-WebRequest -Uri $GitHubURI -UseBasicParsing
+    $Objects = $Response.Content | ConvertFrom-Json
+    $Files = $Objects | Where-Object -FilterScript { $_.type -eq "file" } | Select-Object -ExpandProperty download_url
+    $FileURIs = $Files -match $FileRegExPattern
+    Start-BitsTransfer -Source $FileURIs -Destination $(@($Destination) * $($FileURIs.Count))
+    $DestinationFiles = $FileURIs | ForEach-Object -Process { Join-Path -Path $Destination -ChildPath $($_ -replace ".*/") }
+    #endregion
+
+    #region non-LFS/LFS processing
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $(Get-ChildItem -Path $DestinationFiles | Out-String)"
+    $GitFile = foreach ($CurrentDestinationFile in $DestinationFiles) {
+        #Checking if the file is a Github LFS file
+        if ($(Get-Content -Path $CurrentDestinationFile -TotalCount 1) -match "version https://git-lfs.github.com") {
+            #From https://gist.github.com/fkraeutli/66fa741d9a8c2a6a238a01d17ed0edc5#retrieving-lfs-files
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $CurrentDestinationFile is a LFS File"
+            $FileContent = Get-Content -Path $CurrentDestinationFile
+            $SizeResult = [regex]::Match($FileContent, "size\s(?<size>\d+)")
+            $OidResult = [regex]::Match($FileContent, "oid\ssha256:(?<oid>\w+)")
+            [int]$Size = ($SizeResult.Groups.Captures | Where-Object -FilterScript { $_.Name -eq 'size' }).Value
+            $Oid = ($OidResult.Groups.Captures | Where-Object -FilterScript { $_.Name -eq 'oid' }).Value
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Size: $Size"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Oid: $Oid"
+            $JSONHT = @{
+                "operation" = "download" 
+                "transfer"  = @("basic") 
+                "objects"   = @(@{"oid" = $Oid; "size" = $size })
+            }
+            $JSON = $JSONHT | ConvertTo-Json
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$JSON: $JSON"
+            if ($GitHubURI -match "^https://api.github.com/repos/(?<organisation>[^/]+)/(?<repository>[^/]+)") {
+                $Organisation = $Matches["organisation"]
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Organisation: $Organisation"
+                $Repository = $Matches["repository"]
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Repository: $Repository"
+                $NewURI = "https://github.com/$Organisation/$Repository.git/info/lfs/objects/batch"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NewURI: $NewURI"
+                $Result = Invoke-WebRequest -Method POST -Headers @{"Accept" = "application/vnd.git-lfs+json"; "Content-type" = "application/json" } -Body $JSON -Uri $NewURI -UseBasicParsing
+                $LFSDownloadURI = ($Result.Content | ConvertFrom-Json).objects.actions.download.href
+                Invoke-WebRequest -Uri $LFSDownloadURI -UseBasicParsing -OutFile $CurrentDestinationFile
+                Get-Item -Path $CurrentDestinationFile
+            }
+            else {
+                Write-Warning "Unable to determine the Organisation and the Repository from '$GitHubURI'"
+            }
+        }
+        #Non-LFS file
+        else {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $CurrentDestinationFile is NOT a LFS File"
+            Get-Item -Path $CurrentDestinationFile
+        }
+    }
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $(Get-ChildItem -Path $GitFile | Out-String)"
+    #endregion
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    return $GitFile
+}
+
 function Copy-PsAvdMSIXDemoAppAttachPackage {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -4256,15 +4336,9 @@ function Copy-PsAvdMSIXDemoAppAttachPackage {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
-    $Response = Invoke-WebRequest -Uri $URI -UseBasicParsing
-    $Objects = $Response.Content | ConvertFrom-Json
-    $Files = $Objects | Where-Object -FilterScript { $_.type -eq "file" } | Select-Object -ExpandProperty download_url
-    $VHDFileURIs = $Files -match "\.vhd$"
+    $MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhdx?$" -Destination $Destination -Verbose
+    #$MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhd$" -Destination $Destination -Verbose
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] VHD File Source URIs: $($VHDFileURIs -join ',')" 
-    #Copying the VHD package for MSIX to the MSIX file share    
-    Start-BitsTransfer -Source $VHDFileURIs -Destination $Destination
-    $MSIXDemoPackage = $VHDFileURIs | ForEach-Object -Process { Join-Path -Path $Destination -ChildPath $($_ -replace ".*/") }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $MSIXDemoPackage
 }
@@ -4275,7 +4349,10 @@ function Copy-PsAvdMSIXDemoPFXFile {
     (
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()] 
-        [string[]]$ComputerName,
+        [string[]] $ComputerName,
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()] 
+        [System.Management.Automation.PSCredential]$Credential,
         [Parameter(Mandatory = $false)]
         [ValidateNotNull()] 
         [System.Security.SecureString]$SecurePassword = $(ConvertTo-SecureString -String "P@ssw0rd" -AsPlainText -Force)
@@ -4285,20 +4362,15 @@ function Copy-PsAvdMSIXDemoPFXFile {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
-    $Response = Invoke-WebRequest -Uri $URI -UseBasicParsing
-    $Objects = $Response.Content | ConvertFrom-Json
-    $Files = $Objects | Where-Object -FilterScript { $_.type -eq "file" } | Select-Object -ExpandProperty download_url
-    $PFXFileURIs = $Files -match "\.pfx$"
-
-    #Copying the PFX files for MSIX to a temp local folder
     $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
-    #Copying the Self-Signed certificate to the MSIX file share
-    Start-BitsTransfer -Source $PFXFileURIs -Destination $TempFolder
-    $DownloadedPFXFiles = Get-ChildItem -Path $TempFolder -Filter *.pfx -File
+    $DownloadedPFXFiles = Get-GitFile -URI $URI -FileRegExPattern "\.pfx$" -Destination $TempFolder -Verbose
 
-
-    #$Session = New-PSSession -ComputerName $ComputerName -ErrorAction Ignore
-    $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
+    if ($Credential) {
+        $Session = Wait-PSSession -ComputerName $ComputerName -Credential $Credential -PassThru
+    }
+    else {
+        $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
+    }
 
     #Copying the PFX to all session hosts
     $Session | ForEach-Object -Process { Copy-Item -Path $DownloadedPFXFiles.FullName -Destination C:\ -ToSession $_ -Force }
@@ -4306,7 +4378,7 @@ function Copy-PsAvdMSIXDemoPFXFile {
     Invoke-Command -Session $Session -ScriptBlock {
         $using:DownloadedPFXFiles | ForEach-Object -Process { 
             $LocalFile = $(Join-Path -Path C: -ChildPath $_.Name)
-            #Adding the self-signed certificate to the Trusted Root Certification Authorities (To validate this certificate)
+            #Adding the self-signed certificate to the Trusted People (To validate this certificate)
             $ImportPfxCertificates = Import-PfxCertificate $LocalFile -CertStoreLocation Cert:\LocalMachine\TrustedPeople\ -Password $using:SecurePassword 
             Write-Verbose -Message $($ImportPfxCertificates | Out-String)
             #Removing the PFX file (useless now)
@@ -4317,7 +4389,7 @@ function Copy-PsAvdMSIXDemoPFXFile {
     }
     $Session | Remove-PSSession
     #Removing the Temp folder (useless now)
-    Remove-Item -Path $TempFolder -Recurse -Force
+    Remove-Item -Path $TempFolder -Recurse -Force -ErrorAction Ignore
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
@@ -4327,13 +4399,16 @@ function Wait-PSSession {
     (
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()] 
-        [string[]]$ComputerName,
+        [string[]] $ComputerName,
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()] 
         [int]$Seconds = 30,
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()] 
         [int]$Attempts = 10,
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()] 
+        [System.Management.Automation.PSCredential]$Credential,
         [switch]$PassThru
     )
 
@@ -4349,7 +4424,12 @@ function Wait-PSSession {
     Do {
         $Loop ++  
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Loop #$($Loop)"  
-        $Session = New-PSSession -ComputerName $ComputerName -ErrorAction Ignore
+        if ($Credential) {
+            $Session = New-PSSession -ComputerName $ComputerName -Credential $Credential -ErrorAction Ignore
+        }
+        else {
+            $Session = New-PSSession -ComputerName $ComputerName -ErrorAction Ignore
+        }
         if ($Session.Count -lt $ComputerName.Count) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping $Seconds Seconds"
             Start-Sleep -Seconds $Seconds
@@ -4648,16 +4728,14 @@ function New-PsAvdPersonalHostPoolSetup {
         #region Variables
         $SKUName = "Standard_LRS"
 
+        #region Getting this Azure VM and the related Virtual Network
         $ThisDomainController = Get-AzVMCompute | Get-AzVM
-        # Get the VM's network interface
-        $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
-        $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
-        # Get the subnet ID
-        $ThisDomainControllerSubnetId = $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id
-        $ThisDomainControllerSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $ThisDomainControllerSubnetId
-        # Get the vnet ID
-        $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
-        $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
+        #$ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
+        #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+        $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+        #endregion
 
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
@@ -4771,68 +4849,6 @@ function New-PsAvdPersonalHostPoolSetup {
             
             New-PsAvdHostPoolCredentialKeyVault -HostPool $CurrentHostPool
              
-            <#
-            #region Key Vault
-            #region Key Vault Name Setup
-            $CurrentHostPoolKeyVaultName = $CurrentHostPool.GetKeyVaultName()
-            #endregion 
-
-            #region Dedicated Key Vault Setup
-            $CurrentHostPoolKeyVault = Get-AzKeyVault -VaultName $CurrentHostPoolKeyVaultName -ErrorAction Ignore
-            if (-not($CurrentHostPoolKeyVault)) {
-                if (-not(Test-AzKeyVaultNameAvailability -Name $CurrentHostPoolKeyVaultName).NameAvailable) {
-                    Stop-Transcript
-                    Write-Error "The key vault name '$CurrentHostPoolKeyVaultName' is not available !" -ErrorAction Stop
-                }
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolKeyVaultName' Key Vault (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $CurrentHostPoolKeyVault = New-AzKeyVault -ResourceGroupName $CurrentHostPoolResourceGroupName -VaultName $CurrentHostPoolKeyVaultName -Location $ThisDomainControllerVirtualNetwork.Location -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
-            }
-            #endregion
-
-            #region Private endpoint for Key Vault Setup
-            #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
-            #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
-            ## Create the private endpoint connection. ## 
-
-            $PrivateEndpointName = "pep{0}" -f $($CurrentHostPoolKeyVaultName -replace "\W")
-            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolKeyVault.ResourceId).GroupId
-            $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $CurrentHostPoolKeyVault.ResourceId -GroupId $GroupId
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Key Vault '$CurrentHostPoolKeyVaultName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerSubnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
-
-            ## Create the private DNS zone. ##
-            $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
-            $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
-            if ($null -eq $PrivateDnsZone) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Key Vault '$CurrentHostPoolKeyVaultName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName
-            }
-
-            $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($ThisDomainControllerVirtualNetwork.Name -replace "\W")
-            $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
-            if ($null -eq $PrivateDnsVirtualNetworkLink) {
-                $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerVirtualNetwork.Id
-                ## Create a DNS network link. ##
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS VNet Link for the Key Vault '$CurrentHostPoolKeyVaultName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $ThisDomainControllerVirtualNetworkId
-            }
-
-
-            ## Configure the DNS zone. ##
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the Private Dns Zone Group for Key Vault '$CurrentHostPoolKeyVaultName'"
-            $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZone.Name -PrivateDnsZoneId $PrivateDnsZone.ResourceId
-
-            ## Create the DNS zone group. ##
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $CurrentHostPoolResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-
-            #Key Vault - Disabling Public Access
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault'$CurrentHostPoolKeyVaultName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $null = Update-AzKeyVault -VaultName $CurrentHostPoolKeyVaultName -ResourceGroupName $CurrentHostPoolResourceGroupName -PublicNetworkAccess "Disabled" 
-            #endregion
-
-            #endregion
-            #>
             #region Host Pool Setup
             $RegistrationInfoExpirationTime = (Get-Date).ToUniversalTime().AddDays(1)
             #Microsoft Entra ID
@@ -5261,20 +5277,18 @@ function New-PsAvdPooledHostPoolSetup {
 </FrxProfileFolderRedirection>
 '@
 
+        #region Getting this Azure VM and the related Virtual Network
         $ThisDomainController = Get-AzVMCompute | Get-AzVM
-        # Get the VM's network interface
-        $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
-        $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
-        # Get the subnet ID
-        $ThisDomainControllerSubnetId = $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id
-        $ThisDomainControllerSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $ThisDomainControllerSubnetId
-        # Get the vnet ID
-        $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
-        $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
+        #$ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
+        #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+        $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+        #endregion
 
         #$DomainName = (Get-ADDomain).DNSRoot
         #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
-        $DomainInformation = Get-ADDomain
+        $DomainInformation = (Get-ADDomain)
         $DomainGuid = $DomainInformation.ObjectGUID.ToString()
         $DomainName = $DomainInformation.DnsRoot
         #endregion 
@@ -5295,7 +5309,7 @@ function New-PsAvdPooledHostPoolSetup {
             #>
 
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; FSLogix = $Status[$CurrentHostPool.FSLogix]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot] }
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot] }
             if ($CurrentHostPool.$PreferredAppGroupType) {
                 $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
             }
@@ -5570,6 +5584,7 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
                 }
 
+                <#
                 #region Adding The Storage Account Key1 in the dedicated Key Vault
                 if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Storing the Storage Account Key in the Azure Key Vault"
@@ -5579,6 +5594,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $secret = Set-AzKeyVaultSecret -VaultName $CurrentHostPool.KeyVault.VaultName -Name $SecretName -SecretValue $SecretValue
                 }
                 #endregion
+                #>
 
                 #Registering the Storage Account with your active directory environment under the target
                 if ($CurrentHostPool.IsActiveDirectoryJoined()) {
@@ -5666,6 +5682,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                 # Save the password so the drive will persist on reboot
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
+                <#
                 #region Storage Account Key
                 if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
                     #region Getting the Storage Account Key from the Azure Key Vault
@@ -5682,19 +5699,15 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
                     #endregion
                 }
+                #>
+                #region Getting the Storage Account Key from the Storage Account
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Azure Key Vault"
+                $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                #endregion
 
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion
-
-                <#
-                #region AD User
-                $AzFileShareACEManagerUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerUserName -AsPlainText
-                $AzFileShareACEManagerPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerPassword).SecretValue
-                $AzFileShareACEManagerADUser = Get-ADUser -Identity $AzFileShareACEManagerUserName
-                $AzFileShareACEManagerCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($AzFileShareACEManagerADUser.userPrincipalName, $AzFileShareACEManagerPassword)
-                #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"$($AzFileShareACEManagerADUser.UserPrincipalName)`" /pass:`"$AzFileShareACEManagerPassword`"" -Wait -NoNewWindow
-                #endregion 
-                #>
 
                 #region Private endpoint for Storage Setup
                 #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
@@ -5706,7 +5719,7 @@ function New-PsAvdPooledHostPoolSetup {
                 $PrivateEndpointName = "pep{0}" -f $($CurrentHostPoolStorageAccountName -replace "\W")
                 $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
                 $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $CurrentHostPoolStorageAccount.Id -GroupId $GroupId
-                $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerSubnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
+                $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerVirtualNetwork.Subnets[0] -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
 
                 ## Create the private DNS zone. ##
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
@@ -5755,17 +5768,6 @@ function New-PsAvdPooledHostPoolSetup {
                     $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
 
-                    <#
-                    #region Azure File Share ACE Manager User Management
-                    #Adding the Azure File Share ACE Manager User in the AD (if not existing)
-                    $AzFileShareACEManagerADUser = Get-PsAvdAzFileShareACEManagerADUser -HostPool $CurrentHostPool
-                    #Adding the Azure File Share ACE Manager User in the roup with the "Storage File Data SMB Share Elevated Contributor" RBAC Role
-                    $CurrentHostPoolFSLogixElevatedContributorADGroup | Add-ADGroupMember -Members $AzFileShareACEManagerADUser.DistinguishedName
-                    #region Run a sync with Azure AD
-                    Start-MicrosoftEntraIDConnectSync
-                    #endregion 
-                    #endregion 
-                    #>
                     #region RBAC Management
                     #Constrain the scope to the target file share
                     $SubscriptionId = $AzContext.Subscription.Id
@@ -5831,9 +5833,10 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
 
                     # Mount the share
+                    # Temporary re-Enable storage account key access (due to SFI)
+                    $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                     Remove-PSDrive -Name Z -ErrorAction Ignore
-                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName" #-Credential $AzFileShareACEManagerCredential
-                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/k", "net use z: \\$CurrentHostPoolStorageAccountName.file.core.windows.net\profiles /user:$($AzFileShareACEManagerCredential.UserName) $($AzFileShareACEManagerCredential.GetNetworkCredential().Password)" -Wait
+                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
                     #region NTFS permissions for FSLogix
                     #From https://blue42.net/windows/changing-ntfs-security-permissions-using-powershell/
@@ -5928,9 +5931,9 @@ function New-PsAvdPooledHostPoolSetup {
             }
             #endregion
 
-            #region MSIX
+            #region MSIX or AppAttach
             #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
-            if (($CurrentHostPool.IsActiveDirectoryJoined()) -and ($CurrentHostPool.MSIX)) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -and ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach)) {
                 #region MSIX AD Management
                 #region Dedicated HostPool AD group
 
@@ -6010,7 +6013,6 @@ function New-PsAvdPooledHostPoolSetup {
                 }
                 #endregion
 
-
                 #region Dedicated Storage Account Setup
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore
                 if (-not($CurrentHostPoolStorageAccount)) {
@@ -6022,6 +6024,7 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
                 }
 
+                <#
                 #region Adding The Storage Account Key1 in the dedicated Key Vault
                 if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Storing the Storage Account Key in the Azure Key Vault"
@@ -6031,6 +6034,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $secret = Set-AzKeyVaultSecret -VaultName $CurrentHostPool.KeyVault.VaultName -Name $SecretName -SecretValue $SecretValue
                 }
                 #endregion
+                #>
 
                 #Registering the Storage Account with your active directory environment under the target
                 if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
@@ -6071,6 +6075,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #region Storage Account Key
 
                 #region Storage Account Key
+                <#
                 if ([HostPool]::UseKeyVaultForStorageAccountKey_) {
                     #region Getting the Storage Account Key from the Azure Key Vault
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Azure Key Vault"
@@ -6086,18 +6091,16 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
                     #endregion 
                 }
+                #>
+                #region Getting the Storage Account Key from the Storage Account
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Storage Account"
+                $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                #endregion 
+
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion 
 
-                <#
-                #region AD User
-                $AzFileShareACEManagerUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerUserName -AsPlainText
-                $AzFileShareACEManagerPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AzFileShareACEManagerPassword).SecretValue
-                $AzFileShareACEManagerADUser = Get-ADUser -Identity $AzFileShareACEManagerUserName
-                $AzFileShareACEManagerCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($AzFileShareACEManagerADUser.userPrincipalName, $AzFileShareACEManagerPassword)
-                #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"$($AzFileShareACEManagerADUser.UserPrincipalName)`" /pass:`"$AzFileShareACEManagerPassword`"" -Wait -NoNewWindow
-                #endregion 
-                #>
                 #region Private endpoint for Storage Setup
                 #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
                 #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
@@ -6108,7 +6111,7 @@ function New-PsAvdPooledHostPoolSetup {
                 $PrivateEndpointName = "pep{0}" -f $($CurrentHostPoolStorageAccountName -replace "\W")
                 $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
                 $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $CurrentHostPoolStorageAccount.Id -GroupId $GroupId
-                $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerSubnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
+                $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerVirtualNetwork.Subnets[0] -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
 
                 ## Create the private DNS zone. ##
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
@@ -6161,17 +6164,6 @@ function New-PsAvdPooledHostPoolSetup {
                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
-                    <#
-                    #region Azure File Share ACE Manager User Management
-                    #Adding the Azure File Share ACE Manager User in the AD (if not existing)
-                    $AzFileShareACEManagerADUser = Get-PsAvdAzFileShareACEManagerADUser -HostPool $CurrentHostPool
-                    #Adding the Azure File Share ACE Manager User in the roup with the "Storage File Data SMB Share Elevated Contributor" RBAC Role
-                    $CurrentHostPoolMSIXShareAdminsADGroup | Add-ADGroupMember -Members $AzFileShareACEManagerADUser.DistinguishedName
-                    #region Run a sync with Azure AD
-                    Start-MicrosoftEntraIDConnectSync
-                    #endregion 
-                    #endregion 
-                    #>
                     #region RBAC Management
                     #Constrain the scope to the target file share
                     $SubscriptionId = $AzContext.Subscription.Id
@@ -6232,9 +6224,10 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
 
                     # Mount the share
+                    # Temporary re-Enable storage account key access (due to SFI)
+                    $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                     Remove-PSDrive -Name Z -ErrorAction Ignore
-                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName" #-Credential $AzFileShareACEManagerCredential
-                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/k", "net use z: \\$CurrentHostPoolStorageAccountName.file.core.windows.net\profiles /user:$($AzFileShareACEManagerCredential.UserName) $($AzFileShareACEManagerCredential.GetNetworkCredential().Password)" -Wait
+                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                     
                     #region NTFS permissions for MSIX
                     #From https://docs.microsoft.com/en-us/azure/virtual-desktop/app-attach-file-share#how-to-set-up-the-file-share
@@ -6304,7 +6297,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion
             
                 #endregion
-
+                #endregion
             }
             else {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX NOT enabled for '$($CurrentHostPool.Name)' HostPool"
@@ -6357,68 +6350,6 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion 
 
             New-PsAvdHostPoolCredentialKeyVault -HostPool $CurrentHostPool
-            <#
-            #region Key Vault
-            #region Key Vault Name Setup
-            $CurrentHostPoolKeyVaultName = $CurrentHostPool.GetKeyVaultName()
-            #endregion 
-
-            #region Dedicated Key Vault Setup
-            $CurrentHostPoolKeyVault = Get-AzKeyVault -VaultName $CurrentHostPoolKeyVaultName -ErrorAction Ignore
-            if (-not($CurrentHostPoolKeyVault)) {
-                if (-not(Test-AzKeyVaultNameAvailability -Name $CurrentHostPoolKeyVaultName).NameAvailable) {
-                    Stop-Transcript
-                    Write-Error "The key vault name '$CurrentHostPoolKeyVaultName' is not available !" -ErrorAction Stop
-                }
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolKeyVaultName' Key Vault (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $CurrentHostPoolKeyVault = New-AzKeyVault -ResourceGroupName $CurrentHostPoolResourceGroupName -VaultName $CurrentHostPoolKeyVaultName -Location $ThisDomainControllerVirtualNetwork.Location -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
-            }
-            #endregion
-
-            #region Private endpoint for Key Vault Setup
-            #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
-            #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
-            ## Create the private endpoint connection. ## 
-
-            $PrivateEndpointName = "pep{0}" -f $($CurrentHostPoolKeyVaultName -replace "\W")
-            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolKeyVault.ResourceId).GroupId
-            $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $CurrentHostPoolKeyVault.ResourceId -GroupId $GroupId
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Key Vault '$CurrentHostPoolKeyVaultName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $ThisDomainControllerVirtualNetwork.Location -Subnet $ThisDomainControllerSubnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
-
-            ## Create the private DNS zone. ##
-            $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
-            $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
-            if ($null -eq $PrivateDnsZone) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Key Vault '$CurrentHostPoolKeyVaultName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName
-            }
-
-            $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($ThisDomainControllerVirtualNetwork.Name -replace "\W")
-            $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
-            if ($null -eq $PrivateDnsVirtualNetworkLink) {
-                $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerVirtualNetwork.Id
-                ## Create a DNS network link. ##
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS VNet Link for the Key Vault '$CurrentHostPoolKeyVaultName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $ThisDomainControllerVirtualNetworkId
-            }
-
-
-            ## Configure the DNS zone. ##
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the Private Dns Zone Group for Key Vault '$CurrentHostPoolKeyVaultName'"
-            $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZone.Name -PrivateDnsZoneId $PrivateDnsZone.ResourceId
-
-            ## Create the DNS zone group. ##
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $CurrentHostPoolResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-
-            #Key Vault - Disabling Public Access
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault'$CurrentHostPoolKeyVaultName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $null = Update-AzKeyVault -VaultName $CurrentHostPoolKeyVaultName -ResourceGroupName $CurrentHostPoolResourceGroupName -PublicNetworkAccess "Disabled" 
-            #endregion
-
-            #endregion
-            #>
 
             #Microsoft Entra ID
             if ($CurrentHostPool.IsMicrosoftEntraIdJoined()) {
@@ -6569,6 +6500,9 @@ function New-PsAvdPooledHostPoolSetup {
             if ($CurrentHostPool.MSIX) {
                 $Options += 'MSIX'
             }
+            if ($CurrentHostPool.AppAttach) {
+                $Options += 'AppAttach'
+            }
             if ($CurrentHostPool.Intune) {
                 $Options += 'Intune'
             }
@@ -6691,7 +6625,6 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-AVDRegistryItemProperty.ps1"
-                        Invoke-WebRequest -Uri $URI -UseBasicParsing -OutFile $ScriptPath
                         $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath
                         Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptPath, ($Result | Out-String))
                         #Remove-Item -Path $ScriptPath -Force
@@ -6705,7 +6638,6 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixRegistryItemProperty.ps1"
-                        Invoke-WebRequest -Uri $URI -UseBasicParsing -OutFile $ScriptPath
                         $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{HostPoolStorageAccountName = $CurrentHostPoolStorageAccountName }
                         Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptPath, ($Result | Out-String))
                         #Remove-Item -Path $ScriptPath -Force
@@ -6760,26 +6692,60 @@ function New-PsAvdPooledHostPoolSetup {
 
             #region MSIX
             #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
-            if (($CurrentHostPool.IsActiveDirectoryJoined()) -and ($CurrentHostPool.MSIX)) {
-                #Adding the Session Hosts to the dedicated ADGroup for MSIX 
-                #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
-                #$SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
-                #Adding Session Hosts to the dedicated AD MSIX Host group
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the Session Hosts Session Hosts to the '$($CurrentHostPoolMSIXHostsADGroup.Name)' AD Group"
-                $CurrentHostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
-                Start-MicrosoftEntraIDConnectSync
-    
-                #Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -and ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach)) {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPool : $($CurrentHostPool.Name)"
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames : $($SessionHostNames -join ',')"
-                #$result = Wait-PSSession -ComputerName $SessionHostNames
-                #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
-                Copy-PsAvdMSIXDemoPFXFile -ComputerName $SessionHostNames
 
-                #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
-                #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
-                $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" -CimSession $SessionHostNames
-                #endregion 
+                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                    #Adding the Session Hosts to the dedicated ADGroup for MSIX 
+                    #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                    #$SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
+                    #Adding Session Hosts to the dedicated AD MSIX Host group
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the Session Hosts Session Hosts to the '$($CurrentHostPoolMSIXHostsADGroup.Name)' AD Group"
+                    $CurrentHostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
+                    Start-MicrosoftEntraIDConnectSync
+                    #Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
+                    #$result = Wait-PSSession -ComputerName $SessionHostNames
+                    #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
+                    Copy-PsAvdMSIXDemoPFXFile -ComputerName $SessionHostNames
+                    #Copy-PsAvdMSIXDemoPFXFile -HostPool $CurrentHostPool
+
+                    #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
+                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
+                    $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" -CimSession $SessionHostNames
+                    #endregion 
+                }
+                else {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' is not AD joined"
+
+                    $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                    $VM = $SessionHosts.ResourceId | Get-AzVM
+                    $LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
+                    $LocalAdminPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
+                    $LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
+
+                    $PrivateIpAddress = $VM | ForEach-Object -Process {
+                        $NIC = Get-AzNetworkInterface -Name $($_.NetworkProfile.NetworkInterfaces.Id -replace ".*/")
+                        $NIC.IpConfigurations.PrivateIPAddress
+                    }
+                    #Backing up the trustedhosts value before modifying it
+                    $Trustedhosts = (Get-Item -Path WSMan:localhost\client\trustedhosts).Value
+                    Set-Item -Path WSMan:localhost\client\trustedhosts -Value $($PrivateIpAddress -join ",") -Force
+
+                    #Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
+                    #$result = Wait-PSSession -ComputerName $SessionHostNames
+                    #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
+                    Copy-PsAvdMSIXDemoPFXFile -ComputerName $PrivateIpAddress -Credential $LocalAdminCredential
+
+                    #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
+                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
+                    $CimSession = New-CimSession -ComputerName $PrivateIpAddress -Credential $LocalAdminCredential
+                    $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" -CimSession $CimSession
+                    #endregion 
+
+                    #Restoring the previous trustedhosts value
+                    Set-Item -Path WSMan:localhost\client\trustedhosts -Value $Trustedhosts -Force
+                }
 
                 #region Restarting the Session Hosts
                 $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
@@ -6789,42 +6755,130 @@ function New-PsAvdPooledHostPoolSetup {
                 $Jobs | Remove-Job -Force
                 #endregion 
 
-                #region Adding the MSIX package(s) to the Host Pool
-                #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
-                foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
-                    $obj = $null
-                    While ($null -eq $obj) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
-                        $MyError = $null
-                        #$obj = Expand-PsAvdMSIXImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage
-                        $obj = Expand-AzWvdMsixImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
-                        if (($null -eq $obj)) {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                            Start-Sleep -Seconds 30
+                #region MSIX
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -and $CurrentHostPool.MSIX) {
+                    #region Adding the MSIX package(s) to the Host Pool
+                    #Adding a script property to keep only the Application name (using the Basename property with the naming convention AppName_x.y.z.vhdx where x.y.z is the version number)
+                    $MSIXDemoPackages | Add-Member -MemberType ScriptProperty -Name AppName -Value { $this.BaseName -replace "_.*$" } -Force
+                    #Keeping only the highest version per MSI packages (only one possible version per application with MSIX)
+                    $HighestVersionMSIXDemoPackages = $MSIXDemoPackages | Sort-Object -Property BaseName -Descending  | Sort-Object -Property AppName -Unique
+                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
+                    foreach ($CurrentMSIXDemoPackage in $HighestVersionMSIXDemoPackages) {
+                        $obj = $null
+                        While ($null -eq $obj) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
+                            $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPool.GetFSLogixStorageAccountName() -AllowSharedKeyAccess $true
+                            $MyError = $null
+                            #$obj = Expand-PsAvdMSIXImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage
+                            $obj = Expand-AzWvdMsixImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
+                            if (($null -eq $obj)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                                Start-Sleep -Seconds 30
+                            }
                         }
+
+                        $DisplayName = "{0} (v{1})" -f $obj.PackageApplication.FriendlyName, $obj.Version
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName'..."
+                        New-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -PackageAlias $obj.PackageAlias -DisplayName $DisplayName -ImagePath $CurrentMSIXDemoPackage -IsActive:$true
+                        #Get-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName | Where-Object {$_.PackageFamilyName -eq $obj.PackageFamilyName}
                     }
+                    #endregion 
 
-                    $DisplayName = "{0} v{1}" -f $obj.PackageApplication.FriendlyName, $obj.Version
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName'..."
-                    New-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -PackageAlias $obj.PackageAlias -DisplayName $DisplayName -ImagePath $CurrentMSIXDemoPackage -IsActive:$true
-                    #Get-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName | Where-Object {$_.PackageFamilyName -eq $obj.PackageFamilyName}
-                }
-                #endregion 
-
-                #region Publishing MSIX apps to application groups
-                #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell#publish-msix-apps-to-an-application-group
-                #Publishing MSIX application to a desktop application group
-                $SubscriptionId = $AzContext.Subscription.Id
-                $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzDesktopApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0
+                    #region Publishing MSIX apps to application groups
+                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell#publish-msix-apps-to-an-application-group
+                    #Publishing MSIX application to a desktop application group
+                    $SubscriptionId = $AzContext.Subscription.Id
+                    $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzDesktopApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0
             
-                #Publishing MSIX application to a RemoteApp application group
-                $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $obj.PackageApplication.AppId
-                #endregion 
+                    #Publishing MSIX application to a RemoteApp application group
+                    $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $obj.PackageApplication.AppId
+                    #endregion 
+                }
+                #endregion
+
+                #region AppAttach
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -and $CurrentHostPool.AppAttach) {
+                    #region Adding the application(s) to the Host Pool
+                    #Keeping only the highest version per MSI packages (only one possible version per application with MSIX)
+                    $HighestVersionMSIXDemoPackages = $MSIXDemoPackages | Sort-Object -Property BaseName -Descending  | Sort-Object -Property AppName -Unique
+
+                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
+                    foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
+                        $app = $null
+                        While ($null -eq $app) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing MSIX Image '$CurrentMSIXDemoPackage'"
+                            $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPool.GetFSLogixStorageAccountName() -AllowSharedKeyAccess $true
+                            $MyError = $null
+                            $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
+                            if (($null -eq $app)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                                Start-Sleep -Seconds 30
+                            }
+                        }
+
+                        #if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript {$_.Name -eq $app.ImagePackageAlias})) {
+                        if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
+                            $DisplayName = "{0} v{1}" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                            $parameters = @{
+                                Name                            = $app.ImagePackageAlias
+                                ResourceGroupName               = $CurrentHostPoolResourceGroupName
+                                Location                        = $CurrentHostPool.Location
+                                FailHealthCheckOnStagingFailure = 'NeedsAssistance'
+                                ImageIsRegularRegistration      = $false
+                                ImageDisplayName                = $DisplayName
+                                ImageIsActive                   = $true
+                            }
+                            New-AzWvdAppAttachPackage -AppAttachPackage $app @parameters
+                            #Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName
+                        }
+
+                        #region Assigning an app attach package
+                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
+                        #region Host pools
+                        $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                        $parameters = @{
+                            Name              = $app.ImagePackageAlias
+                            ResourceGroupName = $CurrentHostPoolResourceGroupName
+                            HostPoolReference = $AzWvdHostPool.Id
+                        }
+
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the MSIX Image '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
+                        Update-AzWvdAppAttachPackage @parameters
+                        #endregion
+
+                        #region Groups and users
+                        $parameters = @{
+                            Name              = $app.ImagePackageAlias
+                            ResourceGroupName = $CurrentHostPoolResourceGroupName
+                        }
+
+                        $appAttachPackage = Get-AzWvdAppAttachPackage @parameters
+                        $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersAzADGroupName'"
+                        foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the MSIX Image '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
+                            New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName "Desktop Virtualization User" -Scope $appAttachPackage.Id
+                        }
+                        #endregion
+                        #endregion
+
+                        #region Publishing AppAttach application to a RemoteApp application group
+                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
+                        if ($CurrentHostPool.PreferredAppGroupType -eq [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Support.PreferredAppGroupType]::RailApplications) {
+                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
+                        }
+                        #endregion 
+
+                    }
+                    #endregion 
+                }
+                #endregion
             }
             #endregion
 
-            #region Adding Some Remote Apps
+            #region Adding Some Apps in the Remote Application Group
             #$RemoteApps = "Edge","Excel"
             #$SelectedAzWvdStartMenuItem = (Get-AzWvdStartMenuItem -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -ResourceGroupName $CurrentHostPoolResourceGroupName | Where-Object -FilterScript {$_.Name -match $($RemoteApps -join '|')} | Select-Object -Property *)
             
@@ -7077,22 +7131,13 @@ function New-PsAvdHostPoolSetup {
         }
         #endregion
 
-
-        #region Get the vnet and subnet where this DC is connected to
-        # Get the VM networking data
+        #region Getting this Azure VM and the related Virtual Network
         $ThisDomainController = Get-AzVMCompute | Get-AzVM
-        # Get the VM's network interface
-        $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
-        $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
-
-        # Get the subnet ID
-        $ThisDomainControllerSubnetId = $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id
-        # Get the vnet ID
-        $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
-        $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
-
-        # Get the subnet details
-        $ThisDomainControllerSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $ThisDomainControllerSubnetId
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
+        #$ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
+        #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+        $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
         #endregion
 
         #region AVD OU Management
@@ -7235,7 +7280,8 @@ function New-PsAvdHostPoolSetup {
 
             $ExportedFunctions = [scriptblock]::Create(@"
                 New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global
-                Function Wait-PsAvdRunPowerShell { ${Function:Wait-PsAvdRunPowerShell } }
+                Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }
+                Function Wait-PsAvdRunPowerShell { ${Function:Wait-PsAvdRunPowerShell} }
                 Function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy { ${Function:Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy} }
                 Function Set-PsAvdGPRegistryValue { ${Function:Set-PsAvdGPRegistryValue} }
                 Function New-PsAvdPooledHostPoolSetup { ${Function:New-PsAvdPooledHostPoolSetup} }
@@ -7245,6 +7291,7 @@ function New-PsAvdHostPoolSetup {
                 Function Get-AzVMCompute { ${Function:Get-AzVMCompute} }
                 Function Wait-PSSession { ${Function:Wait-PSSession} }
                 function Set-AdminConsent { ${Function:Set-AdminConsent} }
+                Function Get-GitFile { ${Function:Get-GitFile} }
                 Function Copy-PsAvdMSIXDemoAppAttachPackage { ${Function:Copy-PsAvdMSIXDemoAppAttachPackage} }
                 Function Copy-PsAvdMSIXDemoPFXFile { ${Function:Copy-PsAvdMSIXDemoPFXFile} }
                 Function Get-PsAvdKeyVaultNameAvailability { ${Function:Get-PsAvdKeyVaultNameAvailability} }
@@ -7928,7 +7975,7 @@ function Get-PsAvdMSIXProfileShare {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     foreach ($CurrentHostPool in $HostPool) {
-        if ($CurrentHostPool.MSIX) {
+        if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
             $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
             # Get the list of file shares in the storage account
             $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
@@ -8096,16 +8143,15 @@ function Import-PsAvdWorkbook {
         "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
     }
 
+    #region Getting this Azure VM and the related Virtual Network
     $ThisDomainController = Get-AzVMCompute | Get-AzVM
-    # Get the VM's network interface
-    $ThisDomainControllerNetworkInterfaceId = $ThisDomainController.NetworkProfile.NetworkInterfaces[0].Id
-    $ThisDomainControllerNetworkInterface = Get-AzNetworkInterface -ResourceId $ThisDomainControllerNetworkInterfaceId
-    # Get the subnet ID
-    $ThisDomainControllerSubnetId = $ThisDomainControllerNetworkInterface.IpConfigurations[0].Subnet.Id
-    $ThisDomainControllerSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $ThisDomainControllerSubnetId
-    # Get the vnet ID
-    $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerSubnetId -replace "/subnets/.*$"
-    $ThisDomainControllerVirtualNetwork = Get-AzResource -ResourceId $ThisDomainControllerVirtualNetworkId | Get-AzVirtualNetwork
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
+    #$ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
+    #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+    #endregion
+
     $Location = $ThisDomainControllerVirtualNetwork.Location
 
     if ($null -eq [HostPool]::AzLocationShortNameHT) {
