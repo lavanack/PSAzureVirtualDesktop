@@ -5832,9 +5832,9 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #endregion
 
-                    # Mount the share
-                    # Temporary re-Enable storage account key access (due to SFI)
+                    #Temporary Allowing storage account key access(disabled due to SFI)
                     $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
+                    # Mount the share
                     Remove-PSDrive -Name Z -ErrorAction Ignore
                     $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
@@ -5916,6 +5916,8 @@ function New-PsAvdPooledHostPoolSetup {
 
                     # Unmount the share
                     Remove-PSDrive -Name Z
+                    #Not Allowing storage account key access (SFI compliant)
+                    #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
                     #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
                     #endregion
 
@@ -6224,7 +6226,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
 
                     # Mount the share
-                    # Temporary re-Enable storage account key access (due to SFI)
+                    #Temporary Allowing storage account key access(disabled due to SFI)
                     $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                     Remove-PSDrive -Name Z -ErrorAction Ignore
                     $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
@@ -6291,6 +6293,8 @@ function New-PsAvdPooledHostPoolSetup {
 
                     # Unmount the share
                     Remove-PSDrive -Name Z
+                    #Not Allowing storage account key access (SFI compliant)
+                    #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
                     #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
                 }
                 #endregion
@@ -6767,6 +6771,7 @@ function New-PsAvdPooledHostPoolSetup {
                         $obj = $null
                         While ($null -eq $obj) {
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
+                            #Temporary Allowing storage account key access(disabled due to SFI)
                             $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPool.GetFSLogixStorageAccountName() -AllowSharedKeyAccess $true
                             $MyError = $null
                             #$obj = Expand-PsAvdMSIXImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage
@@ -6776,9 +6781,12 @@ function New-PsAvdPooledHostPoolSetup {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                                 Start-Sleep -Seconds 30
                             }
+                            #Not Allowing storage account key access (SFI compliant)
+                            #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
                         }
 
                         $DisplayName = "{0} (v{1})" -f $obj.PackageApplication.FriendlyName, $obj.Version
+                        #$DisplayName = $obj.PackageApplication.FriendlyName
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName'..."
                         New-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -PackageAlias $obj.PackageAlias -DisplayName $DisplayName -ImagePath $CurrentMSIXDemoPackage -IsActive:$true
                         #Get-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName | Where-Object {$_.PackageFamilyName -eq $obj.PackageFamilyName}
@@ -6800,14 +6808,13 @@ function New-PsAvdPooledHostPoolSetup {
                 #region AppAttach
                 if ($CurrentHostPool.IsActiveDirectoryJoined() -and $CurrentHostPool.AppAttach) {
                     #region Adding the application(s) to the Host Pool
-                    #Keeping only the highest version per MSI packages (only one possible version per application with MSIX)
-                    $HighestVersionMSIXDemoPackages = $MSIXDemoPackages | Sort-Object -Property BaseName -Descending  | Sort-Object -Property AppName -Unique
 
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
                     foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
                         $app = $null
                         While ($null -eq $app) {
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing MSIX Image '$CurrentMSIXDemoPackage'"
+                            #Temporary Allowing storage account key access(disabled due to SFI)
                             $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPool.GetFSLogixStorageAccountName() -AllowSharedKeyAccess $true
                             $MyError = $null
                             $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
@@ -6816,11 +6823,14 @@ function New-PsAvdPooledHostPoolSetup {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                                 Start-Sleep -Seconds 30
                             }
+                            #Not Allowing storage account key access (SFI compliant)
+                            #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
                         }
 
-                        #if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript {$_.Name -eq $app.ImagePackageAlias})) {
-                        if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
-                            $DisplayName = "{0} v{1}" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
+                        if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript {$_.Name -eq $app.ImagePackageAlias})) {
+                        #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
+                            $DisplayName = "{0} (v{1})" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
+                            #$DisplayName = "{0}" -f $app.ImagePackageApplication.FriendlyName
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
                             $parameters = @{
                                 Name                            = $app.ImagePackageAlias
@@ -7318,6 +7328,7 @@ function New-PsAvdHostPoolSetup {
                 $Verbose = $(( $PSBoundParameters['Verbose'] -or $VerbosePreference -eq 'Continue' ))
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Verbose: $Verbose"
                 Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPooledHostPoolSetup -HostPool $using:CurrentPooledHostPool -ADOrganizationalUnit $using:AVDRootOU -NoMFAEntraIDGroupName $using:NoMFAEntraIDGroupName -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPooledHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPooledHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdPooledHostPoolSetup' job to finish"
             }
 
             $Jobs += foreach ($CurrentPersonalHostPool in $PersonalHostPools) {
@@ -7325,11 +7336,11 @@ function New-PsAvdHostPoolSetup {
                 $Verbose = $(( $PSBoundParameters['Verbose'] -or $VerbosePreference -eq 'Continue' ))
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Verbose: $Verbose"
                 Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPersonalHostPoolSetup -HostPool $using:CurrentPersonalHostPool -ADOrganizationalUnit $using:AVDRootOU -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPersonalHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPersonalHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdPersonalHostPoolSetup' job to finish"
             }
 
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdPersonalHostPoolSetup' job to finish"
             $Jobs | Receive-Job -Wait -AutoRemoveJob
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Waiting is over for the 'New-PsAvdPersonalHostPoolSetup' job"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Waiting is over for the 'New-PsAvdPersonalHostPoolSetup' and/or 'New-PsAvdPooledHostPoolSetup' job(s)"
             #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing the background jobs"
             #$Jobs | Remove-Job -Force
         }
