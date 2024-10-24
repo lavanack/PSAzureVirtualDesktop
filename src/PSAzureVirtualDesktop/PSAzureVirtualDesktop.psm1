@@ -2808,6 +2808,78 @@ function Test-PsAvdKeyVaultNameAvailability {
     return $result
 }
 
+function Get-LocalAdminCredential {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.Azure.Commands.KeyVault.Models.PSKeyVault]$KeyVault,
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()] 
+        [int]$Attempts = 10
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    #Any negative value means infinite loop. 
+    if ($Attempts -lt 0) {
+        $Attempts = [int]::MaxValue
+    }
+    $Loop = 0
+    Do {
+        $Loop ++  
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Loop #$($Loop)"  
+        try {
+            $LocalAdminUserName = $KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
+            $LocalAdminPassword = ($KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
+            $LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
+            $Success = $true
+        }
+        catch {
+            $Success = $false
+        }
+    } While ((-not($Success)) -and ($Loop -lt $Attempts))
+     
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    return $LocalAdminCredential
+}
+
+function Get-AdjoinCredential {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true)]
+        [Microsoft.Azure.Commands.KeyVault.Models.PSKeyVault]$KeyVault,
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()] 
+        [int]$Attempts = 10
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    #Any negative value means infinite loop. 
+    if ($Attempts -lt 0) {
+        $Attempts = [int]::MaxValue
+    }
+    $Loop = 0
+    Do {
+        $Loop ++  
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Loop #$($Loop)"  
+        try {
+            $AdjoinUserName = $KeyVault | Get-AzKeyVaultSecret -Name AdJoinUserName -AsPlainText
+            $AdjoinPassword = ($KeyVault | Get-AzKeyVaultSecret -Name AdJoinPassword).SecretValue
+            $AdjoinCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($AdjoinUserName, $AdjoinPassword)
+            $Success = $true
+        }
+        catch {
+            $Success = $false
+        }
+    } While ((-not($Success)) -and ($Loop -lt $Attempts))
+     
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    return $AdjoinCredential
+}
+
 function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -2815,9 +2887,9 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
         [Parameter(Mandatory = $false)]
         [string] $Location = "EastUs",
         [Parameter(Mandatory = $false)]
-        [PSCredential] $LocalAdminCredential,
+        [System.Management.Automation.PSCredential] $LocalAdminCredential,
         [Parameter(Mandatory = $false)]
-        [PSCredential] $ADJoinCredential
+        [System.Management.Automation.PSCredential] $ADJoinCredential
     )
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -3185,7 +3257,7 @@ function Grant-PsAvdADJoinPermission {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
-        [PSCredential]$Credential,
+        [System.Management.Automation.PSCredential]$Credential,
         [Parameter(Mandatory = $true)]
         [Alias('OU')]
         [string]$OrganizationalUnit
@@ -3869,9 +3941,12 @@ function New-PsAvdSessionHost {
     }
     $null = Add-AzVMNetworkInterface -VM $VMConfig -Id $NIC.Id
 
+    <#
     $LocalAdminUserName = $KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
     $LocalAdminPassword = ($KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
     $LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
+    #>
+    $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $KeyVault
 
     #Set VM operating system parameters
     $null = Set-AzVMOperatingSystem -VM $VMConfig -Windows -ComputerName $VMName -Credential $LocalAdminCredential -ProvisionVMAgent
@@ -3940,8 +4015,14 @@ function New-PsAvdSessionHost {
         $ExtensionName = "joindomain_{0:yyyyMMddHHmmss}" -f (Get-Date)
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding '$VMName' VM to '$DomainName' AD domain"
 
+        <#
         $AdJoinUserName = $KeyVault | Get-AzKeyVaultSecret -Name AdJoinUserName -AsPlainText
         $AdJoinPassword = ($KeyVault | Get-AzKeyVaultSecret -Name AdJoinPassword).SecretValue
+        #>
+        $ADDomainJoinCredential = Get-AdjoinCredential -KeyVault $KeyVault
+        $AdJoinUserName = $ADDomainJoinCredential.UserName
+        $AdJoinPassword = $ADDomainJoinCredential.Password
+
 
         $ADDomainJoinUser = Get-ADUser -Identity $AdJoinUserName -Properties UserPrincipalName -ErrorAction Ignore
         if ([string]::IsNullOrEmpty($ADDomainJoinUser.UserPrincipalName)) {
@@ -4200,6 +4281,8 @@ function Add-PsAvdSessionHost {
             #From https://stackoverflow.com/questions/7162090/how-do-i-start-a-job-of-a-function-i-just-defined
             #From https://stackoverflow.com/questions/76844912/how-to-call-a-class-object-in-powershell-jobs
             $ExportedFunctions = [scriptblock]::Create(@"
+            Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
+            Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
             Function New-PsAvdSessionHost { ${Function:New-PsAvdSessionHost} }          
             Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }          
             Function Get-AzVMCompute { ${Function:Get-AzVMCompute} }
@@ -4336,6 +4419,7 @@ function Copy-PsAvdMSIXDemoAppAttachPackage {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
+    #$URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX/tests"
     $MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhdx?$" -Destination $Destination -Verbose
     #$MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhd$" -Destination $Destination -Verbose
 
@@ -4362,6 +4446,7 @@ function Copy-PsAvdMSIXDemoPFXFile {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
+    #$URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX/tests"
     $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
     $DownloadedPFXFiles = Get-GitFile -URI $URI -FileRegExPattern "\.pfx$" -Destination $TempFolder -Verbose
 
@@ -4813,9 +4898,13 @@ function New-PsAvdPersonalHostPoolSetup {
 
             #region Identity Provider Management
             if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AdJoinUserName -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AdJoinPassword).SecretValue
                 $AdJoinCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($AdJoinUserName, $AdJoinPassword)
+                #>
+                $AdJoinCredential = Get-AdjoinCredential -KeyVault $CurrentHostPool.KeyVault
+
                 Grant-PsAvdADJoinPermission -Credential $AdJoinCredential -OrganizationalUnit $CurrentHostPoolOU.DistinguishedName
                 $Tag['IdentityProvider'] = "Active Directory Directory Services"
             }
@@ -6320,9 +6409,12 @@ function New-PsAvdPooledHostPoolSetup {
 
             #region Identity Provider Management
             if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AdJoinUserName -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name AdJoinPassword).SecretValue
                 $AdJoinCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($AdJoinUserName, $AdJoinPassword)
+                #>
+                $AdJoinCredential = Get-AdjoinCredential -KeyVault $CurrentHostPool.KeyVault
                 Grant-PsAvdADJoinPermission -Credential $AdJoinCredential -OrganizationalUnit $CurrentHostPoolOU.DistinguishedName
                 $Tag['IdentityProvider'] = "Active Directory Directory Services"
             }
@@ -6593,7 +6685,9 @@ function New-PsAvdPooledHostPoolSetup {
                 #region Configure the clients to retrieve Kerberos tickets
                 # From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-powershell#configure-the-clients-to-retrieve-kerberos-tickets
                 # From https://learn.microsoft.com/en-us/azure/virtual-desktop/create-profile-container-azure-ad#configure-the-session-hosts
-                $LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
+                #$LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
+                $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
+                $LocalAdminUserName = $LocalAdminCredential.UserName
                 foreach ($CurrentSessionHostName in $SessionHostNames) {
                     $ScriptString = 'Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters" -Name "CloudKerberosTicketRetrievalEnabled" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
                     # Run PowerShell script on the VM
@@ -6724,9 +6818,12 @@ function New-PsAvdPooledHostPoolSetup {
 
                     $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     $VM = $SessionHosts.ResourceId | Get-AzVM
+                    <#
                     $LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
                     $LocalAdminPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
                     $LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
+                    #>
+                    $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
 
                     $PrivateIpAddress = $VM | ForEach-Object -Process {
                         $NIC = Get-AzNetworkInterface -Name $($_.NetworkProfile.NetworkInterfaces.Id -replace ".*/")
@@ -7290,6 +7387,8 @@ function New-PsAvdHostPoolSetup {
 
             $ExportedFunctions = [scriptblock]::Create(@"
                 New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global
+                Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
+                Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
                 Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }
                 Function Wait-PsAvdRunPowerShell { ${Function:Wait-PsAvdRunPowerShell} }
                 Function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy { ${Function:Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy} }
@@ -7611,9 +7710,12 @@ function New-PsAvdRdcMan {
 
         if ($CurrentHostPool.IsMicrosoftEntraIdJoined()) {
             if ($null -ne $CurrentHostPool.KeyVault) {
+                <#
                 $LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
                 $LocalAdminPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
                 $LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
+                #>
+                $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
                 $RDCManCredential = $LocalAdminCredential
             }
             else {
@@ -7833,9 +7935,12 @@ function New-PsAvdRdcManV2 {
 
         if ($CurrentHostPool.IsMicrosoftEntraIdJoined()) {
             if ($null -ne $CurrentHostPool.KeyVault) {
+                <#
                 $LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
                 $LocalAdminPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
                 $LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
+                #>
+                $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
                 $RDCManCredential = $LocalAdminCredential
             }
             else {
