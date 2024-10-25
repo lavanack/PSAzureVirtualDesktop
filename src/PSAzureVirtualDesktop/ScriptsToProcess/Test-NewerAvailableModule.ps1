@@ -1,3 +1,4 @@
+#region function definitions
 Function Test-NewerAvailableModule {
     [CmdletBinding()]
     Param (
@@ -23,5 +24,6 @@ Function Test-NewerAvailableModule {
     }
     Write-Verbose -Message "Leaving function '$($MyInvocation.MyCommand)'"
 }
+#endregion
 
 Test-NewerAvailableModule #-Verbose
