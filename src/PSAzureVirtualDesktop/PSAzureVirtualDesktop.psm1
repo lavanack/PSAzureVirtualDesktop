@@ -883,6 +883,13 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
                     BuiltInControls = @("Mfa")
                     Operator        = "OR"
                 }
+                SessionControls = @{
+                    SignInFrequency = @{
+                        Value = 1
+                        Type = "hours"
+                        IsEnabled = $true
+                    }
+                }
             }
             if (-not($MFAForAllUsersConditionalAccessPolicy)) {
                 # Define the policy properties
@@ -2754,6 +2761,17 @@ function Test-PsAvdStorageAccountNameAvailability {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    #region Pester Tests for Host Pool - Class Instantiation
+    $ModuleBase = Get-ModuleBase
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+    $HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
+    $Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
+    Invoke-Pester -Container $Container -Output Detailed -Verbose
+    #endregion
 
     $result = $true
     foreach ($CurrentHostPool in $HostPool) {
@@ -5038,7 +5056,7 @@ function New-PsAvdPersonalHostPoolSetup {
             #region Workspace Setup
             $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.IdentityProvider
             if ($CurrentHostPool.ScalingPlan) {
-                $Options += 'ScalinPlan'
+                $Options += 'ScalingPlan'
             }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Options += 'Azure Compte Gallery'
@@ -5144,17 +5162,21 @@ function New-PsAvdPersonalHostPoolSetup {
             } While ($null -eq $LogAnalyticsWorkSpace)
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
             Start-Sleep -Seconds 30
+
             #region Enabling Diagnostics Setting for the HostPool
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the '$($CurrentAzWvdHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $Categories = "Checkpoint", "Error", "Management", "Connection", "HostRegistration", "AgentHealthStatus"
+            <#
+            $Categories = "Checkpoint", "Error", "Management", "Connection", "HostRegistration", "AgentHealthStatus", "NetworkData", "AutoscaleEvaluationPooled"
             $Log = $Categories | ForEach-Object {
                 New-AzDiagnosticSettingLogSettingsObject -Enabled $true -Category $_ 
             }
+            #>
+            $Log = New-AzDiagnosticSettingLogSettingsObject -Enabled $true -CategoryGroup allLogs 
             $HostPoolDiagnosticSetting = New-AzDiagnosticSetting -Name $CurrentAzWvdHostPool.Name -ResourceId $CurrentAzWvdHostPool.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Log $Log
             #endregion
 
             #region Enabling Diagnostics Setting for the WorkSpace
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the  '$($CurrentAzWvdWorkspace.Name)' Work Space"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the '$($CurrentAzWvdWorkspace.Name)' Work Space"
             <#
             $Categories = "Checkpoint", "Error", "Management", "Feed"
             $Log = $Categories | ForEach-Object {
@@ -5164,6 +5186,19 @@ function New-PsAvdPersonalHostPoolSetup {
             $Log = New-AzDiagnosticSettingLogSettingsObject -Enabled $true -CategoryGroup allLogs 
             $WorkSpaceDiagnosticSetting = New-AzDiagnosticSetting -Name $CurrentAzWvdWorkspace.Name -ResourceId $CurrentAzWvdWorkspace.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Log $Log
             #endregion
+
+            #region Enabling Diagnostics Setting for the Desktop Application Group
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the '$($CurrentAzDesktopApplicationGroup.Name)' Work Space"
+            <#
+            $Categories = "Checkpoint", "Error", "Management"
+            $Log = $Categories | ForEach-Object {
+                New-AzDiagnosticSettingLogSettingsObject -Enabled $true -Category $_ 
+            }
+            #>
+            $Log = New-AzDiagnosticSettingLogSettingsObject -Enabled $true -CategoryGroup allLogs 
+            $DesktopApplicationGroupDiagnosticSetting = New-AzDiagnosticSetting -Name $CurrentAzDesktopApplicationGroup.Name -ResourceId $CurrentAzDesktopApplicationGroup.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Log $Log
+            #endregion
+
             #endregion
 
             #region Installing Azure Monitor Windows Agent on Virtual Machine(s)
@@ -5272,8 +5307,9 @@ function New-PsAvdPersonalHostPoolSetup {
             $DataCollectionEndpointName = "dce-{0}" -f $LogAnalyticsWorkSpace.Name
             $DataCollectionEndpoint = New-AzDataCollectionEndpoint -Name $DataCollectionEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -NetworkAclsPublicNetworkAccess Enabled
             #>
-            $DataCollectionRuleName = "dcr-{0}" -f $LogAnalyticsWorkSpace.Name
-            $DataFlow = New-AzDataFlowObject -Stream Microsoft-Perf, Microsoft-Event -Destination $LogAnalyticsWorkSpace.Name
+            #From https://www.reddit.com/r/AZURE/comments/1ddac0z/avd_insights_dcr_does_not_appear/?tl=fr
+            $DataCollectionRuleName = "microsoft-avdi-{0}" -f $LogAnalyticsWorkSpace.Location
+            $DataFlow = New-AzDataFlowObject -Stream Microsoft-InsightsMetrics, Microsoft-Perf, Microsoft-Event -Destination $LogAnalyticsWorkSpace.Name
             $DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
             $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounters -DataSourceWindowsEventLog $WindowsEventLogs -DestinationLogAnalytic $DestinationLogAnalytic #-DataCollectionEndpointId $DataCollectionEndpoint.Id
             #endregion
@@ -5287,12 +5323,54 @@ function New-PsAvdPersonalHostPoolSetup {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AssociationName: $AssociationName"
                 New-AzDataCollectionRuleAssociation -ResourceUri $CurrentSessionHost.ResourceId -AssociationName $AssociationName #-DataCollectionEndpointId $DataCollectionEndpoint.Id
                 #>
-                $AssociationName = "dcr-{0}" -f $($CurrentSessionHost.ResourceId -replace ".*/").ToLower()
+                #$AssociationName = "dcr-{0}" -f $($CurrentSessionHost.ResourceId -replace ".*/").ToLower()
+                $AssociationName = "{0}-VMInsights-Dcr-Association" -f $($CurrentSessionHost.ResourceId -replace ".*/").ToLower()
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Associating the '$($DataCollectionRule.Name)' Data Collection Rule with the '$($CurrentSessionHost.Name)' Session Host "
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AssociationName: $AssociationName"
                 New-AzDataCollectionRuleAssociation -ResourceUri $CurrentSessionHost.ResourceId -AssociationName $AssociationName -DataCollectionRuleId $DataCollectionRule.Id
             }
             #endregion
+
+            #region Enable VM insights on Virtual Machine(s)
+            #From http://aka.ms/OnBoardVMInsights
+            #From https://learn.microsoft.com/en-us/azure/azure-monitor/vm/vminsights-enable?tabs=powershell#enable-vm-insights-1
+            if (-not(Get-InstalledScript -Name Install-VMInsights)) {
+                Install-Script -Name Install-VMInsights -Force
+            }
+            else {
+                Update-Script -Name Install-VMInsights -Force
+            }
+            $UserAssignedManagedIdentityName = "uami-{0}" -f $CurrentHostPool.Name
+            $UserAssignedManagedIdentity = Get-AzUserAssignedIdentity -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $UserAssignedManagedIdentityName -ErrorAction Ignore
+            if (-not($UserAssignedManagedIdentity)) {
+                $UserAssignedManagedIdentity = New-AzUserAssignedIdentity -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $UserAssignedManagedIdentityName -Location $CurrentHostPool.Location
+            }
+
+            #region Data Collection Rule for VM Insights
+            $DataCollectionRuleName = "MSVMI-{0}" -f $LogAnalyticsWorkspaceName
+            $DataFlow = New-AzDataFlowObject -Stream Microsoft-InsightsMetrics -Destination $LogAnalyticsWorkspaceName
+            $PerformanceCounter = New-AzPerfCounterDataSourceObject -CounterSpecifier "\VmInsights\DetailedMetrics" -Name VMInsightsPerfCounters -SamplingFrequencyInSecond 60 -Stream Microsoft-InsightsMetrics
+            #$DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
+            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $ResourceGroupName -Location $Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounter -DestinationLogAnalytic $DestinationLogAnalytic
+            #endregion
+
+            #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+            if (-not([string]::IsNullOrEmpty($SessionHosts.ResourceId))) {
+                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                foreach ($CurrentSessionHostVM in $SessionHostVMs) {
+                    $Parameters = @{
+                        SubscriptionId                           = (Get-AzContext).Subscription.Id
+                        ResourceGroup                            = $CurrentHostPoolResourceGroupName
+                        Name                                     = $CurrentSessionHostVM.Name
+                        DcrResourceId                            = $DataCollectionRule.Id
+                        UserAssignedManagedIdentityName          = $UserAssignedManagedIdentity.Name
+                        UserAssignedManagedIdentityResourceGroup = $UserAssignedManagedIdentity.ResourceGroupName
+                        Approve                                  = $true
+                    }
+                    Install-VMInsights.ps1 @Parameters
+                }
+            }
+            #endregion 
 
             $CurrentHostPoolEndTime = Get-Date
             $TimeSpan = New-TimeSpan -Start $CurrentHostPoolStartTime -End $CurrentHostPoolEndTime
@@ -5528,7 +5606,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Verbose -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "IsDynamic" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
 
                     $null = Set-PsAvdGPRegistryValue -Verbose -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "VHDLocations" -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
-                    #Use Redirections.xml. Be careful : https://twitter.com/JimMoyle/status/1247843511413755904w
+                    #Use Redirections.xml. Be careful : https://twitter.com/JimMoyle/status/1247843511413755904
                     $null = Set-PsAvdGPRegistryValue -Verbose -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "RedirXMLSourceFolder" -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles"
 
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#disable-automatic-updates
@@ -7023,21 +7101,50 @@ function New-PsAvdPooledHostPoolSetup {
             #region Enabling Diagnostics Setting for the HostPool
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the '$($CurrentAzWvdHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
             #$HostPoolDiagnosticSetting = Set-AzDiagnosticSetting -Name $CurrentAzWvdHostPool.Name -ResourceId $CurrentAzWvdHostPool.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Enabled $true -Category "Checkpoint", "Error", "Management", "Connection", "HostRegistration", "AgentHealthStatus"
-            $Categories = "Checkpoint", "Error", "Management", "Connection", "HostRegistration", "AgentHealthStatus"
+            <#
+            $Categories = "Checkpoint", "Error", "Management", "Connection", "HostRegistration", "AgentHealthStatus", "NetworkData", "AutoscaleEvaluationPooled"
             $Log = $Categories | ForEach-Object {
                 New-AzDiagnosticSettingLogSettingsObject -Enabled $true -Category $_ 
             }
+            #>
+            $Log = New-AzDiagnosticSettingLogSettingsObject -Enabled $true -CategoryGroup allLogs 
             $HostPoolDiagnosticSetting = New-AzDiagnosticSetting -Name $CurrentAzWvdHostPool.Name -ResourceId $CurrentAzWvdHostPool.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Log $Log
             #endregion
 
             #region Enabling Diagnostics Setting for the WorkSpace
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the  '$($CurrentAzWvdWorkspace.Name)' Work Space"
-            #$WorkSpaceDiagnosticSetting = Set-AzDiagnosticSetting -Name $CurrentAzWvdWorkspace.Name -ResourceId $CurrentAzWvdWorkspace.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Enabled $true -Category "Checkpoint", "Error", "Management", "Feed"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the '$($CurrentAzWvdWorkspace.Name)' Work Space"
+            <#
             $Categories = "Checkpoint", "Error", "Management", "Feed"
             $Log = $Categories | ForEach-Object {
                 New-AzDiagnosticSettingLogSettingsObject -Enabled $true -Category $_ 
             }
+            #>
+            $Log = New-AzDiagnosticSettingLogSettingsObject -Enabled $true -CategoryGroup allLogs 
             $WorkSpaceDiagnosticSetting = New-AzDiagnosticSetting -Name $CurrentAzWvdWorkspace.Name -ResourceId $CurrentAzWvdWorkspace.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Log $Log
+            #endregion
+
+            #region Enabling Diagnostics Setting for the Desktop Application Group
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the '$($CurrentAzDesktopApplicationGroup.Name)' Work Space"
+            <#
+            $Categories = "Checkpoint", "Error", "Management"
+            $Log = $Categories | ForEach-Object {
+                New-AzDiagnosticSettingLogSettingsObject -Enabled $true -Category $_ 
+            }
+            #>
+            $Log = New-AzDiagnosticSettingLogSettingsObject -Enabled $true -CategoryGroup allLogs 
+            $DesktopApplicationGroupDiagnosticSetting = New-AzDiagnosticSetting -Name $CurrentAzDesktopApplicationGroup.Name -ResourceId $CurrentAzDesktopApplicationGroup.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Log $Log
+            #endregion
+
+            #region Enabling Diagnostics Setting for the Remote Application Group
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling Diagnostics Setting for the '$($CurrentAzRemoteApplicationGroup.Name)' Work Space"
+            <#
+            $Categories = "Checkpoint", "Error", "Management"
+            $Log = $Categories | ForEach-Object {
+                New-AzDiagnosticSettingLogSettingsObject -Enabled $true -Category $_ 
+            }
+            #>
+            $Log = New-AzDiagnosticSettingLogSettingsObject -Enabled $true -CategoryGroup allLogs 
+            $RemoteApplicationGroupDiagnosticSetting = New-AzDiagnosticSetting -Name $CurrentAzRemoteApplicationGroup.Name -ResourceId $CurrentAzRemoteApplicationGroup.Id -WorkspaceId $LogAnalyticsWorkSpace.ResourceId -Log $Log
             #endregion
             #endregion
 
@@ -7147,8 +7254,9 @@ function New-PsAvdPooledHostPoolSetup {
             $DataCollectionEndpointName = "dce-{0}" -f $LogAnalyticsWorkSpace.Name
             $DataCollectionEndpoint = New-AzDataCollectionEndpoint -Name $DataCollectionEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -NetworkAclsPublicNetworkAccess Enabled
             #>
-            $DataCollectionRuleName = "dcr-{0}" -f $LogAnalyticsWorkSpace.Name
-            $DataFlow = New-AzDataFlowObject -Stream Microsoft-Perf, Microsoft-Event -Destination $LogAnalyticsWorkSpace.Name
+            #From https://www.reddit.com/r/AZURE/comments/1ddac0z/avd_insights_dcr_does_not_appear/?tl=fr
+            $DataCollectionRuleName = "microsoft-avdi-{0}" -f $LogAnalyticsWorkSpace.Location
+            $DataFlow = New-AzDataFlowObject -Stream Microsoft-InsightsMetrics, Microsoft-Perf, Microsoft-Event -Destination $LogAnalyticsWorkSpace.Name
             $DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
             $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounters -DataSourceWindowsEventLog $WindowsEventLogs -DestinationLogAnalytic $DestinationLogAnalytic #-DataCollectionEndpointId $DataCollectionEndpoint.Id
             #endregion
@@ -7162,12 +7270,55 @@ function New-PsAvdPooledHostPoolSetup {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AssociationName: $AssociationName"
                 New-AzDataCollectionRuleAssociation -ResourceUri $CurrentSessionHost.ResourceId -AssociationName $AssociationName -DataCollectionEndpointId $DataCollectionEndpoint.Id
                 #>
-                $AssociationName = "dcr-{0}" -f $($CurrentSessionHost.ResourceId -replace ".*/").ToLower()
+                #$AssociationName = "dcr-{0}" -f $($CurrentSessionHost.ResourceId -replace ".*/").ToLower()
+                $AssociationName = "{0}-VMInsights-Dcr-Association" -f $($CurrentSessionHost.ResourceId -replace ".*/").ToLower()
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Associating the '$($DataCollectionRule.Name)' Data Collection Rule with the '$($CurrentSessionHost.Name)' Session Host "
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AssociationName: $AssociationName"
                 New-AzDataCollectionRuleAssociation -ResourceUri $CurrentSessionHost.ResourceId -AssociationName $AssociationName -DataCollectionRuleId $DataCollectionRule.Id
             }
             #endregion
+
+            #region Enable VM insights on Virtual Machine(s)
+            #From http://aka.ms/OnBoardVMInsights
+            #From https://learn.microsoft.com/en-us/azure/azure-monitor/vm/vminsights-enable?tabs=powershell#enable-vm-insights-1
+            if (-not(Get-InstalledScript -Name Install-VMInsights)) {
+                Install-Script -Name Install-VMInsights -Force
+            }
+            else {
+                Update-Script -Name Install-VMInsights -Force
+            }
+            $UserAssignedManagedIdentityName = "uami-{0}" -f $CurrentHostPool.Name
+            $UserAssignedManagedIdentity = Get-AzUserAssignedIdentity -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $UserAssignedManagedIdentityName -ErrorAction Ignore
+            if (-not($UserAssignedManagedIdentity)) {
+                $UserAssignedManagedIdentity = New-AzUserAssignedIdentity -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $UserAssignedManagedIdentityName -Location $CurrentHostPool.Location
+            }
+
+            #region Data Collection Rule for VM Insights
+            $DataCollectionRuleName = "MSVMI-{0}" -f $LogAnalyticsWorkspaceName
+            $DataFlow = New-AzDataFlowObject -Stream Microsoft-InsightsMetrics -Destination $LogAnalyticsWorkspaceName
+            $PerformanceCounter = New-AzPerfCounterDataSourceObject -CounterSpecifier "\VmInsights\DetailedMetrics" -Name VMInsightsPerfCounters -SamplingFrequencyInSecond 60 -Stream Microsoft-InsightsMetrics
+            #$DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
+            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $ResourceGroupName -Location $Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounter -DestinationLogAnalytic $DestinationLogAnalytic
+            #endregion
+
+
+            #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+            if (-not([string]::IsNullOrEmpty($SessionHosts.ResourceId))) {
+                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                foreach ($CurrentSessionHostVM in $SessionHostVMs) {
+                    $Parameters = @{
+                        SubscriptionId                           = (Get-AzContext).Subscription.Id
+                        ResourceGroup                            = $CurrentHostPoolResourceGroupName
+                        Name                                     = $CurrentSessionHostVM.Name
+                        DcrResourceId                            = $DataCollectionRule.Id
+                        UserAssignedManagedIdentityName          = $UserAssignedManagedIdentity.Name
+                        UserAssignedManagedIdentityResourceGroup = $UserAssignedManagedIdentity.ResourceGroupName
+                        Approve                                  = $true
+                    }
+                    Install-VMInsights.ps1 @Parameters
+                }
+            }
+            #endregion 
 
             $CurrentHostPoolEndTime = Get-Date
             $TimeSpan = New-TimeSpan -Start $CurrentHostPoolStartTime -End $CurrentHostPoolEndTime
