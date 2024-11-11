@@ -5351,7 +5351,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $DataFlow = New-AzDataFlowObject -Stream Microsoft-InsightsMetrics -Destination $LogAnalyticsWorkspaceName
             $PerformanceCounter = New-AzPerfCounterDataSourceObject -CounterSpecifier "\VmInsights\DetailedMetrics" -Name VMInsightsPerfCounters -SamplingFrequencyInSecond 60 -Stream Microsoft-InsightsMetrics
             #$DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
-            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $ResourceGroupName -Location $Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounter -DestinationLogAnalytic $DestinationLogAnalytic
+            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounter -DestinationLogAnalytic $DestinationLogAnalytic
             #endregion
 
             #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
@@ -7298,7 +7298,7 @@ function New-PsAvdPooledHostPoolSetup {
             $DataFlow = New-AzDataFlowObject -Stream Microsoft-InsightsMetrics -Destination $LogAnalyticsWorkspaceName
             $PerformanceCounter = New-AzPerfCounterDataSourceObject -CounterSpecifier "\VmInsights\DetailedMetrics" -Name VMInsightsPerfCounters -SamplingFrequencyInSecond 60 -Stream Microsoft-InsightsMetrics
             #$DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
-            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $ResourceGroupName -Location $Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounter -DestinationLogAnalytic $DestinationLogAnalytic
+            $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounter -DestinationLogAnalytic $DestinationLogAnalytic
             #endregion
 
 
