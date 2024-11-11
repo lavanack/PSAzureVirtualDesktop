@@ -6,12 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Change log for PSAzureVirtualDesktop](#change-log-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
-  - [\[1.0.2\] - 2024-09-27](#102---2024-09-27)
+  - [\[1.0.3\] - 2024-10-24](#103---2024-10-24)
     - [Changed](#changed-1)
-  - [\[1.0.1\] - 2024-09-06](#101---2024-09-06)
+  - [\[1.0.2\] - 2024-09-27](#102---2024-09-27)
     - [Changed](#changed-2)
-  - [\[1.0.0\] - 2024-09-05](#100---2024-09-05)
+  - [\[1.0.1\] - 2024-09-06](#101---2024-09-06)
     - [Changed](#changed-3)
+  - [\[1.0.0\] - 2024-09-05](#100---2024-09-05)
+    - [Changed](#changed-4)
 
   
 ## [Unreleased]
@@ -21,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated CHANGELOG.md
 - 2024-09-05 - Created CHANGELOG.md
 
+
+## [1.0.3] - 2024-10-24
+
+### Changed
+
+- Changing credential management by adding [Get-LocalAdminCredential](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-LocalAdminCredential) and [Get-AdjoinCredential](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-AdjoinCredential) functions
+- Minor fixes
+  
 ## [1.0.2] - 2024-09-27
 
 ### Changed
