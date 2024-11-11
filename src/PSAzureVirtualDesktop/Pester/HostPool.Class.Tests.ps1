@@ -13,6 +13,10 @@ Describe "<_.Name> HostPool - Class Instantiation" -ForEach $HostPool {
             $_ | Should -BeOfType -ExpectedType HostPool #-ErrorAction Stop
         }
 
+        It  '<_.Name> has a Name' {
+            $_.Name | Should -Not -BeNullOrEmpty #-ErrorAction Stop
+        }
+
         It '<_.Name> has a valid Azure location' {
             $_.Location | Should -BeIn $AzLocation #-ErrorAction Stop
         }
