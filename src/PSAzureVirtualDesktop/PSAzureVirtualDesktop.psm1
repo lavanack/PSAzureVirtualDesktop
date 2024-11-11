@@ -864,8 +864,8 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex" -Verbose
             $MFAForAllUsersConditionalAccessPolicy = Get-MgBetaIdentityConditionalAccessPolicy -Filter "displayName eq '$DisplayName'"
             $policyProperties = @{
-                State         = "Enabled"
-                Conditions    = @{
+                State           = "Enabled"
+                Conditions      = @{
                     Applications = @{
                         IncludeApplications = @((Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Virtual Desktop'").AppId)
                     }
@@ -879,14 +879,14 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
                         IncludeLocations = @("All")
                     }
                 }
-                GrantControls = @{
+                GrantControls   = @{
                     BuiltInControls = @("Mfa")
                     Operator        = "OR"
                 }
                 SessionControls = @{
                     SignInFrequency = @{
-                        Value = 1
-                        Type = "hours"
+                        Value     = 1
+                        Type      = "hours"
                         IsEnabled = $true
                     }
                 }
@@ -2756,6 +2756,7 @@ function Test-PsAvdStorageAccountNameAvailability {
     Param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
+
         [HostPool[]] $HostPool
     )
 
@@ -5332,7 +5333,6 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             #region Enable VM insights on Virtual Machine(s)
-            #From http://aka.ms/OnBoardVMInsights
             #From https://learn.microsoft.com/en-us/azure/azure-monitor/vm/vminsights-enable?tabs=powershell#enable-vm-insights-1
             if (-not(Get-InstalledScript -Name Install-VMInsights)) {
                 Install-Script -Name Install-VMInsights -Force
@@ -7002,8 +7002,8 @@ function New-PsAvdPooledHostPoolSetup {
                             #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
                         }
 
-                        if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript {$_.Name -eq $app.ImagePackageAlias})) {
-                        #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
+                        if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias })) {
+                            #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
                             $DisplayName = "{0} (v{1})" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
                             #$DisplayName = "{0}" -f $app.ImagePackageApplication.FriendlyName
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
