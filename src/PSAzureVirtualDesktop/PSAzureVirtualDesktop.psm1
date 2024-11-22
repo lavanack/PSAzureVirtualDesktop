@@ -163,7 +163,7 @@ Class HostPool {
     }
 
     [object] GetPropertyForJSON() {
-        return $this | Select-Object -Property *, @{Name = "ResourceGroupName"; Expression = { $_.GetResourceGroupName() } }, @{Name = "KeyVaultName"; Expression = { $_.GetKeyVaultName() } }, @{Name = "LogAnalyticsWorkSpaceName"; Expression = { $_.GetLogAnalyticsWorkSpaceName() } } -ExcludeProperty "KeyVault"
+        return $this | Select-Object -Property *, @{Name = "ResourceGroupName"; Expression = { $_.GetResourceGroupName() } }, @{Name = "KeyVaultName"; Expression = { $_.GetKeyVaultName() } }, @{Name = "LogAnalyticsWorkSpaceName"; Expression = { $_.GetLogAnalyticsWorkSpaceName() } } #-ExcludeProperty "KeyVault"
     }
 
 
@@ -2756,7 +2756,6 @@ function Test-PsAvdStorageAccountNameAvailability {
     Param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-
         [HostPool[]] $HostPool
     )
 
@@ -4736,7 +4735,6 @@ function Remove-PsAvdHostPoolSetup {
     }
     #endregion
 
-
     #region Azure Cleanup
     <#
     $HostPools = (Get-AzWvdHostPool | Where-Object -FilterScript {$_.Name -in $($HostPools.Name)})
@@ -4793,6 +4791,12 @@ function Remove-PsAvdHostPoolSetup {
     $Jobs | Remove-Job
     #endregion
     #endregion
+
+    #region Azure Monitor Baseline Alerts for Azure Virtual Desktop Cleanup
+    $Job = Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPools.Name -join "|") } | Remove-AzMetricAlertRuleV2 -Verbose -AsJob
+    Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match $($HostPools.Name -join "|") } | Remove-AzScheduledQueryRule -Verbose
+    $Job | Receive-Job -Wait -AutoRemoveJob
+    #endregion 
     #endregion
 
     #region Run a sync with Azure AD
@@ -8332,12 +8336,22 @@ function New-PsAvdScalingPlan {
         }
         else {
             if ($CurrentHostPoolWithScalingPlan.HibernationEnabled) {
-                $PeakActionOnDisconnect = 'Hibernate'
-                $RampDownActionOnLogoff = 'Hibernate'
+                $PeakActionOnDisconnect    = 'Hibernate'
+                $RampDownActionOnLogoff    = 'Hibernate'
+                $RampUpActionOnDisconnect  = 'Hibernate'
+                $RampUpActionOnLogoff      = 'Hibernate'
+                $PeakActionOnLogoff        = 'Hibernate'
+                $OffPeakActionOnDisconnect = 'Hibernate'
+                $OffPeakActionOnLogoff     = 'Hibernate'
             }
             else {
-                $PeakActionOnDisconnect = 'Deallocate '
-                $RampDownActionOnLogoff = 'Deallocate '
+                $PeakActionOnDisconnect    = 'Deallocate'
+                $RampDownActionOnLogoff    = 'Deallocate'
+                $RampUpActionOnDisconnect  = 'Deallocate'
+                $RampUpActionOnLogoff      = 'Deallocate'
+                $PeakActionOnLogoff        = 'Deallocate'
+                $OffPeakActionOnDisconnect = 'Deallocate'
+                $OffPeakActionOnLogoff     = 'Deallocate'
             }
             $scalingPlanPersonalScheduleParams = @{
                 ResourceGroupName                 = $ResourceGroupName
@@ -8349,16 +8363,16 @@ function New-PsAvdScalingPlan {
                 RampUpAutoStartHost               = 'WithAssignedUser'
                 RampUpStartVMOnConnect            = 'Enable'
                 RampUpMinutesToWaitOnDisconnect   = '30'
-                RampUpActionOnDisconnect          = 'Deallocate'
-                RampUpMinutesToWaitOnLogoff       = '3'
-                RampUpActionOnLogoff              = 'Deallocate'
-                PeakStartTimeHour                 = '9'
+                RampUpActionOnDisconnect          = $RampUpActionOnDisconnect
+                RampUpMinutesToWaitOnLogoff       = '30'
+                RampUpActionOnLogoff              = $RampUpActionOnLogoff
+                PeakStartTimeHour                 = '10'
                 PeakStartTimeMinute               = '0'
                 PeakStartVMOnConnect              = 'Enable'
                 PeakMinutesToWaitOnDisconnect     = '10'
                 PeakActionOnDisconnect            = $PeakActionOnDisconnect
                 PeakMinutesToWaitOnLogoff         = '15'
-                PeakActionOnLogoff                = 'Deallocate'
+                PeakActionOnLogoff                = $PeakActionOnLogoff
                 RampDownStartTimeHour             = '18'
                 RampDownStartTimeMinute           = '0'
                 RampDownStartVMOnConnect          = 'Disable'
@@ -8370,9 +8384,9 @@ function New-PsAvdScalingPlan {
                 OffPeakStartTimeMinute            = '0'
                 OffPeakStartVMOnConnect           = 'Disable'
                 OffPeakMinutesToWaitOnDisconnect  = '10'
-                OffPeakActionOnDisconnect         = 'Deallocate'
+                OffPeakActionOnDisconnect         = $OffPeakActionOnDisconnect
                 OffPeakMinutesToWaitOnLogoff      = '15'
-                OffPeakActionOnLogoff             = 'Deallocate'
+                OffPeakActionOnLogoff             = $OffPeakActionOnLogoff
                 #Verbose                           = $true
             }
 
@@ -8392,6 +8406,111 @@ function New-PsAvdScalingPlan {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+#From https://azure.github.io/azure-monitor-baseline-alerts/patterns/specialized/avd/
+function New-PsAvdAzureMonitorBaselineAlertsDeployment {
+    [CmdletBinding(PositionalBinding = $false)]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [HostPool[]] $HostPool,
+
+        [Parameter(Mandatory = $false)]
+        [string] $Location = "EastUs",
+        
+        [switch] $PassThru
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    $StartTime = Get-Date
+    #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
+    $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
+    $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
+    $AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+    #endregion
+
+    $Index = 1
+    $ResourceGroupName = "rg-avd-amba-poc-{0}-{1:D3}" -f $AzLocationShortNameHT[$Location].shortName, $Index
+    $LogAnalyticsWorkSpaceName = "logavdambapoc{0}{1:D3}" -f $AzLocationShortNameHT[$Location].shortName, $Index
+
+    $ResourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Ignore 
+    if ($null -eq $ResourceGroup) {
+        $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
+    }
+
+    $LogAnalyticsWorkSpace = New-AzOperationalInsightsWorkspace -Location $Location -Name $LogAnalyticsWorkSpaceName -Sku pergb2018 -ResourceGroupName $ResourceGroupName -Force
+
+
+    #region AMBA Template Download
+    $AMBAAVDURI = "https://raw.githubusercontent.com/Azure/azure-monitor-baseline-alerts/main/patterns/avd/avdArm.json"
+    $TemplateFileName = Split-Path -Path $AMBAAVDURI -Leaf
+    $TemplateFile = Join-Path -Path $CurrentDir -ChildPath $TemplateFileName
+    Invoke-RestMethod -Uri $AMBAAVDURI -OutFile $TemplateFile
+    Write-Verbose -Message "`$TemplateFilePath: $TemplateFilePath ..."
+    #endregion
+
+    #region AMBA Template Deployment
+    $hostPoolInfo = @()
+    $storageAccountResourceIds =  @()
+    foreach ($CurrentHostPool in $HostPools) {
+        Write-Verbose "Processing '$($CurrentHostPool.Name)' HostPool ..."
+        $colHostPoolName = (Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id
+        $colVMresGroup = (Get-AzResourceGroup -Name $CurrentHostPool.GetResourceGroupName() -Location $CurrentHostPool.Location).ResourceId
+        $hostPoolInfo += @{colHostPoolName = $colHostPoolName; colVMresGroup = $colVMresGroup}
+
+        if ($CurrentHostPool.MSIX) {
+            Write-Verbose "'$($CurrentHostPool.Name)' MSIX: $($CurrentHostPool.MSIX)"
+            $StorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
+            $storageAccountResourceIds += $StorageAccount.Id
+        }
+        if ($CurrentHostPool.AppAttach) {
+            Write-Verbose "'$($CurrentHostPool.Name)' AppAttach: $($CurrentHostPool.AppAttach)"
+            $StorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
+            $storageAccountResourceIds += $StorageAccount.Id
+        }
+        if ($CurrentHostPool.FSlogix) {
+            Write-Verbose "'$($CurrentHostPool.Name)' FSlogix: $($CurrentHostPool.FSlogix)"
+            $StorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
+            $storageAccountResourceIds += $StorageAccount.Id
+        }
+
+    }
+    $TemplateParameterObject = @{
+        "optoutTelemetry" = $false
+        "AlertNamePrefix" = "AVD"
+        "AllResourcesSameRG" = $false
+        "AutoResolveAlert" = $true
+        "DistributionGroup" = (Get-AzContext).Account.Id
+        "Environment" = "t"
+        "hostPoolInfo" = $hostPoolInfo
+        "location" = $Location
+        "logAnalyticsWorkspaceResourceId" = $LogAnalyticsWorkSpace.ResourceId
+        "resourceGroupName" = $ResourceGroup.ResourceGroupName
+        "resourceGroupStatus" = "Existing"
+        "storageAccountResourceIds" = $storageAccountResourceIds
+    }
+    $TemplateParameterObject | ConvertTo-Json -Depth 100 | Set-Clipboard
+    Write-Host -Object "Starting Subscription Deployment from '$TemplateFile' ..."
+    $Attempts = 0
+    Do {
+        $Attempts++
+        Write-Verbose "Attempts: $Attempts"
+        #Don't know why but the first deployment always fails
+        $SubscriptionDeployment = New-AzDeployment -Location $Location -TemplateFile $TemplateFile -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore #-Verbose
+    }  while (($SubscriptionDeployment.ProvisioningState -ne "Succeeded") -or ($Attempts -ge 3))
+    #endregion
+
+    $EndTime = Get-Date
+    $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
+    Write-Host -Object "Azure Subscription Deployment Processing Time: $($TimeSpan.ToString())"
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    if ($PassThru) {
+        return $ResourceGroup
+    }
+}
 function Import-PsAvdWorkbook {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
@@ -8424,7 +8543,7 @@ function Import-PsAvdWorkbook {
     if ($null -eq [HostPool]::AzLocationShortNameHT) {
         [HostPool]::BuildAzureLocationSortNameHashtable()
     }
-    $ResourceGroupName = "rg-avd-shared-{0}-001" -f [HostPool]::AzLocationShortNameHT[$Location].shortname
+    $ResourceGroupName = "rg-avd-workbook-{0}-001" -f [HostPool]::AzLocationShortNameHT[$Location].shortname
     if ($null -eq (Get-AzResourceGroup -Name $ResourceGroupName -Location $Location)) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group in the '$Location' Location"
         $null = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
