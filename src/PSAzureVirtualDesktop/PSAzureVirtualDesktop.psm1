@@ -46,56 +46,57 @@ Class HostPool {
     static [uint16] $VMProfileOsdiskSizeGb = 127
     
     hidden static BuildAzureLocationSortNameHashtable() {
-        $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
-        $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
-        [HostPool]::AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+        if ($null -eq [HostPool]::AzLocationShortNameHT) {
+            $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
+            $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
+            [HostPool]::AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+        }
     }
     
     hidden static BuildAzurePairedRegionHashtable() {
-        #[HostPool]::AzPairedRegionHT = Get-AzurePairedRegion
-        [HostPool]::AzPairedRegionHT = (Get-AzLocation -OutVariable locations) | Select-Object -Property Location, PhysicalLocation, @{Name='PairedRegion';Expression={$_.PairedRegion.Name}}, @{Name='PairedRegionPhysicalLocation';Expression={($locations | Where-Object -FilterScript {$_.location -eq $_.PairedRegion.Name}).PhysicalLocation} } | Where-Object -FilterScript { $_.PairedRegion } | Group-Object -Property Location -AsHashTable -AsString
+        if ($null -eq [HostPool]::AzPairedRegionHT) {
+            [HostPool]::AzPairedRegionHT = (Get-AzLocation -OutVariable locations) | Select-Object -Property Location, PhysicalLocation, @{Name='PairedRegion';Expression={$_.PairedRegion.Name}}, @{Name='PairedRegionPhysicalLocation';Expression={($locations | Where-Object -FilterScript {$_.location -eq $_.PairedRegion.Name}).PhysicalLocation} } | Where-Object -FilterScript { $_.PairedRegion } | Group-Object -Property Location -AsHashTable -AsString
+        }
     }
     
     hidden static BuildAzureEphemeralOsDiskSkuHashtable([String] $Location, [uint16]$OSImageSizeInGB) {
-        #Based on https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-faq
-        $VmSkus = Get-AzComputeResourceSku $Location | Where-Object -FilterScript { ($_.ResourceType -eq "virtualMachines") -and ($_.Capabilities | Where-Object -FilterScript { ($_.Name -eq "EphemeralOSDiskSupported") -and ($_.Value -eq "True") }) }
-        $EphemeralOsDisk = foreach ($sku in $VmSkus) {
-            $MaxResourceVolumeGB = 0
-            $CachedDiskGB = 0
-            foreach ($capability in $sku.Capabilities) {
-                if ($capability.Name -eq "MaxResourceVolumeMB") {
-                    $MaxResourceVolumeGB = [int]($capability.Value / 1024) 
-                }
+        if (($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) -or (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($Location)))) {
+            #Based on https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-faq
+            $VmSkus = Get-AzComputeResourceSku $Location | Where-Object -FilterScript { ($_.ResourceType -eq "virtualMachines") -and ($_.Capabilities | Where-Object -FilterScript { ($_.Name -eq "EphemeralOSDiskSupported") -and ($_.Value -eq "True") }) }
+            $EphemeralOsDisk = foreach ($sku in $VmSkus) {
+                $MaxResourceVolumeGB = 0
+                $CachedDiskGB = 0
+                foreach ($capability in $sku.Capabilities) {
+                    if ($capability.Name -eq "MaxResourceVolumeMB") {
+                        $MaxResourceVolumeGB = [int]($capability.Value / 1024) 
+                    }
  
-                if ($capability.Name -eq "CachedDiskBytes") {
-                    $CachedDiskGB = [int]($capability.Value / 1GB) 
+                    if ($capability.Name -eq "CachedDiskBytes") {
+                        $CachedDiskGB = [int]($capability.Value / 1GB) 
+                    }
+                }
+                [PSCustomObject][ordered]@{
+                    Name                = $sku.Name
+                    MaxResourceVolumeGB = $MaxResourceVolumeGB
+                    OSImageSizeInGB     = $OSImageSizeInGB
+                    ResourceDisk        = ($MaxResourceVolumeGB -ge $OSImageSizeInGB)
+                    CacheDisk           = ($CachedDiskGB -ge $OSImageSizeInGB)
                 }
             }
-            [PSCustomObject][ordered]@{
-                Name                = $sku.Name
-                MaxResourceVolumeGB = $MaxResourceVolumeGB
-                OSImageSizeInGB     = $OSImageSizeInGB
-                ResourceDisk        = ($MaxResourceVolumeGB -ge $OSImageSizeInGB)
-                CacheDisk           = ($CachedDiskGB -ge $OSImageSizeInGB)
+            if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
+                [HostPool]::AzEphemeralOsDiskSkuHT = @{}
             }
+            [HostPool]::AzEphemeralOsDiskSkuHT[$Location] = $EphemeralOsDisk 
         }
-        if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
-            [HostPool]::AzEphemeralOsDiskSkuHT = @{}
-        }
-        [HostPool]::AzEphemeralOsDiskSkuHT[$Location] = $EphemeralOsDisk 
     }
 
     static [array] GetAzureEphemeralOsDiskSku([String] $Location) {
-        if (($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) -or (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($Location)))) {
-            [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($Location, [HostPool]::VMProfileOsdiskSizeGb)
-        }
+        [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($Location, [HostPool]::VMProfileOsdiskSizeGb)
         return $([HostPool]::AzEphemeralOsDiskSkuHT[$Location])
     }
 
     hidden Init([Object] $KeyVault, [string] $SubnetId) {
-        if ($null -eq [HostPool]::AzLocationShortNameHT) {
-            [HostPool]::BuildAzureLocationSortNameHashtable()
-        }
+        [HostPool]::BuildAzureLocationSortNameHashtable()
         if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
         }
@@ -158,18 +159,14 @@ Class HostPool {
     }
 
     static [string] GetAzurePairedRegion([string] $Location) {
-        if ($null -eq [HostPool]::AzPairedRegionHT) {
-            [HostPool]::BuildAzurePairedRegionHashtable()
-        }
+        [HostPool]::BuildAzurePairedRegionHashtable()
         return ([HostPool]::AzPairedRegionHT[$Location].PairedRegion -as [string])
     }
 
     [string] GetAzurePairedRegion() {
         #Non working solution in case of a ThreadJob (don't know why)
         #return [HostPool]::GetAzurePairedRegion($this.Location)
-        if ($null -eq [HostPool]::AzPairedRegionHT) {
-            [HostPool]::BuildAzurePairedRegionHashtable()
-        }
+        [HostPool]::BuildAzurePairedRegionHashtable()
         return ([HostPool]::AzPairedRegionHT[$this.Location].PairedRegion -as [string])
     }
 
@@ -250,9 +247,7 @@ Class HostPool {
     }
 
     [HostPool]EnableEphemeralOSDisk([DiffDiskPlacement] $DiffDiskPlacement) {
-        if (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($this.Location))) {
-            [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
-        }
+        [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
         $AzEphemeralOsDiskSkuForThisLocation = ([HostPool]::AzEphemeralOsDiskSkuHT)[$this.Location]
         Write-Verbose -Message "$($AzEphemeralOsDiskSkuForThisLocation | Out-String)"
         $CurrentAzEphemeralOsDiskSku = $AzEphemeralOsDiskSkuForThisLocation | Where-Object -FilterScript { $_.Name -eq $this.VMSize }
@@ -325,9 +320,7 @@ Class HostPool {
             Write-Warning -Message "Unknown Azure Location: '$($Location)'. We keep the previously set location: '$($this.Location)'"
         }
 
-        if (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($this.Location))) {
-            [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
-        }
+        [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
 
         return $this
     }
@@ -3055,6 +3048,143 @@ function Get-AdjoinCredential {
     return $AdjoinCredential
 }
 
+function Get-PsAvdNetworkResourceGroupName  {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param()
+    return "rg-avd-network-poc-use-001"
+}
+
+function New-PsAvdPrivateDnsZoneSetup  {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        <#
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()] 
+        [string]$Location = "EastUS"
+        #>
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    [HostPool]::BuildAzureLocationSortNameHashtable()
+    <#
+    $Index= 1
+    $ResourceGroupName = "rg-avd-network-poc-{0}-{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
+    #>
+    $Location = "EastUS"
+    $ResourceGroupName = Get-PsAvdNetworkResourceGroupName
+
+    $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
+
+    $PrivateDnsZoneSetup = @{}
+
+    $PrivateDnsZoneNames = 'privatelink.vaultcore.azure.net', 'privatelink.file.core.windows.net'
+    foreach ($PrivateDnsZoneName in $PrivateDnsZoneNames) {
+        #region Creating the private DNS zone.
+        $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
+        if ([string]::IsNullOrEmpty($PrivateDnsZone)) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsZoneName' Private DNS Zone (in the '$ResourceGroupName' Resource Group)"
+            $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName -Name $PrivateDnsZoneName
+        }
+        #region Configure the DNS zone.
+        $PrivateDnsZoneConfigName = $PrivateDnsZone.Name -replace "\.", "-"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the '$PrivateDnsZoneConfigName' Private Dns Zone Group  (in the '$ResourceGroupName' Resource Group)"
+        $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZoneConfigName -PrivateDnsZoneId $PrivateDnsZone.ResourceId
+        #endregion
+
+        $PrivateDnsZoneSetup[$PrivateDnsZoneName] = [PSCustomObject]@{PrivateDnsZone=$PrivateDnsZone;PrivateDnsZoneConfig=$PrivateDnsZoneConfig}
+        #endregion
+    }
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    return $PrivateDnsZoneSetup
+}
+
+function New-PsAvdPrivateEndpointSetup {
+    [CmdletBinding(PositionalBinding = $false)]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string] $SubnetId,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'KeyVault')]
+        [ValidateNotNullOrEmpty()]
+        [Microsoft.Azure.Commands.KeyVault.Models.PSKeyVaultIdentityItem] $KeyVault,
+
+        [Parameter(Mandatory = $true, ParameterSetName = 'StorageAccount')]
+        [ValidateNotNullOrEmpty()]
+        [Microsoft.Azure.Commands.Management.Storage.Models.PSStorageAccount] $StorageAccount
+    )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $SubnetId
+    $VirtualNetwork = Get-AzResource -ResourceID $($Subnet.Id -replace "/subnets/.*$") | Get-AzVirtualNetwork
+    if ($null -ne $KeyVault) {
+        $AzResource = $KeyVault | Get-AzResource
+        $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.ResourceId).GroupId
+    }
+    if ($null -ne $StorageAccount) {
+        $AzResource = $StorageAccount | Get-AzResource
+        $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
+    }
+    $ResourceGroupName = $AzResource.ResourceGroupName
+    	
+    #region Private endpoint for '$($AzResource.ResourceType)' or Storage Account Setup
+    #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
+    #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
+    #From https://ystatit.medium.com/azure-key-vault-with-azure-service-endpoints-and-private-link-part-1-bcc84b4c5fbc
+
+    #region Create the private endpoint connection on the Subnet.
+    $PrivateEndpointName = "pep{0}" -f $($AzResource.Name -replace "\W")
+    $PrivateEndpoint = Get-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
+    if ($null -eq $PrivateEndpoint) {
+        $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $AzResource.ResourceId -GroupId $GroupId
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group)"
+        $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $VirtualNetwork.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
+    }
+    else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateEndpointName' Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group) already exists"
+    }
+    #endregion
+
+    #region Create the private DNS Virtual Network Link and DNS Zone Group
+    $PrivateDnsZoneSetup = New-PsAvdPrivateDnsZoneSetup
+    $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
+    $PrivateDnsZone = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZone
+    $PrivateDnsZoneConfig = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZoneConfig
+
+    #region Create the private DNS Virtual Network Link
+    $PrivateDnsVirtualNetworkLinkResourceGroupName = Get-PsAvdNetworkResourceGroupName
+    $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($VirtualNetwork.Name -replace "\W")
+    $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
+    if ($null -eq $PrivateDnsVirtualNetworkLink) {
+        $VirtualNetworkId = $VirtualNetwork.Id
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
+        $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $VirtualNetworkId 
+    }
+    else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group) already exists"
+    }
+    #endregion
+
+    #region Create the DNS zone group
+    $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
+    if ([string]::IsNullOrEmpty($PrivateDnsZoneGroup)) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
+        $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
+    }
+    else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) already exists"
+    }
+    #endregion
+    #endregion
+    #endregion
+    #>
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
 function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -3077,23 +3207,21 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     Write-Host -Object "Azure Key Vault Setup"
     $StartTime = Get-Date
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
-    $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
-    $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
-    $AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+    [HostPool]::BuildAzureLocationSortNameHashtable()
     #endregion
     
     $Index = 0
     Do {
         $Index++
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Index: $Index"
-        $KeyVaultName = "kvavdhpcred{0}{1:D3}" -f $AzLocationShortNameHT[$Location].shortName, $Index
+        $KeyVaultName = "kvavdhpcred{0}{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
         $KeyVaultName = $KeyVaultName.ToLower()
         if ($Index -gt 999) {
             Write-Error "No name available for HostPool Credential Keyvault" -ErrorAction Stop
         }
     } While (-not(Test-AzKeyVaultNameAvailability -Name $KeyVaultName).NameAvailable)
     Write-Host -Object "Azure Key Vault Name for Credentials: $KeyVaultName"
-    $ResourceGroupName = "rg-avd-kv-poc-{0}-{1:D3}" -f $AzLocationShortNameHT[$Location].shortName, $Index
+    $ResourceGroupName = "rg-avd-kv-poc-{0}-{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
 
     $ResourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Ignore 
     if ($null -eq $ResourceGroup) {
@@ -3149,39 +3277,59 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     #region Private endpoint for Key Vault Setup
     #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
     #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
-    ## Create the private endpoint connection. ## 
+
+
+    New-PsAvdPrivateEndpointSetup -SubnetId $Subnet.Id -KeyVault $KeyVault
+
+    <#
+    #region Create the private endpoint connection on the DC Subnet.
     $PrivateEndpointName = "pep{0}" -f $($KeyVaultName -replace "\W")
-    $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $KeyVault.ResourceId).GroupId
-    $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $KeyVault.ResourceId -GroupId $GroupId
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Key Vault '$KeyVaultName' (in the '$ResourceGroupName' Resource Group)"
-    $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $VirtualNetwork.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
-
-    ## Create the private DNS zone. ##
-    $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
-    $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $VirtualNetwork.ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
-    if ($null -eq $PrivateDnsZone) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Key Vault '$KeyVaultName' (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
-        $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $VirtualNetwork.ResourceGroupName -Name $PrivateDnsZoneName
+    $PrivateEndpoint = Get-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName
+    if ($null -eq $PrivateEndpoint) {
+        $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $KeyVault.ResourceId).GroupId
+        $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $KeyVault.ResourceId -GroupId $GroupId
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Key Vault '$KeyVaultName' (in the '$ResourceGroupName' Resource Group)"
+        $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $VirtualNetwork.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
     }
+    else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateEndpointName' Private Endpoint for the Key Vault '$KeyVaultName' (in the '$ResourceGroupName' Resource Group) already exists"
+    }
+    #endregion
 
+    #region Create the private DNS Virtual Network Link and DNS Zone Group
+    $PrivateDnsZoneSetup = New-PsAvdPrivateDnsZoneSetup
+    $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
+    $PrivateDnsZone = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZone
+    $PrivateDnsZoneConfig = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZoneConfig
+
+    #region Create the private DNS Virtual Network Link
     $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($VirtualNetwork.Name -replace "\W")
     $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $VirtualNetwork.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
     if ($null -eq $PrivateDnsVirtualNetworkLink) {
         $VirtualNetworkId = $VirtualNetwork.Id
-        ## Create a DNS network link. ##
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS VNet Link for the Key Vault '$KeyVaultName' (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
         $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $VirtualNetwork.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $VirtualNetworkId
     }
+    else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group) already exists"
+    }
+    #endregion
 
-    ## Configure the DNS zone. ##
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the Private Dns Zone Group for Key Vault '$KeyVaultName'"
-    $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZone.Name -PrivateDnsZoneId $PrivateDnsZone.ResourceId
+    #region Create the DNS zone group
+    $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
+    if ($null -eq $PrivateDnsZoneGroup) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
+        $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
+    }
+    else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) already exists"
+    }
+    #endregion
+    #endregion
+    #>
+    #endregion
 
-    ## Create the DNS zone group. ##
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
-    $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-
-    #Key Vault - Disabling Public Access
+    #region Key Vault - Disabling Public Access
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault'$KeyVaultName' (in the '$ResourceGroupName' Resource Group)"
     $null = Update-AzKeyVault -VaultName $KeyVaultName -ResourceGroupName $ResourceGroupName -PublicNetworkAccess "Disabled" 
     #endregion
@@ -3223,6 +3371,9 @@ function New-PsAvdHostPoolCredentialKeyVault {
     }
     #endregion
 
+    New-PsAvdPrivateEndpointSetup -SubnetId $HostPool.SubnetId -KeyVault $HostPoolKeyVault
+
+    <#
     #region Private endpoint for Key Vault Setup
     #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
     #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
@@ -3265,7 +3416,7 @@ function New-PsAvdHostPoolCredentialKeyVault {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault'$HostPoolKeyVaultName' (in the '$HostPoolResourceGroupName' Resource Group)"
     $null = Update-AzKeyVault -VaultName $HostPoolKeyVaultName -ResourceGroupName $HostPoolResourceGroupName -PublicNetworkAccess "Disabled" 
     #endregion
-
+    #>
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -5781,7 +5932,9 @@ function New-PsAvdPooledHostPoolSetup {
             else {
             }
             #>
-
+            
+            New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
+             
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
             $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
             if ($CurrentHostPool.$PreferredAppGroupType) {
@@ -6170,6 +6323,9 @@ function New-PsAvdPooledHostPoolSetup {
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion
 
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
+
+                <#
                 #region Private endpoint for Storage Setup
                 #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
                 #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
@@ -6219,6 +6375,7 @@ function New-PsAvdPooledHostPoolSetup {
                 $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -PublicNetworkAccess Disabled
                 #(Get-AzStorageAccount -Name $CurrentHostPoolResourceGroupName -ResourceGroupName $CurrentHostPoolStorageAccountName ).AllowBlobPublicAccess
                 #endregion
+                #>
                 #endregion
                 Start-Sleep -Seconds 60
                 #region Dedicated Share Management
@@ -6577,6 +6734,9 @@ function New-PsAvdPooledHostPoolSetup {
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion 
 
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
+
+                <#
                 #region Private endpoint for Storage Setup
                 #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
                 #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
@@ -6625,6 +6785,7 @@ function New-PsAvdPooledHostPoolSetup {
                 $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -PublicNetworkAccess Disabled
                 #(Get-AzStorageAccount -Name $CurrentHostPoolResourceGroupName -ResourceGroupName $CurrentHostPoolStorageAccountName ).AllowBlobPublicAccess
                 #endregion
+                #>
                 #endregion
                 Start-Sleep -Seconds 60
                 $MSIXDemoPackages = $null
@@ -7821,6 +7982,8 @@ function New-PsAvdHostPoolSetup {
             $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName "Desktop Virtualization Power On Off Contributor" -Scope $Scope
         }
         #endregion
+
+        $PrivateDnsZoneSetup = New-PsAvdPrivateDnsZoneSetup 
     }
     process {
         #No pipeline input and No -AsJob switch specified
@@ -7870,6 +8033,9 @@ function New-PsAvdHostPoolSetup {
                 Function Get-MgGraphObject { ${Function:Get-MgGraphObject} }
                 Function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI { ${Function:New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI} }   
                 Function New-PsAvdHostPoolCredentialKeyVault { ${Function:New-PsAvdHostPoolCredentialKeyVault} }
+                Function New-PsAvdPrivateDnsZoneSetup { ${Function:New-PsAvdPrivateDnsZoneSetup} }
+                Function New-PsAvdPrivateEndpointSetup { ${Function:New-PsAvdPrivateEndpointSetup} }
+                Function Get-PsAvdNetworkResourceGroupName { ${Function:Get-PsAvdNetworkResourceGroupName} }
 "@)
             $Jobs = @()
             $Jobs += foreach ($CurrentPooledHostPool in $PooledHostPools) {
@@ -8714,15 +8880,10 @@ function New-PsAvdAzureSiteRecoveryPolicyAssignement {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     #region Building an Hashtable to get the azure region pairs
-    if ($null -eq [HostPool]::AzPairedRegionHT) {
-        [HostPool]::BuildAzurePairedRegionHashtable()
-    }
-
+    [HostPool]::BuildAzurePairedRegionHashtable()
 
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
-    if ($null -eq [HostPool]::AzLocationShortNameHT) {
-        [HostPool]::BuildAzureLocationSortNameHashtable()
-    }
+    [HostPool]::BuildAzureLocationSortNameHashtable()
     #endregion
 
     $HostPoolWithAzureSiteRecovery = $HostPool | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_.ASRFailOverVNetId)) }
@@ -8827,9 +8988,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     $StartTime = Get-Date
 
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
-    if ($null -eq [HostPool]::AzLocationShortNameHT) {
-        [HostPool]::BuildAzureLocationSortNameHashtable()
-    }
+    [HostPool]::BuildAzureLocationSortNameHashtable()
     #endregion
 
     $Index = 1
@@ -8937,9 +9096,7 @@ function Import-PsAvdWorkbook {
         "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
     }
 
-    if ($null -eq [HostPool]::AzLocationShortNameHT) {
-        [HostPool]::BuildAzureLocationSortNameHashtable()
-    }
+    [HostPool]::BuildAzureLocationSortNameHashtable()
     $ResourceGroupName = "rg-avd-workbook-poc-{0}-001" -f [HostPool]::AzLocationShortNameHT[$Location].shortname
     if ($null -eq (Get-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Ignore)) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group in the '$Location' Location"
