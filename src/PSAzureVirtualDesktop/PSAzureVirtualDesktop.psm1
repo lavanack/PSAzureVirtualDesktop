@@ -3122,10 +3122,12 @@ function New-PsAvdPrivateEndpointSetup {
     $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $SubnetId
     $VirtualNetwork = Get-AzResource -ResourceID $($Subnet.Id -replace "/subnets/.*$") | Get-AzVirtualNetwork
     if ($null -ne $KeyVault) {
+        $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
         $AzResource = $KeyVault | Get-AzResource
         $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.ResourceId).GroupId
     }
     if ($null -ne $StorageAccount) {
+        $PrivateDnsZoneName = 'privatelink.file.core.windows.net' 
         $AzResource = $StorageAccount | Get-AzResource
         $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
     }
@@ -3151,7 +3153,6 @@ function New-PsAvdPrivateEndpointSetup {
 
     #region Create the private DNS Virtual Network Link and DNS Zone Group
     $PrivateDnsZoneSetup = New-PsAvdPrivateDnsZoneSetup
-    $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
     $PrivateDnsZone = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZone
     $PrivateDnsZoneConfig = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZoneConfig
 
@@ -3181,7 +3182,20 @@ function New-PsAvdPrivateEndpointSetup {
     #endregion
     #endregion
     #endregion
-    #>
+
+    
+    #region Key Vault - Disabling Public Access
+    if ($null -ne $KeyVault) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault '$($KeyVault.VaultName)' (in the '$ResourceGroupName' Resource Group)"
+        $null = Update-AzKeyVault -ResourceGroupName $ResourceGroupName -VaultName $KeyVault.VaultName -PublicNetworkAccess Disabled
+    }
+
+    if ($null -ne $StorageAccount) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Storage Account '$($StorageAccount.StorageAccountName)' (in the '$ResourceGroupName' Resource Group)"
+        $null = Set-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccount.StorageAccountName -PublicNetworkAccess Disabled
+    }
+    #endregion
+
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
@@ -3279,6 +3293,8 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
 
 
+    #Creating a Private EndPoint for this KeyVault on this Subnet
+    #TODO: comment this line
     New-PsAvdPrivateEndpointSetup -SubnetId $Subnet.Id -KeyVault $KeyVault
 
     <#
@@ -3329,10 +3345,12 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     #>
     #endregion
 
+    <#
     #region Key Vault - Disabling Public Access
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault'$KeyVaultName' (in the '$ResourceGroupName' Resource Group)"
     $null = Update-AzKeyVault -VaultName $KeyVaultName -ResourceGroupName $ResourceGroupName -PublicNetworkAccess "Disabled" 
     #endregion
+    #>
 
     $EndTime = Get-Date
     $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
@@ -3371,6 +3389,7 @@ function New-PsAvdHostPoolCredentialKeyVault {
     }
     #endregion
 
+    #Creating a Private EndPoint for this KeyVault on this Subnet
     New-PsAvdPrivateEndpointSetup -SubnetId $HostPool.SubnetId -KeyVault $HostPoolKeyVault
 
     <#
@@ -5933,7 +5952,9 @@ function New-PsAvdPooledHostPoolSetup {
             }
             #>
             
+            #Creating a Private EndPoint for this KeyVault on this Subnet
             New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
+            #New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
              
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
             $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
@@ -6323,6 +6344,7 @@ function New-PsAvdPooledHostPoolSetup {
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion
 
+                #Creating a Private EndPoint for this Storage Account on this Subnet
                 New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
 
                 <#
@@ -6734,6 +6756,7 @@ function New-PsAvdPooledHostPoolSetup {
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion 
 
+                #Creating a Private EndPoint for this Storage Account on this Subnet
                 New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
 
                 <#
@@ -7318,11 +7341,11 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #region Intune Configuration Profile - Settings Catalog
                     #region AVD Global Settings FSLogix - Intune Configuration Profile - Settings Catalog
-                    New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name
+                    New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -Watermarking:$CurrentHostPool.Watermarking
                     #endregion
 
                     #region Configure FSLogix - Intune Configuration Profile - Settings Catalog
-                    New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -HostPoolRecoveryLocationStorageAccountName $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()
+                    New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -HostPoolRecoveryLocationStorageAccountName $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName() -Watermarking:$CurrentHostPool.Watermarking
                     #endregion
                     #endregion
 
@@ -8668,16 +8691,25 @@ function Get-PsAvdFSLogixProfileShare {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    $ThisDomainControllerSubnet = Get-AzVMSubnet
 
     foreach ($CurrentHostPool in $HostPool) {
         if ($CurrentHostPool.FSLogix) {
-            $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
-            # Get the list of file shares in the storage account
-            $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
-            $CurrentHostPoolProfilesStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "profiles" }
-            if ($null -ne $CurrentHostPoolProfilesStorageShare) {
-                Start-Process $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolProfilesStorageShare.context.StorageAccountName, ($CurrentHostPoolProfilesStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolProfilesStorageShare.Name)
+            if ($CurrentHostPool.SubnetId -eq $ThisDomainControllerSubnet.Id) {
+                $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
+                # Get the list of file shares in the storage account
+                $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
+                $CurrentHostPoolProfilesStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "profiles" }
+                if ($null -ne $CurrentHostPoolProfilesStorageShare) {
+                    Start-Process $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolProfilesStorageShare.context.StorageAccountName, ($CurrentHostPoolProfilesStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolProfilesStorageShare.Name)
+                }
             }
+            else {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The FSLogix FileShare is not accessible from this subnet"
+            }
+        }
+        else {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] FSLogix is not enabled for '$($CurrentHostPool.Name)' HostPool"
         }
     }
     #region Pester Tests for Azure Host Pool - FSLogix File Share - Azure Instantiation
@@ -8703,16 +8735,25 @@ function Get-PsAvdMSIXProfileShare {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    $ThisDomainControllerSubnet = Get-AzVMSubnet
 
     foreach ($CurrentHostPool in $HostPool) {
         if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
-            $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
-            # Get the list of file shares in the storage account
-            $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
-            $CurrentHostPoolMSIXStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "msix" }
-            if ($null -ne $CurrentHostPoolMSIXStorageShare) {
-                Start-Process $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolMSIXStorageShare.context.StorageAccountName, ($CurrentHostPoolMSIXStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolMSIXStorageShare.Name)
+            if ($CurrentHostPool.SubnetId -eq $ThisDomainControllerSubnet.Id) {
+                $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
+                # Get the list of file shares in the storage account
+                $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
+                $CurrentHostPoolMSIXStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "msix" }
+                if ($null -ne $CurrentHostPoolMSIXStorageShare) {
+                    Start-Process $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolMSIXStorageShare.context.StorageAccountName, ($CurrentHostPoolMSIXStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolMSIXStorageShare.Name)
+                }
             }
+            else {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The MSIX FileShare is not accessible from this subnet"
+            }
+        }
+        else {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX is not enabled for '$($CurrentHostPool.Name)' HostPool"
         }
     }
     #region Pester Tests for Azure Host Pool - MSIX File Share - Azure Instantiation
