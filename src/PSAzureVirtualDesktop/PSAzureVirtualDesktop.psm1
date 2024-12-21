@@ -3048,10 +3048,29 @@ function Get-AdjoinCredential {
     return $AdjoinCredential
 }
 
-function Get-PsAvdNetworkResourceGroupName  {
+function Get-PsAvdPrivateDnsResourceGroupName  {
     [CmdletBinding(PositionalBinding = $false)]
-    Param()
-    return "rg-avd-network-poc-use-001"
+    Param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('privatelink.file.core.windows.net', 'privatelink.vaultcore.azure.net')] 
+        [string] $Name
+    )
+    $PrivateDnsZone = Get-AzPrivateDnsZone -Name $PrivateDnsZoneName -ErrorAction Ignore
+    #No such Private Dns Zone found
+    if ([string]::IsNullOrEmpty($PrivateDnsZone)) {
+        #Returning a default name 
+        $ResourceGroupName = "rg-avd-network-poc-use-001"
+    }
+    else {
+        if ($PrivateDnsZone -is [array]) {
+            Write-Warning "Multiple resource groups found for '$PrivateDnsZoneName' ($($PrivateDnsZone.ResourceGroupName -join ', ')) .We take the first one."
+            $ResourceGroupName = $PrivateDnsZone.ResourceGroupName | Select-Object -First 1
+        }
+        else {
+            $ResourceGroupName = $PrivateDnsZone.ResourceGroupName
+        }
+    }
+    return $ResourceGroupName
 }
 
 function New-PsAvdPrivateDnsZoneSetup  {
@@ -3071,22 +3090,26 @@ function New-PsAvdPrivateDnsZoneSetup  {
     $Index= 1
     $ResourceGroupName = "rg-avd-network-poc-{0}-{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
     #>
-    $Location = "EastUS"
-    $ResourceGroupName = Get-PsAvdNetworkResourceGroupName
-
-    $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
 
     $PrivateDnsZoneSetup = @{}
 
     $PrivateDnsZoneNames = 'privatelink.vaultcore.azure.net', 'privatelink.file.core.windows.net'
     foreach ($PrivateDnsZoneName in $PrivateDnsZoneNames) {
-        #region Creating the private DNS zone.
-        $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
+        #region Configuring the Private DNS zone.
+        $ResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -Name $PrivateDnsZoneName
+        $PrivateDnsZone = Get-AzPrivateDnsZone -Name $PrivateDnsZoneName -ErrorAction Ignore
         if ([string]::IsNullOrEmpty($PrivateDnsZone)) {
+            $Location = "EastUS"
+            $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsZoneName' Private DNS Zone (in the '$ResourceGroupName' Resource Group)"
             $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName -Name $PrivateDnsZoneName
         }
-        #region Configure the DNS zone.
+        else {
+            #In case of multiple Private Dns Zones, we took only the first one.
+            $PrivateDnsZone = Get-AzPrivateDnsZone -Name $PrivateDnsZoneName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
+        }
+
+        #region Configuring the DNS zone.
         $PrivateDnsZoneConfigName = $PrivateDnsZone.Name -replace "\.", "-"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the '$PrivateDnsZoneConfigName' Private Dns Zone Group  (in the '$ResourceGroupName' Resource Group)"
         $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZoneConfigName -PrivateDnsZoneId $PrivateDnsZone.ResourceId
@@ -3157,7 +3180,7 @@ function New-PsAvdPrivateEndpointSetup {
     $PrivateDnsZoneConfig = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZoneConfig
 
     #region Create the private DNS Virtual Network Link
-    $PrivateDnsVirtualNetworkLinkResourceGroupName = Get-PsAvdNetworkResourceGroupName
+    $PrivateDnsVirtualNetworkLinkResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -Name $PrivateDnsZoneName
     $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($VirtualNetwork.Name -replace "\W")
     $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
     if ($null -eq $PrivateDnsVirtualNetworkLink) {
@@ -3294,7 +3317,6 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
 
 
     #Creating a Private EndPoint for this KeyVault on this Subnet
-    #TODO: comment this line
     New-PsAvdPrivateEndpointSetup -SubnetId $Subnet.Id -KeyVault $KeyVault
 
     <#
@@ -5954,7 +5976,6 @@ function New-PsAvdPooledHostPoolSetup {
             
             #Creating a Private EndPoint for this KeyVault on this Subnet
             New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
-            #New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
              
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
             $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
@@ -6327,7 +6348,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #>
                     #endregion
 
-                    #region Configure the clients to retrieve Kerberos tickets
+                    #region Configuring the clients to retrieve Kerberos tickets
                     #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-portal#configure-the-clients-to-retrieve-kerberos-tickets
                     #endregion
                 }
@@ -7260,9 +7281,9 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion 
 
             if (($CurrentHostPool.IsMicrosoftEntraIdJoined()) -and ($CurrentHostPool.FSLogix)) {
-                #region Configure the session hosts
+                #region Configuring the session hosts
 
-                #region Configure the clients to retrieve Kerberos tickets
+                #region Configuring the clients to retrieve Kerberos tickets
                 # From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-powershell#configure-the-clients-to-retrieve-kerberos-tickets
                 # From https://learn.microsoft.com/en-us/azure/virtual-desktop/create-profile-container-azure-ad#configure-the-session-hosts
                 #$LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
@@ -7309,8 +7330,8 @@ function New-PsAvdPooledHostPoolSetup {
                         #endregion
                         #endregion
 
-                        #region Configure FSLogix
-                        #region Configure FSLogix - Registry
+                        #region Configuring FSLogix
+                        #region Configuring FSLogix - Registry
                         # Run PowerShell script on the VM
                         #$URI = "https://raw.githubusercontent.com/lavanack/PSAzureVirtualDesktop/master/src/PSAzureVirtualDesktop/HelperScripts/Set-FSLogixRegistryItemProperty.ps1"
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
@@ -7323,7 +7344,7 @@ function New-PsAvdPooledHostPoolSetup {
                         #endregion
 
                         <#
-                        #region Configure the clients to disable FSLogix
+                        #region Configuring the clients to disable FSLogix
                         $ScriptString = "Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'Enabled' -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 0"
                         # Run PowerShell script on the VM
                         $null = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
@@ -7344,7 +7365,7 @@ function New-PsAvdPooledHostPoolSetup {
                     New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -Watermarking:$CurrentHostPool.Watermarking
                     #endregion
 
-                    #region Configure FSLogix - Intune Configuration Profile - Settings Catalog
+                    #region Configuring FSLogix - Intune Configuration Profile - Settings Catalog
                     New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -HostPoolRecoveryLocationStorageAccountName $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName() -Watermarking:$CurrentHostPool.Watermarking
                     #endregion
                     #endregion
@@ -8058,7 +8079,7 @@ function New-PsAvdHostPoolSetup {
                 Function New-PsAvdHostPoolCredentialKeyVault { ${Function:New-PsAvdHostPoolCredentialKeyVault} }
                 Function New-PsAvdPrivateDnsZoneSetup { ${Function:New-PsAvdPrivateDnsZoneSetup} }
                 Function New-PsAvdPrivateEndpointSetup { ${Function:New-PsAvdPrivateEndpointSetup} }
-                Function Get-PsAvdNetworkResourceGroupName { ${Function:Get-PsAvdNetworkResourceGroupName} }
+                Function Get-PsAvdPrivateDnsResourceGroupName { ${Function:Get-PsAvdPrivateDnsResourceGroupName} }
 "@)
             $Jobs = @()
             $Jobs += foreach ($CurrentPooledHostPool in $PooledHostPools) {
