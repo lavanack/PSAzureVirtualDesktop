@@ -952,6 +952,7 @@ function New-PsAvdNoMFAUserEntraIDGroup {
     catch [System.Threading.AbandonedMutexException] {
         #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
         $null = $EntraIDGroupMutex.ReleaseMutex()
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
     }
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
@@ -1050,6 +1051,7 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
     catch [System.Threading.AbandonedMutexException] {
         #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
         $null = $ConditionalAccessPolicyMutex.ReleaseMutex()
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
     }
 
     #region Pester Tests for Conditional Access Policy - Azure Instantiation
@@ -3060,11 +3062,13 @@ function Get-PsAvdPrivateDnsResourceGroupName  {
     if ([string]::IsNullOrEmpty($PrivateDnsZone)) {
         #Returning a default name 
         $ResourceGroupName = "rg-avd-network-poc-use-001"
+        $Location = "EastUS"
+        $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
     }
     else {
         if ($PrivateDnsZone -is [array]) {
-            Write-Warning "Multiple resource groups found for '$PrivateDnsZoneName' ($($PrivateDnsZone.ResourceGroupName -join ', ')) .We take the first one."
             $ResourceGroupName = $PrivateDnsZone.ResourceGroupName | Select-Object -First 1
+            Write-Warning "Multiple resource groups found for '$PrivateDnsZoneName' Private DNS zone ($($PrivateDnsZone.ResourceGroupName -join ', ')) .We take the first one ('$ResourceGroupName') !"
         }
         else {
             $ResourceGroupName = $PrivateDnsZone.ResourceGroupName
@@ -3076,20 +3080,11 @@ function Get-PsAvdPrivateDnsResourceGroupName  {
 function New-PsAvdPrivateDnsZoneSetup  {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
-        <#
-        [Parameter(Mandatory = $false)]
-        [ValidateNotNullOrEmpty()] 
-        [string]$Location = "EastUS"
-        #>
     )
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     [HostPool]::BuildAzureLocationSortNameHashtable()
-    <#
-    $Index= 1
-    $ResourceGroupName = "rg-avd-network-poc-{0}-{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
-    #>
 
     $PrivateDnsZoneSetup = @{}
 
@@ -3099,18 +3094,16 @@ function New-PsAvdPrivateDnsZoneSetup  {
         $ResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -Name $PrivateDnsZoneName
         $PrivateDnsZone = Get-AzPrivateDnsZone -Name $PrivateDnsZoneName -ErrorAction Ignore
         if ([string]::IsNullOrEmpty($PrivateDnsZone)) {
-            $Location = "EastUS"
-            $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsZoneName' Private DNS Zone (in the '$ResourceGroupName' Resource Group)"
             $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName -Name $PrivateDnsZoneName
         }
         else {
-            #In case of multiple Private Dns Zones, we took only the first one.
+            #In case of multiple Private Dns Zones, we took only the first one (thanks to the Get-PsAvdPrivateDnsResourceGroupName function).
             $PrivateDnsZone = Get-AzPrivateDnsZone -Name $PrivateDnsZoneName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
         }
 
         #region Configuring the DNS zone.
-        $PrivateDnsZoneConfigName = $PrivateDnsZone.Name -replace "\.", "-"
+        $PrivateDnsZoneConfigName = $PrivateDnsZone.Name #-replace "\.", "-"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the '$PrivateDnsZoneConfigName' Private Dns Zone Group  (in the '$ResourceGroupName' Resource Group)"
         $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZoneConfigName -PrivateDnsZoneId $PrivateDnsZone.ResourceId
         #endregion
@@ -3180,16 +3173,36 @@ function New-PsAvdPrivateEndpointSetup {
     $PrivateDnsZoneConfig = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZoneConfig
 
     #region Create the private DNS Virtual Network Link
-    $PrivateDnsVirtualNetworkLinkResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -Name $PrivateDnsZoneName
-    $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($VirtualNetwork.Name -replace "\W")
-    $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
-    if ($null -eq $PrivateDnsVirtualNetworkLink) {
-        $VirtualNetworkId = $VirtualNetwork.Id
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
-        $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $VirtualNetworkId 
+    $PrivateDnsVirtualNetworkLinkMutex = $null
+    $MutexName = "PrivateDnsVirtualNetworkLink"
+    $PrivateDnsVirtualNetworkLinkMutex = New-Object System.Threading.Mutex($false, $MutexName)
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
+
+    try {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
+        If ($PrivateDnsVirtualNetworkLinkMutex.WaitOne()) {         
+        $PrivateDnsVirtualNetworkLinkResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -Name $PrivateDnsZoneName
+        $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($VirtualNetwork.Name -replace "\W")
+        $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
+        if ($null -eq $PrivateDnsVirtualNetworkLink) {
+            $VirtualNetworkId = $VirtualNetwork.Id
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
+            $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $VirtualNetworkId 
+        }
+        else {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group) already exists"
+        }
+        $null = $PrivateDnsVirtualNetworkLinkMutex.ReleaseMutex()
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
     }
-    else {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group) already exists"
+        Else {
+        Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
+    }
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
+        $null = $PrivateDnsVirtualNetworkLinkMutex.ReleaseMutex()
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
     }
     #endregion
 
@@ -3210,7 +3223,8 @@ function New-PsAvdPrivateEndpointSetup {
     #region Key Vault - Disabling Public Access
     if ($null -ne $KeyVault) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault '$($KeyVault.VaultName)' (in the '$ResourceGroupName' Resource Group)"
-        $null = Update-AzKeyVault -ResourceGroupName $ResourceGroupName -VaultName $KeyVault.VaultName -PublicNetworkAccess Disabled
+        #TODO: Implement a mutext instead of -ErrorAction Ignore
+        $null = Update-AzKeyVault -ResourceGroupName $ResourceGroupName -VaultName $KeyVault.VaultName -PublicNetworkAccess Disabled -ErrorAction Ignore
     }
 
     if ($null -ne $StorageAccount) {
@@ -3622,7 +3636,7 @@ function Grant-PsAvdADJoinPermission {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     # Import the Active Directory module
-    Import-Module ActiveDirectory
+    Import-Module ActiveDirectory 
 
     $ComputerGUID = "bf967a86-0de6-11d0-a285-00aa003049e2"
     $ObjectTypeGUIDs = @{
@@ -6283,7 +6297,7 @@ function New-PsAvdPooledHostPoolSetup {
                             Pop-Location
                         }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
-                        Import-Module AzFilesHybrid
+                        Import-Module AzFilesHybrid #-Force
                         #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"#
                         $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
                         #Debug-AzStorageAccountAuth -StorageAccountName $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName -Verbose
@@ -6741,7 +6755,7 @@ function New-PsAvdPooledHostPoolSetup {
                         Pop-Location
                     }
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
-                    Import-Module AzFilesHybrid
+                    Import-Module AzFilesHybrid #-Force
                     #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
                     $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
 
@@ -7871,6 +7885,10 @@ function New-PsAvdHostPoolSetup {
         [Parameter(Mandatory = $false)]
         [string]$LogDir = ".",
 
+        [switch] $AMBA,
+        [switch] $WorkBook,
+        [switch] $Restart,
+        [switch] $RDCMan,
         [switch] $AsJob
     )
 
@@ -8163,6 +8181,35 @@ function New-PsAvdHostPoolSetup {
         Invoke-Pester -Container $Container -Output Detailed -Verbose
         #endregion
 
+        $Location = (Get-AzVMCompute).Location
+
+        #Setting up the hostpool scaling plan(s)
+        New-PsAvdScalingPlan -HostPool $HostPool 
+
+        #Setting up the Azure site Recovery for the Hostpools 
+        New-PsAvdAzureSiteRecoveryPolicyAssignement -HostPool $HostPool
+
+        if ($WorkBook) {
+            #Importing some useful AVD Worbooks
+            Import-PsAvdWorkbook -Location $Location
+        }
+        
+        if ($AMBA) {
+            #Setting up Azure Monitor Baseline Alerts for Azure Virtual Desktop
+            $AMBAResourceGroup = New-PsAvdAzureMonitorBaselineAlertsDeployment -Location $Location -HostPool $HostPool -PassThru -Verbose
+        }
+
+        if ($Restart) {
+            #region Restarting all session hosts
+            Restart-PsAvdSessionHost -HostPool $HostPool -Wait
+            #endregion
+        }
+        
+        if ($RDCMan) {
+            #region Running RDCMan to connect to all Session Hosts (for administration purpose if needed)
+            New-PsAvdRdcMan -HostPool $HostPool -Install -Open
+            #endregion
+        }
 
         $EndTime = Get-Date
         $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
