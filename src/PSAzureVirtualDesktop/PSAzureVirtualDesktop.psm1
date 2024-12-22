@@ -5989,7 +5989,7 @@ function New-PsAvdPooledHostPoolSetup {
             #>
             
             #Creating a Private EndPoint for this KeyVault on this Subnet
-            New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
+            #New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
              
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
             $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
@@ -6379,9 +6379,6 @@ function New-PsAvdPooledHostPoolSetup {
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion
 
-                #Creating a Private EndPoint for this Storage Account on this Subnet
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
-
                 <#
                 #region Private endpoint for Storage Setup
                 #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
@@ -6433,7 +6430,6 @@ function New-PsAvdPooledHostPoolSetup {
                 #(Get-AzStorageAccount -Name $CurrentHostPoolResourceGroupName -ResourceGroupName $CurrentHostPoolStorageAccountName ).AllowBlobPublicAccess
                 #endregion
                 #>
-                #endregion
                 Start-Sleep -Seconds 60
                 #region Dedicated Share Management
                 $FSLogixShareName | ForEach-Object -Process { 
@@ -6602,6 +6598,10 @@ function New-PsAvdPooledHostPoolSetup {
                     Start-MicrosoftEntraIDConnectSync
                     #endregion 
                 }
+                #endregion
+
+                #Creating a Private EndPoint for this Storage Account on this Subnet
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
                 #endregion
             }
             else {
@@ -6790,9 +6790,6 @@ function New-PsAvdPooledHostPoolSetup {
 
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion 
-
-                #Creating a Private EndPoint for this Storage Account on this Subnet
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
 
                 <#
                 #region Private endpoint for Storage Setup
@@ -6992,6 +6989,9 @@ function New-PsAvdPooledHostPoolSetup {
                     #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
                 }
                 #endregion
+
+                #Creating a Private EndPoint for this Storage Account on this Subnet
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
                 #endregion
             
                 #endregion
