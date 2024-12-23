@@ -1,7 +1,7 @@
 param (
     #[Parameter(Mandatory)]
     [HostPool[]] $HostPool,
-    [int] $MinutesAgo = 30
+    [int] $MinutesAgo = 60
 )
 
 BeforeDiscovery {
