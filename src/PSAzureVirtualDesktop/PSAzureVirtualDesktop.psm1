@@ -3121,7 +3121,7 @@ function New-PsAvdPrivateEndpointSetup {
     (
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [string] $SubnetId,
+        [string[]] $SubnetId,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'KeyVault')]
         [ValidateNotNullOrEmpty()]
@@ -3135,103 +3135,106 @@ function New-PsAvdPrivateEndpointSetup {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
-    $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $SubnetId
-    $VirtualNetwork = Get-AzResource -ResourceID $($Subnet.Id -replace "/subnets/.*$") | Get-AzVirtualNetwork
-    if ($null -ne $KeyVault) {
-        $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
-        $AzResource = $KeyVault | Get-AzResource
-        $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.ResourceId).GroupId
-    }
-    if ($null -ne $StorageAccount) {
-        $PrivateDnsZoneName = 'privatelink.file.core.windows.net' 
-        $AzResource = $StorageAccount | Get-AzResource
-        $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
-    }
-    $ResourceGroupName = $AzResource.ResourceGroupName
+    foreach ($CurrentSubnetId in $SubnetId) {
+        $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $CurrentSubnetId
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($Subnet.Name)' Subnet"
+        $VirtualNetwork = Get-AzResource -ResourceID $($Subnet.Id -replace "/subnets/.*$") | Get-AzVirtualNetwork
+        if ($null -ne $KeyVault) {
+            $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
+            $AzResource = $KeyVault | Get-AzResource
+            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.ResourceId).GroupId
+        }
+        if ($null -ne $StorageAccount) {
+            $PrivateDnsZoneName = 'privatelink.file.core.windows.net' 
+            $AzResource = $StorageAccount | Get-AzResource
+            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
+        }
+        $ResourceGroupName = $AzResource.ResourceGroupName
     	
-    #region Private endpoint for '$($AzResource.ResourceType)' or Storage Account Setup
-    #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
-    #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
-    #From https://ystatit.medium.com/azure-key-vault-with-azure-service-endpoints-and-private-link-part-1-bcc84b4c5fbc
+        #region Private endpoint for '$($AzResource.ResourceType)' or Storage Account Setup
+        #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
+        #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
+        #From https://ystatit.medium.com/azure-key-vault-with-azure-service-endpoints-and-private-link-part-1-bcc84b4c5fbc
 
-    #region Create the private endpoint connection on the Subnet.
-    $PrivateEndpointName = "pep{0}" -f $($AzResource.Name -replace "\W")
-    $PrivateEndpoint = Get-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
-    if ($null -eq $PrivateEndpoint) {
-        $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $AzResource.ResourceId -GroupId $GroupId
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group)"
-        $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $VirtualNetwork.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
-    }
-    else {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateEndpointName' Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group) already exists"
-    }
-    #endregion
-
-    #region Create the private DNS Virtual Network Link and DNS Zone Group
-    $PrivateDnsZoneSetup = New-PsAvdPrivateDnsZoneSetup
-    $PrivateDnsZone = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZone
-    $PrivateDnsZoneConfig = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZoneConfig
-
-    #region Create the private DNS Virtual Network Link
-    $PrivateDnsVirtualNetworkLinkMutex = $null
-    $MutexName = "PrivateDnsVirtualNetworkLink"
-    $PrivateDnsVirtualNetworkLinkMutex = New-Object System.Threading.Mutex($false, $MutexName)
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
-
-    try {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
-        If ($PrivateDnsVirtualNetworkLinkMutex.WaitOne()) {         
-        $PrivateDnsVirtualNetworkLinkResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -Name $PrivateDnsZoneName
-        $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($VirtualNetwork.Name -replace "\W")
-        $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
-        if ($null -eq $PrivateDnsVirtualNetworkLink) {
-            $VirtualNetworkId = $VirtualNetwork.Id
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
-            $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $VirtualNetworkId 
+        #region Create the private endpoint connection on the Subnet.
+        $PrivateEndpointName = "pep-{0}-{1}" -f $($AzResource.Name -replace "\W"), $Subnet.Name
+        $PrivateEndpoint = Get-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
+        if ($null -eq $PrivateEndpoint) {
+            $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $AzResource.ResourceId -GroupId $GroupId
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateEndpointName' Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group)"
+            $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $VirtualNetwork.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
         }
         else {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group) already exists"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateEndpointName' Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group) already exists"
         }
-        $null = $PrivateDnsVirtualNetworkLinkMutex.ReleaseMutex()
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
-    }
-        Else {
-        Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
-    }
-    }
-    catch [System.Threading.AbandonedMutexException] {
-        #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
-        $null = $PrivateDnsVirtualNetworkLinkMutex.ReleaseMutex()
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
-    }
-    #endregion
+        #endregion
 
-    #region Create the DNS zone group
-    $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
-    if ([string]::IsNullOrEmpty($PrivateDnsZoneGroup)) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
-        $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-    }
-    else {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) already exists"
-    }
-    #endregion
-    #endregion
-    #endregion
+        #region Create the private DNS Virtual Network Link and DNS Zone Group
+        $PrivateDnsZoneSetup = New-PsAvdPrivateDnsZoneSetup
+        $PrivateDnsZone = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZone
+        $PrivateDnsZoneConfig = $PrivateDnsZoneSetup[$PrivateDnsZoneName].PrivateDnsZoneConfig
+
+        #region Create the private DNS Virtual Network Link
+        $PrivateDnsVirtualNetworkLinkMutex = $null
+        $MutexName = "PrivateDnsVirtualNetworkLink"
+        $PrivateDnsVirtualNetworkLinkMutex = New-Object System.Threading.Mutex($false, $MutexName)
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
+
+        try {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
+            If ($PrivateDnsVirtualNetworkLinkMutex.WaitOne()) {         
+            $PrivateDnsVirtualNetworkLinkResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -Name $PrivateDnsZoneName
+            $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($VirtualNetwork.Name -replace "\W")
+            $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
+            if ($null -eq $PrivateDnsVirtualNetworkLink) {
+                $VirtualNetworkId = $VirtualNetwork.Id
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group)"
+                $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $PrivateDnsVirtualNetworkLinkResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $VirtualNetworkId 
+            }
+            else {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateDnsVirtualNetworkLinkName' Private DNS VNet Link (in the '$($VirtualNetwork.ResourceGroupName)' Resource Group) already exists"
+            }
+            $null = $PrivateDnsVirtualNetworkLinkMutex.ReleaseMutex()
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+        }
+            Else {
+            Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
+        }
+        }
+        catch [System.Threading.AbandonedMutexException] {
+            #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
+            $null = $PrivateDnsVirtualNetworkLinkMutex.ReleaseMutex()
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+        }
+        #endregion
+
+        #region Create the DNS zone group
+        $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
+        if ([string]::IsNullOrEmpty($PrivateDnsZoneGroup)) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
+            $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
+        }
+        else {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) already exists"
+        }
+        #endregion
+        #endregion
+        #endregion
 
     
-    #region Key Vault - Disabling Public Access
-    if ($null -ne $KeyVault) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault '$($KeyVault.VaultName)' (in the '$ResourceGroupName' Resource Group)"
-        #TODO: Implement a mutext instead of -ErrorAction Ignore
-        $null = Update-AzKeyVault -ResourceGroupName $ResourceGroupName -VaultName $KeyVault.VaultName -PublicNetworkAccess Disabled -ErrorAction Ignore
-    }
+        #region Key Vault - Disabling Public Access
+        if ($null -ne $KeyVault) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Key Vault '$($KeyVault.VaultName)' (in the '$ResourceGroupName' Resource Group)"
+            #TODO: Implement a mutext instead of -ErrorAction Ignore
+            $null = Update-AzKeyVault -ResourceGroupName $ResourceGroupName -VaultName $KeyVault.VaultName -PublicNetworkAccess Disabled -ErrorAction Ignore
+        }
 
-    if ($null -ne $StorageAccount) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Storage Account '$($StorageAccount.StorageAccountName)' (in the '$ResourceGroupName' Resource Group)"
-        $null = Set-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccount.StorageAccountName -PublicNetworkAccess Disabled
+        if ($null -ne $StorageAccount) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Storage Account '$($StorageAccount.StorageAccountName)' (in the '$ResourceGroupName' Resource Group)"
+            $null = Set-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccount.StorageAccountName -PublicNetworkAccess Disabled
+        }
+        #endregion
     }
-    #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -5964,6 +5967,8 @@ function New-PsAvdPooledHostPoolSetup {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainController: $($ThisDomainController | Select-Object -Property * | Out-String)"
         $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork -VM $ThisDomainController
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerVirtualNetwork: $($ThisDomainControllerVirtualNetwork | Select-Object -Property * | Out-String)"
+        $ThisDomainControllerSubnet = Get-AzVMSubnet
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ThisDomainControllerSubnet: $($ThisDomainControllerSubnet | Select-Object -Property * | Out-String)"
         #endregion
 
         #$DomainName = (Get-ADDomain).DNSRoot
@@ -6600,8 +6605,8 @@ function New-PsAvdPooledHostPoolSetup {
                 }
                 #endregion
 
-                #Creating a Private EndPoint for this Storage Account on this Subnet
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
+                #Creating a Private EndPoint for this Storage Account on the HostPool Subnet and the Subnet used by this DC
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
                 #endregion
             }
             else {
@@ -7514,8 +7519,8 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion 
                 }
 
-                #Creating a Private EndPoint for this Storage Account on this Subnet
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
+                #Creating a Private EndPoint for this Storage Account on the HostPool Subnet and the Subnet used by this DC
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
                 #endregion
 
                 #region AppAttach
@@ -8062,6 +8067,7 @@ function New-PsAvdHostPoolSetup {
             $null = Start-ThreadJob -ScriptBlock { $null } -ThrottleLimit $ThrottleLimit
 
             $ExportedFunctions = [scriptblock]::Create(@"
+                Set-Variable -Name MaximumFunctionCount -Value 32768 -Scope Global -Force
                 New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
@@ -8099,6 +8105,7 @@ function New-PsAvdHostPoolSetup {
                 Function New-PsAvdPrivateDnsZoneSetup { ${Function:New-PsAvdPrivateDnsZoneSetup} }
                 Function New-PsAvdPrivateEndpointSetup { ${Function:New-PsAvdPrivateEndpointSetup} }
                 Function Get-PsAvdPrivateDnsResourceGroupName { ${Function:Get-PsAvdPrivateDnsResourceGroupName} }
+                Function Get-AzVMSubnet { ${Function:Get-AzVMSubnet} }
 "@)
             $Jobs = @()
             $Jobs += foreach ($CurrentPooledHostPool in $PooledHostPools) {
@@ -8764,7 +8771,8 @@ function Get-PsAvdFSLogixProfileShare {
 
     foreach ($CurrentHostPool in $HostPool) {
         if ($CurrentHostPool.FSLogix) {
-            if ($CurrentHostPool.SubnetId -eq $ThisDomainControllerSubnet.Id) {
+            $PrivateEndpointSubnetId = (Get-AzPrivateEndpoint | Where-Object -FilterScript {$_.PrivateLinkServiceConnections.PrivateLinkServiceId -match $((Get-AzStorageAccount -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id)}).Subnet.Id
+            if ($ThisDomainControllerSubnet.Id -in $PrivateEndpointSubnetId) {
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
                 # Get the list of file shares in the storage account
                 $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
@@ -8774,7 +8782,7 @@ function Get-PsAvdFSLogixProfileShare {
                 }
             }
             else {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The FSLogix FileShare is not accessible from this subnet"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The FSLogix FileShare is not accessible from this subnet ('$($ThisDomainControllerSubnet.Id)')"
             }
         }
         else {
@@ -8808,7 +8816,8 @@ function Get-PsAvdMSIXProfileShare {
 
     foreach ($CurrentHostPool in $HostPool) {
         if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
-            if ($CurrentHostPool.SubnetId -eq $ThisDomainControllerSubnet.Id) {
+            $PrivateEndpointSubnetId = (Get-AzPrivateEndpoint | Where-Object -FilterScript {$_.PrivateLinkServiceConnections.PrivateLinkServiceId -match $((Get-AzStorageAccount -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id)}).Subnet.Id
+            if ($ThisDomainControllerSubnet.Id -in $PrivateEndpointSubnetId) {
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
                 # Get the list of file shares in the storage account
                 $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
@@ -8818,7 +8827,7 @@ function Get-PsAvdMSIXProfileShare {
                 }
             }
             else {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The MSIX FileShare is not accessible from this subnet"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The MSIX FileShare is not accessible from this subnet ('$($ThisDomainControllerSubnet.Id)')"
             }
         }
         else {
@@ -8974,8 +8983,6 @@ function New-PsAvdScalingPlan {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
-
-
 
 #From https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-how-to-enable-policy
 function New-PsAvdAzureSiteRecoveryPolicyAssignement {
