@@ -6990,8 +6990,6 @@ function New-PsAvdPooledHostPoolSetup {
                 }
                 #endregion
 
-                #Creating a Private EndPoint for this Storage Account on this Subnet
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
                 #endregion
             
                 #endregion
@@ -7515,6 +7513,9 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $obj.PackageApplication.AppId
                     #endregion 
                 }
+
+                #Creating a Private EndPoint for this Storage Account on this Subnet
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -StorageAccount $CurrentHostPoolStorageAccount
                 #endregion
 
                 #region AppAttach
