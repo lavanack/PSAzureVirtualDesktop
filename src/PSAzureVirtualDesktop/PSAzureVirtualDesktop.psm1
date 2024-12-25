@@ -5770,7 +5770,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $EventLogs = @(
                 [PSCustomObject] @{EventLogName = 'Application'; Levels = 1, 2, 3 }
                 [PSCustomObject] @{EventLogName = 'System'; Levels = 1, 2, 3 }
-                [PSCustomObject] @{EventLogName = 'Security'; Levels = 2 }
+                [PSCustomObject] @{EventLogName = 'Security'; Keywords = "4503599627370496" }
                 [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'; Levels = 1, 2, 3 }
                 [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin'; Levels = 1, 2, 3 }
                 [PSCustomObject] @{EventLogName = 'Microsoft-FSLogix-Apps/Operational' ; Levels = 1, 2, 3 }
@@ -5782,7 +5782,12 @@ function New-PsAvdPersonalHostPoolSetup {
                 $Levels = foreach ($CurrentLevel in $CurrentEventLog.Levels) {
                     "Level={0}" -f $CurrentLevel
                 }
-                "{0}!*[System[($($Levels -join ' or '))]]" -f $CurrentEventLog.EventLogName
+                if ($CurrentEventLog.EventLogName -eq 'Security') {
+                    "{0}!*[System[(band(Keywords,{1}))]]" -f $CurrentEventLog.EventLogName, $CurrentEventLog.Keywords 
+                }
+                else {
+                    "{0}!*[System[($($Levels -join ' or '))]]" -f $CurrentEventLog.EventLogName
+                }
             }
             $WindowsEventLogs = New-AzWindowsEventLogDataSourceObject -Name WindowsEventLogsDataSource -Stream Microsoft-Event -XPathQuery $XPathQuery
             #endregion
