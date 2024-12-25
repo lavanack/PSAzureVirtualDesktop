@@ -8771,7 +8771,7 @@ function Get-PsAvdFSLogixProfileShare {
 
     foreach ($CurrentHostPool in $HostPool) {
         if ($CurrentHostPool.FSLogix) {
-            $PrivateEndpointSubnetId = (Get-AzPrivateEndpoint | Where-Object -FilterScript {$_.PrivateLinkServiceConnections.PrivateLinkServiceId -match $((Get-AzStorageAccount -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id)}).Subnet.Id
+            $PrivateEndpointSubnetId = (Get-AzPrivateEndpoint | Where-Object -FilterScript {$_.PrivateLinkServiceConnections.PrivateLinkServiceId -match $((Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id)}).Subnet.Id
             if ($ThisDomainControllerSubnet.Id -in $PrivateEndpointSubnetId) {
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
                 # Get the list of file shares in the storage account
@@ -8816,7 +8816,7 @@ function Get-PsAvdMSIXProfileShare {
 
     foreach ($CurrentHostPool in $HostPool) {
         if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
-            $PrivateEndpointSubnetId = (Get-AzPrivateEndpoint | Where-Object -FilterScript {$_.PrivateLinkServiceConnections.PrivateLinkServiceId -match $((Get-AzStorageAccount -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id)}).Subnet.Id
+            $PrivateEndpointSubnetId = (Get-AzPrivateEndpoint | Where-Object -FilterScript {$_.PrivateLinkServiceConnections.PrivateLinkServiceId -match $((Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id)}).Subnet.Id
             if ($ThisDomainControllerSubnet.Id -in $PrivateEndpointSubnetId) {
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetMSIXStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
                 # Get the list of file shares in the storage account
