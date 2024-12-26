@@ -13,6 +13,8 @@
 
 ## Release Notes
 
+- 1.0.7
+  - Minor update
 - 1.0.6
   - Fixing bug for the Security eventlog (for collecting failures)
 - 1.0.5

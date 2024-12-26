@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Change log for PSAzureVirtualDesktop](#change-log-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
-  - [\[1.0.6\] - 2024-12-26](#106---2024-12-26)
+  - [\[1.0.7\] - 2024-12-26](#107---2024-12-26)
     - [Changed](#changed-1)
   - [\[1.0.5\] - 2024-12-26](#105---2024-12-26)
     - [Changed](#changed-2)
@@ -30,11 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated CHANGELOG.md
 - 2024-09-05 - Created CHANGELOG.md
 
-## [1.0.6] - 2024-12-26
+## [1.0.7] - 2024-12-26
+
+- Moving back pester test files to the Pester folder
 
 ### Changed
 
 - Fixing bug for the Security eventlog (for collecting failures)
+- Moving pester test files to the tools\Pester folder
 
 ## [1.0.5] - 2024-12-26
 
