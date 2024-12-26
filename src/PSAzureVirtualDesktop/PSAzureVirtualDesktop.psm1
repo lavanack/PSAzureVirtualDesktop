@@ -958,9 +958,9 @@ function New-PsAvdNoMFAUserEntraIDGroup {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
     #region Pester Tests for Azure MFA - Azure Instantiation
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $MFAAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MFA.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MFAAzurePesterTests: $MFAAzurePesterTests"
     $Container = New-PesterContainer -Path $MFAAzurePesterTests -Data @{ HostPool = $HostPool }
@@ -1056,9 +1056,9 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
 
     #region Pester Tests for Conditional Access Policy - Azure Instantiation
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $ConditionalAccessPolicyAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ConditionalAccessPolicy.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ConditionalAccessPolicyAzurePesterTests: $ConditionalAccessPolicyAzurePesterTests"
     $Container = New-PesterContainer -Path $ConditionalAccessPolicyAzurePesterTests
@@ -2916,9 +2916,9 @@ function Test-PsAvdStorageAccountNameAvailability {
 
     #region Pester Tests for Host Pool - Class Instantiation
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
     $Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
@@ -5641,9 +5641,9 @@ function New-PsAvdPersonalHostPoolSetup {
 
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
             $ModuleBase = Get-ModuleBase
-            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
             $HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
             $Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
@@ -7289,9 +7289,9 @@ function New-PsAvdPooledHostPoolSetup {
 
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
             $ModuleBase = Get-ModuleBase
-            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
             $HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
             $Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
@@ -7920,9 +7920,9 @@ function New-PsAvdHostPoolSetup {
 
         #region Pester Tests for Host Pool - Class Instantiation
         $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
         $HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
         $Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
@@ -8163,9 +8163,9 @@ function New-PsAvdHostPoolSetup {
         
         #region Pester Tests for Host Pool - Azure Instantiation
         $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
         $HostPoolAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Azure.Tests.ps1'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolAzurePesterTests: $HostPoolAzurePesterTests"
         $Container = New-PesterContainer -Path $HostPoolAzurePesterTests -Data @{ HostPool = $HostPool }
@@ -8174,9 +8174,9 @@ function New-PsAvdHostPoolSetup {
 
         #region Pester Tests for Azure Host Pool Session Host - OS Ephemeral Disk
         $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
         $OSEphemeralDiskAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OSEphemeralDisk.Azure.Tests.ps1'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OSEphemeralDiskAzurePesterTests: $OSEphemeralDiskAzurePesterTests"
         $Container = New-PesterContainer -Path $OSEphemeralDiskAzurePesterTests -Data @{ HostPool = $HostPool }
@@ -8185,9 +8185,9 @@ function New-PsAvdHostPoolSetup {
 
         #region Pester Tests for Azure Host Pool Session Host - Operational Insights
         $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
         $OperationalInsightsQueryAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OperationalInsightsQuery.Azure.Tests.ps1'
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OperationalInsightsQueryAzurePesterTests: $OperationalInsightsQueryAzurePesterTests"
         $Container = New-PesterContainer -Path $OperationalInsightsQueryAzurePesterTests -Data @{ HostPool = $HostPool }
@@ -8243,9 +8243,9 @@ function Invoke-PsAvdErrorLogFilePester {
 
     #region Pester Tests Errors - Log Files
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $ErrorLogFilePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'Error.LogFile.Tests.ps1'
     $Container = New-PesterContainer -Path $ErrorLogFilePesterTests -Data @{ LogDir = $LogDir }
     Invoke-Pester -Container $Container -Output Detailed -Verbose
@@ -8796,9 +8796,9 @@ function Get-PsAvdFSLogixProfileShare {
     }
     #region Pester Tests for Azure Host Pool - FSLogix File Share - Azure Instantiation
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $FSLogixAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'FSLogix.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FSLogixAzurePesterTests: $FSLogixAzurePesterTests"
     $Container = New-PesterContainer -Path $FSLogixAzurePesterTests -Data @{ HostPool = $HostPool }
@@ -8841,9 +8841,9 @@ function Get-PsAvdMSIXProfileShare {
     }
     #region Pester Tests for Azure Host Pool - MSIX File Share - Azure Instantiation
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $MSIXAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MSIX.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MSIXAzurePesterTests: $MSIXAzurePesterTests"
     $Container = New-PesterContainer -Path $MSIXAzurePesterTests -Data @{ HostPool = $HostPool }
@@ -8978,9 +8978,9 @@ function New-PsAvdScalingPlan {
     }
     #region Pester Tests for Azure Host Pool - Scaling Plan - Azure Instantiation
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $ScalingPlanAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ScalingPlan.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScalingPlanAzurePesterTests: $ScalingPlanAzurePesterTests"
     $Container = New-PesterContainer -Path $ScalingPlanAzurePesterTests -Data @{ HostPool = $HostPool }
@@ -9241,9 +9241,9 @@ function Import-PsAvdWorkbook {
     }
     #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
     $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'tools\Pester'
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'tools\Pester'
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
     $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBook = $WorkBooks }
