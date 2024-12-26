@@ -7747,7 +7747,7 @@ function New-PsAvdPooledHostPoolSetup {
             $EventLogs = @(
                 [PSCustomObject] @{EventLogName = 'Application'; Levels = 1, 2, 3 }
                 [PSCustomObject] @{EventLogName = 'System'; Levels = 1, 2, 3 }
-                [PSCustomObject] @{EventLogName = 'Security'; Levels = 2 }
+                [PSCustomObject] @{EventLogName = 'Security'; Keywords = "4503599627370496" }
                 [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational'; Levels = 1, 2, 3 }
                 [PSCustomObject] @{EventLogName = 'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Admin'; Levels = 1, 2, 3 }
                 [PSCustomObject] @{EventLogName = 'Microsoft-FSLogix-Apps/Operational' ; Levels = 1, 2, 3 }
