@@ -13,6 +13,10 @@
 
 ## Release Notes
 
+- 1.0.6
+  - Fixing bug for the Security eventlog (for collecting failures)
+- 1.0.5
+  - Published by mistake
 - 1.0.4
   - Adding AVD dedicated Virtual network support
   - Bug fixes

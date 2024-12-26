@@ -6,16 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Change log for PSAzureVirtualDesktop](#change-log-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
-  - [\[1.0.4\] - 2024-12-26](#104---2024-12-26)
+  - [\[1.0.6\] - 2024-12-26](#106---2024-12-26)
     - [Changed](#changed-1)
-  - [\[1.0.3\] - 2024-10-24](#103---2024-10-24)
+  - [\[1.0.5\] - 2024-12-26](#105---2024-12-26)
     - [Changed](#changed-2)
-  - [\[1.0.2\] - 2024-09-27](#102---2024-09-27)
+  - [\[1.0.4\] - 2024-12-26](#104---2024-12-26)
     - [Changed](#changed-3)
-  - [\[1.0.1\] - 2024-09-06](#101---2024-09-06)
+  - [\[1.0.3\] - 2024-10-24](#103---2024-10-24)
     - [Changed](#changed-4)
-  - [\[1.0.0\] - 2024-09-05](#100---2024-09-05)
+  - [\[1.0.2\] - 2024-09-27](#102---2024-09-27)
     - [Changed](#changed-5)
+  - [\[1.0.1\] - 2024-09-06](#101---2024-09-06)
+    - [Changed](#changed-6)
+  - [\[1.0.0\] - 2024-09-05](#100---2024-09-05)
+    - [Changed](#changed-7)
 
 ## [Unreleased]
 
@@ -25,6 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-11-11 - Updated CHANGELOG.md
 - 2024-09-27 - Updated CHANGELOG.md
 - 2024-09-05 - Created CHANGELOG.md
+
+## [1.0.6] - 2024-12-26
+
+### Changed
+
+- Fixing bug for the Security eventlog (for collecting failures)
+
+## [1.0.5] - 2024-12-26
+
+### Changed
+
+- Published by mistake
 
 ## [1.0.4] - 2024-12-26
 
