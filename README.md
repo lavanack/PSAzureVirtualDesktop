@@ -13,6 +13,14 @@
 
 ## Release Notes
 
+- 1.0.4
+  - Adding AVD dedicated Virtual network support
+  - Bug fixes
+- 1.0.3
+  - Adding functions for credential management
+  - Bug fixes
+- 1.0.2
+  - Code cleanup and optimizations
 - 1.0.1
   - Minor update
 - 1.0.0
