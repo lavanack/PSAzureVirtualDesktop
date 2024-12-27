@@ -4861,6 +4861,9 @@ function Copy-PsAvdMSIXDemoPFXFile {
     [CmdletBinding(PositionalBinding = $false)]
     param
     (
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('GitHub', 'WebSite')]
+        [string]$Source='GitHub',
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()] 
         [string[]] $ComputerName,
@@ -4875,10 +4878,16 @@ function Copy-PsAvdMSIXDemoPFXFile {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
-    $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
-    #$URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX/tests"
-    $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
-    $DownloadedPFXFiles = Get-GitFile -URI $URI -FileRegExPattern "\.pfx$" -Destination $TempFolder -Verbose
+    if ($Source -eq 'GitHub') {
+        $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
+        #$URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX/tests"
+        $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
+        $DownloadedPFXFiles = Get-GitFile -URI $URI -FileRegExPattern "\.pfx$" -Destination $TempFolder -Verbose
+    }
+    else {
+        $URI = "https://laurentvanacker.com/downloads/Azure/Azure%20Virtual%20Desktop/MSIX"
+        $DownloadedPFXFiles = Get-WebSiteFile -URI $URI -FileRegExPattern "\.pfx?$" -Destination $TempFolder -Verbose
+    }
 
     if ($Credential) {
         $Session = Wait-PSSession -ComputerName $ComputerName -Credential $Credential -PassThru
@@ -7467,8 +7476,8 @@ function New-PsAvdPooledHostPoolSetup {
                     #Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
                     #$result = Wait-PSSession -ComputerName $SessionHostNames
                     #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
-                    Copy-PsAvdMSIXDemoPFXFile -ComputerName $SessionHostNames
-                    #Copy-PsAvdMSIXDemoPFXFile -HostPool $CurrentHostPool
+                    Copy-PsAvdMSIXDemoPFXFile -Source WebSite -ComputerName $SessionHostNames
+                    #Copy-PsAvdMSIXDemoPFXFile -Source WebSite -HostPool $CurrentHostPool
 
                     #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
@@ -7498,7 +7507,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
                     #$result = Wait-PSSession -ComputerName $SessionHostNames
                     #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
-                    Copy-PsAvdMSIXDemoPFXFile -ComputerName $PrivateIpAddress -Credential $LocalAdminCredential
+                    Copy-PsAvdMSIXDemoPFXFile -Source WebSite -ComputerName $PrivateIpAddress -Credential $LocalAdminCredential
 
                     #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
@@ -8127,7 +8136,7 @@ function New-PsAvdHostPoolSetup {
                 Function Wait-PSSession { ${Function:Wait-PSSession} }
                 function Set-AdminConsent { ${Function:Set-AdminConsent} }
                 Function Get-GitFile { ${Function:Get-GitFile} }
-                Function Get-WebSiteFile { ${Function:Get-GitFile} }
+                Function Get-WebSiteFile { ${Function:Get-WebSiteFile} }
                 Function Copy-PsAvdMSIXDemoAppAttachPackage { ${Function:Copy-PsAvdMSIXDemoAppAttachPackage} }
                 Function Copy-PsAvdMSIXDemoPFXFile { ${Function:Copy-PsAvdMSIXDemoPFXFile} }
                 Function Get-PsAvdKeyVaultNameAvailability { ${Function:Get-PsAvdKeyVaultNameAvailability} }
