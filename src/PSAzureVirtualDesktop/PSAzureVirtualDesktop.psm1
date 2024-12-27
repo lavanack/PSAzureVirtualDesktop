@@ -4798,10 +4798,14 @@ function Get-GitFile {
     return $GitFile
 }
 
-function Copy-PsAvdMSIXDemoAppAttachPackage {
+function Get-WebSiteFile {
     [CmdletBinding(PositionalBinding = $false)]
     param
     (
+        [Parameter(Mandatory = $true)]
+        [string]$URI,
+        [Parameter(Mandatory = $true)]
+        [string]$FileRegExPattern,
         [Parameter(Mandatory = $true)]
         [string]$Destination
     )   
@@ -4809,11 +4813,46 @@ function Copy-PsAvdMSIXDemoAppAttachPackage {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
-    $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
-    #$URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX/tests"
-    $MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhdx?$" -Destination $Destination -Verbose
-    #$MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhd$" -Destination $Destination -Verbose
+    #region Getting all request files
+    $Response = Invoke-WebRequest -Uri $URI -UseBasicParsing
+    $Files = $Response.Links.href | Where-Object -FilterScript { $_ -match $FileRegExPattern }
+    $FileURIs = $Files | ForEach-Object -Process { "{0}/{1}" -f $URI.Trim("/"), $_ }
+    Start-BitsTransfer -Source $FileURIs -Destination $(@($Destination) * $($FileURIs.Count))
+    $WebSiteFile = $FileURIs | ForEach-Object -Process { Join-Path -Path $Destination -ChildPath $($_ -replace ".*/") }
+    #endregion
 
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    return $WebSiteFile
+}
+
+function Copy-PsAvdMSIXDemoAppAttachPackage {
+    [CmdletBinding(PositionalBinding = $false)]
+    param
+    (
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('GitHub', 'WebSite')]
+        [string]$Source='GitHub',
+
+        [Parameter(Mandatory = $true)]
+        [string]$Destination
+    )   
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Source: $Source"
+
+    if ($Source -eq 'GitHub') {
+        $URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
+        #$URI = "https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX/tests"
+        $MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhdx?$" -Destination $Destination -Verbose
+        #$MSIXDemoPackage = Get-GitFile -URI $URI -FileRegExPattern "\.vhd$" -Destination $Destination -Verbose
+    }
+    else {
+        $URI = "https://laurentvanacker.com/downloads/Azure/Azure%20Virtual%20Desktop/MSIX"
+        $MSIXDemoPackage = Get-WebSiteFile -URI $URI -FileRegExPattern "\.vhdx?$" -Destination $Destination -Verbose
+    }
+    
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $MSIXDemoPackage
 }
@@ -6865,7 +6904,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
 
                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
-                    $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+                    $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
                     #region RBAC Management
                     #Constrain the scope to the target file share
@@ -8088,6 +8127,7 @@ function New-PsAvdHostPoolSetup {
                 Function Wait-PSSession { ${Function:Wait-PSSession} }
                 function Set-AdminConsent { ${Function:Set-AdminConsent} }
                 Function Get-GitFile { ${Function:Get-GitFile} }
+                Function Get-WebSiteFile { ${Function:Get-GitFile} }
                 Function Copy-PsAvdMSIXDemoAppAttachPackage { ${Function:Copy-PsAvdMSIXDemoAppAttachPackage} }
                 Function Copy-PsAvdMSIXDemoPFXFile { ${Function:Copy-PsAvdMSIXDemoPFXFile} }
                 Function Get-PsAvdKeyVaultNameAvailability { ${Function:Get-PsAvdKeyVaultNameAvailability} }
@@ -9280,6 +9320,42 @@ function Get-AzurePairedRegion {
 
     (Get-AzLocation -OutVariable locations) | Select-Object -Property Location, PhysicalLocation, @{Name='PairedRegion';Expression={$_.PairedRegion.Name}}, @{Name='PairedRegionPhysicalLocation';Expression={($locations | Where-Object -FilterScript {$_.location -eq $_.PairedRegion.Name}).PhysicalLocation} } | Where-Object -FilterScript { $_.PairedRegion } | Group-Object -Property Location -AsHashTable -AsString
 
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
+function Get-PsAvdAzGalleryImageDefinition {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param (
+        [Parameter(Mandatory = $true, ParameterSetName = 'RegionDisplayName')]
+        [ValidateNotNullOrEmpty()]
+        [string[]] $RegionDisplayName,
+        [Parameter(Mandatory = $true, ParameterSetName = 'Region')]
+        [ValidateNotNullOrEmpty()]
+        [string[]] $Region
+    )
+
+    if ([string]::IsNullOrEmpty($RegionDisplayName)) {
+        $RegionDisplayName = (Get-AzLocation | Where-Object {$_.Location -in $Region}).DisplayName
+    }
+    
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
+    Get-AzGallery | Select-Object -Property ResourceGroupName, @{Name="GalleryName";Expression={$_.Name}} | Get-AzGalleryImageDefinition | Where-Object -FilterScript { 
+        [string[]]$TargetRegionNames = (Get-AzGalleryImageVersion -ResourceGroupName $_.ResourceGroupName -GalleryName $($_.Id  -replace "^.*/galleries/" -replace "/images/.*$") -GalleryImageDefinitionName $_.Name).PublishingProfile.TargetRegions.Name 
+        $count = $0;
+        foreach( $TargetRegionName in $TargetRegionNames) { 
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TargetRegionName: $TargetRegionName"
+            if ($RegionDisplayName -contains $TargetRegionName) {
+                $count++
+            }
+        }
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$count: $count"
+        if ($count -eq $RegionDisplayName.Count) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+            return $true
+        }
+    }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 #endregion
