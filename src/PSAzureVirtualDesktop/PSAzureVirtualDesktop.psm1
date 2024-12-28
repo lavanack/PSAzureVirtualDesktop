@@ -4818,9 +4818,12 @@ function Get-WebSiteFile {
     $Files = $Response.Links.href | Where-Object -FilterScript { $_ -match $FileRegExPattern }
     $FileURIs = $Files | ForEach-Object -Process { "{0}/{1}" -f $URI.Trim("/"), $_ }
     Start-BitsTransfer -Source $FileURIs -Destination $(@($Destination) * $($FileURIs.Count))
-    $WebSiteFile = $FileURIs | ForEach-Object -Process { Join-Path -Path $Destination -ChildPath $($_ -replace ".*/") }
+    $DestinationFiles = $FileURIs | ForEach-Object -Process { Join-Path -Path $Destination -ChildPath $($_ -replace ".*/") }
     #endregion
 
+    $WebSiteFile = foreach ($CurrentDestinationFile in $DestinationFiles) {
+        Get-Item -Path $CurrentDestinationFile 
+    }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $WebSiteFile
 }
