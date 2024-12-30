@@ -377,6 +377,7 @@ class PooledHostPool : HostPool {
     [ValidateNotNullOrEmpty()] [boolean] $AppAttach
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
     [String] $PreferredAppGroupType  
+    [String] $FSLogixCloudCachePairedPooledHostPool  
 
 
     hidden Init() {
@@ -399,6 +400,8 @@ class PooledHostPool : HostPool {
         $this.LoadBalancerType = "BreadthFirst"
         $this.PreferredAppGroupType = "Desktop"
         $this.RefreshNames()
+        $this.FSLogixCloudCachePairedPooledHostPool = $null
+
     }
 
     PooledHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
@@ -428,15 +431,20 @@ class PooledHostPool : HostPool {
 
     [string] GetRecoveryLocationFSLogixStorageAccountName() {
         if ($this.FSlogixCloudCache) {
-            if ([string]::IsNullOrEmpty($this.PairedRegion)) {
-                return [string]::Empty
+            if ($this.FSLogixCloudCachePairedPooledHostPool) {
+                return $this.FSLogixCloudCachePairedPooledHostPool.GetFSLogixStorageAccountName()
             }
             else {
-                $StorageAccountNameMaxLength = 24
-                $RecoveryLocationFSLogixStorageAccountName = "fsl{0}" -f $($this.Name.ToLower() -replace "\W")
-                $RecoveryLocationFSLogixStorageAccountName = $RecoveryLocationFSLogixStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $RecoveryLocationFSLogixStorageAccountName.Length)).ToLower() 
-                $RecoveryLocationFSLogixStorageAccountName = $RecoveryLocationFSLogixStorageAccountName -replace [HostPool]::AzLocationShortNameHT[$this.Location].shortName, [HostPool]::AzLocationShortNameHT[$this.PairedRegion].shortName
-                return $RecoveryLocationFSLogixStorageAccountName
+                if ([string]::IsNullOrEmpty($this.PairedRegion)) {
+                    return [string]::Empty
+                }
+                else {
+                    $StorageAccountNameMaxLength = 24
+                    $RecoveryLocationFSLogixStorageAccountName = "fsl{0}" -f $($this.Name.ToLower() -replace "\W")
+                    $RecoveryLocationFSLogixStorageAccountName = $RecoveryLocationFSLogixStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $RecoveryLocationFSLogixStorageAccountName.Length)).ToLower() 
+                    $RecoveryLocationFSLogixStorageAccountName = $RecoveryLocationFSLogixStorageAccountName -replace [HostPool]::AzLocationShortNameHT[$this.Location].shortName, [HostPool]::AzLocationShortNameHT[$this.PairedRegion].shortName
+                    return $RecoveryLocationFSLogixStorageAccountName
+                }
             }
         }
         else {
@@ -509,6 +517,14 @@ class PooledHostPool : HostPool {
 
     [PooledHostPool]DisableFSLogixCloudCache() {
         $this.FSLogixCloudCache = $false
+        return $this
+    }
+
+    [PooledHostPool]EnableFSLogixCloudCache([PooledHostPool] $FSLogixCloudCachePairedPooledHostPool) {
+        $this.EnableFSLogixCloudCache()
+        $this.FSLogixCloudCachePairedPooledHostPool = $FSLogixCloudCachePairedPooledHostPool
+        $FSLogixCloudCachePairedPooledHostPool.EnableFSLogixCloudCache()
+        $FSLogixCloudCachePairedPooledHostPool.FSLogixCloudCachePairedPooledHostPool = $this
         return $this
     }
 
@@ -4673,12 +4689,13 @@ function Add-PsAvdSessionHost {
             #From https://stackoverflow.com/questions/7162090/how-do-i-start-a-job-of-a-function-i-just-defined
             #From https://stackoverflow.com/questions/76844912/how-to-call-a-class-object-in-powershell-jobs
             $ExportedFunctions = [scriptblock]::Create(@"
-            Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
-            Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
-            Function New-PsAvdSessionHost { ${Function:New-PsAvdSessionHost} }          
-            Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }          
-            Function Get-AzVMCompute { ${Function:Get-AzVMCompute} }
-            Function Get-CallerPreference { ${Function:Get-CallerPreference} }
+                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = $true } -Scope Global
+                Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
+                Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
+                Function New-PsAvdSessionHost { ${Function:New-PsAvdSessionHost} }          
+                Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }          
+                Function Get-AzVMCompute { ${Function:Get-AzVMCompute} }
+                Function Get-CallerPreference { ${Function:Get-CallerPreference} }
 "@)
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Starting background job for '$NextSessionHostName' SessionHost Creation (via New-PsAvdSessionHost) ... "
             try {
@@ -8136,6 +8153,7 @@ function New-PsAvdHostPoolSetup {
             $ExportedFunctions = [scriptblock]::Create(@"
                 Set-Variable -Name MaximumFunctionCount -Value 32768 -Scope Global -Force
                 New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global
+                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = $true } -Scope Global
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
                 Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }
