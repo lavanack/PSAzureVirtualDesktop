@@ -526,7 +526,8 @@ class PooledHostPool : HostPool {
     }
 
     [PooledHostPool]EnableAppAttach() {
-        if (-not($this.IsMicrosoftEntraIdJoined())) {
+        #if (-not($this.IsMicrosoftEntraIdJoined())) {
+        if ($this.IsActiveDirectoryJoined()) {
             $this.AppAttach = $true
             $this.DisableMSIX()
         }
@@ -539,7 +540,8 @@ class PooledHostPool : HostPool {
     }
 
     [PooledHostPool]EnableMSIX() {
-        if (-not($this.IsMicrosoftEntraIdJoined())) {
+        #if (-not($this.IsMicrosoftEntraIdJoined())) {
+        if ($this.IsActiveDirectoryJoined()) {
             $this.MSIX = $true
             $this.DisableAppAttach()
         }
@@ -1821,7 +1823,7 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
         { (-not([string]::IsNullOrEmpty($HostPoolRecoveryLocationStorageAccountName))) -and ($_.FullPath -eq '\FSLogix\Profile Containers\CCD Locations') } {
             $CCDLocations = @(
                 "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolStorageAccountName, $StorageEndpointSuffix
-                "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolRecoveryLocationStorageAccountName.GetRecoveryLocationFSLogixStorageAccountName(), $StorageEndpointSuffix
+                "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolRecoveryLocationStorageAccountName, $StorageEndpointSuffix
             ) -join ';'
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue $CCDLocations -Enable; continue 
         } 
@@ -3639,7 +3641,7 @@ function Grant-PsAvdADJoinPermission {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
 
     # Import the Active Directory module
-    Import-Module ActiveDirectory 
+    Import-Module ActiveDirectory #-DisableNameChecking
 
     $ComputerGUID = "bf967a86-0de6-11d0-a285-00aa003049e2"
     $ObjectTypeGUIDs = @{
@@ -3789,7 +3791,7 @@ function Grant-PsAvdADJoinPermission {
 
     # Define the security SamAccountName (user or group) to which you want to grant the permission
     $IdentityReference = [System.Security.Principal.IdentityReference] $ADUser.SID
-    Import-Module -Name ActiveDirectory
+    Import-Module -Name ActiveDirectory #-DisableNameChecking
     $Permission = Get-Acl -Path "AD:$OrganizationalUnit"
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Applying required privileges to '$($Credential.UserName)' AD User (for adding Azure VM to ADDS)"
@@ -3801,7 +3803,7 @@ function Grant-PsAvdADJoinPermission {
     # Apply the permission recursively to the OU and its descendants
     Get-ADOrganizationalUnit -Filter "DistinguishedName -like '$OrganizationalUnit'" -SearchBase $OrganizationalUnit -SearchScope Subtree | ForEach-Object {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Applying those required privileges to '$_'"
-        Import-Module -Name ActiveDirectory
+        Import-Module -Name ActiveDirectory #-DisableNameChecking
         Set-Acl -Path "AD:$_" $Permission
     }
 
@@ -4212,6 +4214,7 @@ function Get-AzVMSubnet {
     # Get the subnet ID
     $VMSubnetId = $VMNetworkInterface.IpConfigurations[0].Subnet.Id
     $VMSubnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $VMSubnetId
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $VMSubnet
 }
 
@@ -4287,7 +4290,7 @@ function New-PsAvdSessionHost {
     $OSDiskSize = [HostPool]::VMProfileOsdiskSizeGb
     $OSDiskType = "Premium_LRS"
 
-    Import-Module -Name Az.Compute
+    Import-Module -Name Az.Compute -DisableNameChecking
 
     if ($null -eq (Get-AzVMSize -Location $Location | Where-Object -FilterScript { $_.Name -eq $VMSize })) {
         Write-Error "The '$VMSize' VM Size is not available in the '$($Location)' location" -ErrorAction Stop
@@ -5044,7 +5047,7 @@ function Start-MicrosoftEntraIDConnectSync {
 
     if (Get-Service -Name ADSync -ErrorAction Ignore) {
         Start-Service -Name ADSync
-        Import-Module -Name "C:\Program Files\Microsoft Azure AD Sync\Bin\ADSync"
+        Import-Module -Name "C:\Program Files\Microsoft Azure AD Sync\Bin\ADSync" #-DisableNameChecking
         $ADSyncConnectorRunStatus = Get-ADSyncConnectorRunStatus
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ADSyncConnectorRunStatus: $($ADSyncConnectorRunStatus | Out-String)"
         if (-not((Get-ADSyncScheduler).SyncCycleInProgress)) {
@@ -6028,10 +6031,18 @@ function New-PsAvdPooledHostPoolSetup {
         #endregion
 
         #$DomainName = (Get-ADDomain).DNSRoot
-        #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
-        $DomainInformation = (Get-ADDomain)
-        $DomainGuid = $DomainInformation.ObjectGUID.ToString()
-        $DomainName = $DomainInformation.DnsRoot
+        try {
+            $DomainInformation = Get-ADDomain -ErrorAction Stop
+            $DomainGuid = $DomainInformation.ObjectGUID.ToString()
+            $DomainName = $DomainInformation.DnsRoot
+        }
+        catch {
+            # Load the necessary .NET namespace
+            Add-Type -AssemblyName System.DirectoryServices
+            $DomainContext = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain()
+            $DomainGuid = [Guid]::new(($DomainContext.GetDirectoryEntry().Properties["objectGuid"][0])).Guid
+            $DomainName = $DomainContext.Name
+        }
         #endregion 
 
     }
@@ -6358,7 +6369,7 @@ function New-PsAvdPooledHostPoolSetup {
                             Pop-Location
                         }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
-                        Import-Module AzFilesHybrid #-Force
+                        Import-Module AzFilesHybrid  #-DisableNameChecking #-Force
                         #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"#
                         $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
                         #Debug-AzStorageAccountAuth -StorageAccountName $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName -Verbose
@@ -6783,6 +6794,7 @@ function New-PsAvdPooledHostPoolSetup {
                 $null = Set-PsAvdGPRegistryValue -Verbose -Name $CurrentHostPoolMSIXGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -ValueName "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.VHDX.metadata" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
                 $null = Set-PsAvdGPRegistryValue -Verbose -Name $CurrentHostPoolMSIXGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -ValueName "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles\*.CIM" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
                 #endregion
+                #endregion
 
                 #region Dedicated Resource Group Management (1 per HostPool)
                 $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
@@ -6816,7 +6828,7 @@ function New-PsAvdPooledHostPoolSetup {
                         Pop-Location
                     }
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
-                    Import-Module AzFilesHybrid #-Force
+                    Import-Module AzFilesHybrid #-DisableNameChecking #-Force
                     #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
                     $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
 
@@ -7054,10 +7066,9 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion
             
                 #endregion
-                #endregion
             }
             else {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX NOT enabled for '$($CurrentHostPool.Name)' HostPool"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX AppAttach Or Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
             }
             #endregion
 
@@ -7439,7 +7450,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
 
                     #region Configuring FSLogix - Intune Configuration Profile - Settings Catalog
-                    New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -HostPoolRecoveryLocationStorageAccountName $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName() -Watermarking:$CurrentHostPool.Watermarking
+                    New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -HostPoolRecoveryLocationStorageAccountName $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()
                     #endregion
                     #endregion
 
@@ -7487,16 +7498,17 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" -CimSession $SessionHostNames
                     #endregion 
                 }
+                <#
                 else {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' is not AD joined"
 
                     $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     $VM = $SessionHosts.ResourceId | Get-AzVM
-                    <#
-                    $LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
-                    $LocalAdminPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
-                    $LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
-                    #>
+                    
+                    #$LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
+                    #$LocalAdminPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
+                    #$LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
+
                     $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
 
                     $PrivateIpAddress = $VM | ForEach-Object -Process {
@@ -7521,7 +7533,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #Restoring the previous trustedhosts value
                     Set-Item -Path WSMan:localhost\client\trustedhosts -Value $Trustedhosts -Force
                 }
-
+                #>
                 #region Restarting the Session Hosts
                 $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
                     Restart-AzVM -Name $CurrentSessionHostName -ResourceGroupName $CurrentHostPoolResourceGroupName -Confirm:$false -AsJob
@@ -7659,6 +7671,9 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion 
                 }
                 #endregion
+            }
+            else {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX AppAttach Or Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
             }
             #endregion
 
@@ -7980,7 +7995,7 @@ function New-PsAvdHostPoolSetup {
         Invoke-Pester -Container $Container -Output Detailed -Verbose
         #endregion
 
-        Import-Module -Name DnsServer
+        Import-Module -Name DnsServer #-DisableNameChecking
         $DnsServerConditionalForwarderZones = "file.core.windows.net", "vaultcore.azure.net", "vault.azure.net"
         #region DNS Conditional Forwarders
         foreach ($CurrentDnsServerConditionalForwarderZone in $DnsServerConditionalForwarderZones) {
