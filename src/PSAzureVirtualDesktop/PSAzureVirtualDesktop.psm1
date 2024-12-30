@@ -1834,13 +1834,6 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
         { ([string]::IsNullOrEmpty($HostPoolRecoveryLocationStorageAccountName)) -and ($_.FullPath -eq '\FSLogix\Profile Containers\VHD Locations') } {
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles" -Enable; continue 
         } 
-        { (-not([string]::IsNullOrEmpty($HostPoolRecoveryLocationStorageAccountName))) -and ($_.FullPath -eq '\FSLogix\Profile Containers\Cloud Cache\CCD Locations') } {
-            $CCDLocations = @(
-                "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolStorageAccountName, $StorageEndpointSuffix
-                "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolRecoveryLocationStorageAccountName, $StorageEndpointSuffix
-            ) -join ';'
-            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue $CCDLocations -Enable; continue 
-        } 
         { $_.FullPath -eq '\FSLogix\Profile Containers\Redirection XML Source Folder' } {
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersConfigurationSettings -Setting $_ -SettingValue "\\$HostPoolStorageAccountName.file.$StorageEndpointSuffix\profiles" -Enable; continue 
         } 
@@ -1850,7 +1843,29 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     }
     #endregion
 
-    #region 'FSLogix > Profile Containers Settings > Container and Directory Naming' Settings
+    #region 'FSLogix > Profile Containers > Cloud Cache' Settings
+    #$FSLogixProfileContainersCloudCacheConfigurationChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript {$_.displayName -eq "Cloud Cache"}
+    $FSLogixProfileContainersCloudCacheConfigurationChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\FSLogix\Profile Containers\Cloud Cache" }
+    $FSLogixProfileContainersCloudCacheConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($FSLogixProfileContainersCloudCacheConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
+
+    #Adding a FullPath Property
+    $FSLogixProfileContainersCloudCacheConfigurationSettings = $FSLogixProfileContainersCloudCacheConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $FSLogixProfileContainersCloudCacheConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
+
+    [array] $settings += switch ($FSLogixProfileContainersCloudCacheConfigurationSettings) {
+        { (-not([string]::IsNullOrEmpty($HostPoolRecoveryLocationStorageAccountName))) -and ($_.FullPath -eq '\FSLogix\Profile Containers\Cloud Cache\CCD Locations') } {
+            $CCDLocations = @(
+                "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolStorageAccountName, $StorageEndpointSuffix
+                "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolRecoveryLocationStorageAccountName, $StorageEndpointSuffix
+            ) -join ';'
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersCloudCacheConfigurationSettings -Setting $_ -SettingValue $CCDLocations -Enable; continue 
+        } 
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
+    }
+    #endregion
+
+    #region 'FSLogix > Profile Containers > Container and Directory Naming' Settings
     $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingChildCategory = $FSLogixConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\FSLogix\Profile Containers\Container and Directory Naming" }
     $FSLogixProfileContainersConfigurationContainerAndDirectoryNamingSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($FSLogixProfileContainersConfigurationContainerAndDirectoryNamingChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
 
@@ -4689,7 +4704,7 @@ function Add-PsAvdSessionHost {
             #From https://stackoverflow.com/questions/7162090/how-do-i-start-a-job-of-a-function-i-just-defined
             #From https://stackoverflow.com/questions/76844912/how-to-call-a-class-object-in-powershell-jobs
             $ExportedFunctions = [scriptblock]::Create(@"
-                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = $true } -Scope Global
+                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
                 Function New-PsAvdSessionHost { ${Function:New-PsAvdSessionHost} }          
@@ -8153,7 +8168,7 @@ function New-PsAvdHostPoolSetup {
             $ExportedFunctions = [scriptblock]::Create(@"
                 Set-Variable -Name MaximumFunctionCount -Value 32768 -Scope Global -Force
                 New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global
-                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = $true } -Scope Global
+                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
                 Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }
