@@ -32,6 +32,7 @@ Class HostPool {
     [boolean] $Spot
     [boolean] $ScalingPlan
     [boolean] $Watermarking
+    [boolean] $RDPShortPath
     [ValidateNotNullOrEmpty()] [string] $VMSize
     [string] $ImagePublisherName
     [string] $ImageOffer
@@ -109,6 +110,8 @@ Class HostPool {
         $this.DisableSpotInstance()
         $this.DisableIntune()            
         $this.DisableScalingPlan()
+        $this.DisableWatermarking()
+        $this.DisableRDPShortPath()
         $this.KeyVault = $KeyVault
         $this.IdentityProvider = [IdentityProvider]::ActiveDirectory
         $this.ASRFailOverVNetId = $null
@@ -164,7 +167,7 @@ Class HostPool {
     }
 
     [string] GetAzurePairedRegion() {
-        #Non working solution in case of a ThreadJob (don't know why)
+        #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
         #return [HostPool]::GetAzurePairedRegion($this.Location)
         [HostPool]::BuildAzurePairedRegionHashtable()
         return ([HostPool]::AzPairedRegionHT[$this.Location].PairedRegion -as [string])
@@ -217,6 +220,16 @@ Class HostPool {
 
     [HostPool]EnableScalingPlan() {
         $this.ScalingPlan = $true
+        return $this
+    }
+
+    [HostPool]DisableRDPShortPath() {
+        $this.RDPShortPath = $false
+        return $this
+    }
+
+    [HostPool] EnableRDPShortPath() {
+        $this.RDPShortPath = $true
         return $this
     }
 
@@ -377,7 +390,8 @@ class PooledHostPool : HostPool {
     [ValidateNotNullOrEmpty()] [boolean] $AppAttach
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
     [String] $PreferredAppGroupType  
-    [String] $FSLogixCloudCachePairedPooledHostPool  
+    [PooledHostPool] $FSLogixCloudCachePairedPooledHostPool  
+    [String] $FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
 
 
     hidden Init() {
@@ -431,28 +445,14 @@ class PooledHostPool : HostPool {
 
     [string] GetRecoveryLocationFSLogixStorageAccountName() {
         if ($this.FSlogixCloudCache) {
-            if ($this.FSLogixCloudCachePairedPooledHostPool) {
-                return $this.FSLogixCloudCachePairedPooledHostPool.GetFSLogixStorageAccountName()
-            }
-            else {
-                if ([string]::IsNullOrEmpty($this.PairedRegion)) {
-                    return [string]::Empty
-                }
-                else {
-                    $StorageAccountNameMaxLength = 24
-                    $RecoveryLocationFSLogixStorageAccountName = "fsl{0}" -f $($this.Name.ToLower() -replace "\W")
-                    $RecoveryLocationFSLogixStorageAccountName = $RecoveryLocationFSLogixStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $RecoveryLocationFSLogixStorageAccountName.Length)).ToLower() 
-                    $RecoveryLocationFSLogixStorageAccountName = $RecoveryLocationFSLogixStorageAccountName -replace [HostPool]::AzLocationShortNameHT[$this.Location].shortName, [HostPool]::AzLocationShortNameHT[$this.PairedRegion].shortName
-                    return $RecoveryLocationFSLogixStorageAccountName
-                }
-            }
+            return $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
         }
         else {
-            return [string]::Empty
+            return $null
         }
 
         <#
-        #Non working solution in case of a ThreadJob (don't know why)
+        #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
         if ($this.FSlogixCloudCache) {
             $AzurePairedRegion = $this.GetAzurePairedRegion()
             if ([string]::IsNullOrEmpty($AzurePairedRegion)) {
@@ -517,20 +517,32 @@ class PooledHostPool : HostPool {
 
     [PooledHostPool]DisableFSLogixCloudCache() {
         $this.FSLogixCloudCache = $false
+        $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $null
         return $this
     }
 
     [PooledHostPool]EnableFSLogixCloudCache([PooledHostPool] $FSLogixCloudCachePairedPooledHostPool) {
         $this.EnableFSLogixCloudCache()
         $this.FSLogixCloudCachePairedPooledHostPool = $FSLogixCloudCachePairedPooledHostPool
+        $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.FSLogixCloudCachePairedPooledHostPool.GetFSLogixStorageAccountName()
+
         $FSLogixCloudCachePairedPooledHostPool.EnableFSLogixCloudCache()
         $FSLogixCloudCachePairedPooledHostPool.FSLogixCloudCachePairedPooledHostPool = $this
+        $FSLogixCloudCachePairedPooledHostPool.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName()
         return $this
     }
 
     [PooledHostPool]EnableFSLogixCloudCache() {
         $this.EnableFSLogix()
         $this.FSLogixCloudCache = $true
+        if ([string]::IsNullOrEmpty($this.PairedRegion)) {
+            $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName()
+        }
+        else 
+        {
+            $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName() -replace [HostPool]::AzLocationShortNameHT[$this.Location].shortName, [HostPool]::AzLocationShortNameHT[$this.PairedRegion].shortName
+        }
+
         return $this
     }
 
@@ -773,8 +785,8 @@ function Connect-PsAvdAzure {
     [CmdletBinding(PositionalBinding = $false)]
     Param()
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     #region Azure Connection
 
     try { 
@@ -804,8 +816,8 @@ function Register-PsAvdRequiredResourceProvider {
     [CmdletBinding(PositionalBinding = $false)]
     Param()
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     #region Azure Provider Registration
     #To use Azure Virtual Desktop, you have to register for the providers and to ensure that RegistrationState will be set to Registered.
     #$RequiredResourceProviders = "Microsoft.ContainerInstance", "Microsoft.DesktopVirtualization", "Microsoft.Insights", "Microsoft.VirtualMachineImages", "Microsoft.Storage", "Microsoft.Compute", "Microsoft.KeyVault", "Microsoft.ManagedIdentity"
@@ -866,8 +878,8 @@ function Install-PsAvdFSLogixGpoSettings {
     Param(
         [switch] $Force
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     #region Installing FSLogix GPO Setting
     if (-not(Test-Path -Path $env:SystemRoot\policyDefinitions\en-US\fslogix.adml -PathType Leaf) -or -not(Test-Path -Path $env:SystemRoot\policyDefinitions\fslogix.admx -PathType Leaf) -or $Force) {
         #From  https://aka.ms/fslogix-latest
@@ -904,8 +916,8 @@ function Install-PsAvdAvdGpoSettings {
     Param(
         [switch] $Force
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     #region Installing AVD GPO Setting
     if (-not(Test-Path -Path $env:SystemRoot\policyDefinitions\en-US\terminalserver-avd.adml -PathType Leaf) -or -not(Test-Path -Path $env:SystemRoot\policyDefinitions\terminalserver-avd.admx -PathType Leaf) -or $Force) {
         $AVDGPOLatestCabName = 'AVDGPTemplate.cab'
@@ -939,8 +951,8 @@ function New-PsAvdNoMFAUserEntraIDGroup {
     Param (
         [string] $NoMFAEntraIDGroupName = 'No-MFA Users'
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $EntraIDGroupMutex = $null
     $MutexName = "EntraIDGroupMutex"
@@ -994,8 +1006,8 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
         [string] $DisplayName = "[AVD] Require multifactor authentication for all users",
         [string[]] $IncludeUsers = @("All")
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $DirectorySynchronizationAccountsRole = Get-MgBetaDirectoryRole -Filter "DisplayName eq 'Directory Synchronization Accounts'"
     $ExcludeGroups = foreach ($CurrentExcludeGroupName in $ExcludeGroupName) {
@@ -1097,8 +1109,8 @@ function Get-MgGraphObject {
         [string] $Uri
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $GraphRequestUri = $Uri
     $MgGraphObject = Do {
@@ -1123,8 +1135,8 @@ function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
         [uint16] $TimeoutInSeconds = 300
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $mobilityManagementPolicyId = "0000000a-0000-0000-c000-000000000000"  
     #Bug : returns $null
@@ -1167,8 +1179,8 @@ Function Sync-PsAvdIntuneSessionHostViaGraphAPI {
         [object[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     #region Devices
@@ -1193,8 +1205,8 @@ Function Remove-PsAvdIntuneItemViaGraphAPI {
         [object[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     #region deviceManagementScripts and groupPolicyConfigurations
@@ -1254,8 +1266,8 @@ Function New-PsAvdIntunePowerShellScriptViaGraphAPI {
         [string]$ScriptPath
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     #region Azure AD Desktop Application Group 
@@ -1363,8 +1375,8 @@ function Get-PsAvdGroupPolicyDefinitionPresentationViaGraphAPI {
         [Parameter(Mandatory = $true)]
         [array] $GroupPolicyDefinition
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     $GroupPolicyDefinitionPresentationHT = @{}
@@ -1390,8 +1402,8 @@ function Import-PsAvdFSLogixADMXViaGraphAPI {
     [CmdletBinding(PositionalBinding = $false)]
     Param (
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     #Checking if the ADMX is already present -
@@ -1506,8 +1518,8 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI {
         [switch] $Disable
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Parameter Set: $($psCmdlet.ParameterSetName)"
@@ -1601,8 +1613,8 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
         [switch] $Disable
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Parameter Set: $($psCmdlet.ParameterSetName)"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($Setting.FullPath)'"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SettingValue: $SettingValue"
@@ -1728,8 +1740,8 @@ function Add-PsAvdCategoryFullPath {
         [object[]] $Categories,
         [object] $ParentCategory
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ParentCategory: $($CurrentCategory.displayName)"
     if ($null -eq $ParentCategory) {
@@ -1766,8 +1778,8 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
         [Alias('RecoveryLocationStorageAccountName')]
         [string] $HostPoolRecoveryLocationStorageAccountName
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     #region Devices Azure AD group 
@@ -2088,8 +2100,8 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
         [Parameter(Mandatory = $false)]
         [string] $StorageEndpointSuffix = 'core.windows.net'
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Graph API
     #region Devices Azure AD group 
@@ -2303,8 +2315,8 @@ Function Sync-PsAvdIntuneSessionHostViaCmdlet {
         [object[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region PowerShell Cmdlets
 
@@ -2330,8 +2342,8 @@ Function Remove-PsAvdIntuneItemViaCmdlet {
         [object[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region PowerShell Cmdlets
     #region deviceManagementScripts and groupPolicyConfigurations
@@ -2394,8 +2406,8 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
         [Parameter(Mandatory = $true, ParameterSetName = 'ScriptBlock')]
         [System.Management.Automation.ScriptBlock]$ScriptBlock
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Devices Azure AD group 
     $HostPoolDeviceAzADGroupName = "{0} - Devices" -f $HostPoolName
@@ -2463,8 +2475,8 @@ function Get-PsAvdGroupPolicyDefinitionPresentationViaCmdlet {
         [Parameter(Mandatory = $true)]
         [array] $GroupPolicyDefinition
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Powershell Cmdlets
     $GroupPolicyDefinitionPresentationHT = @{}
@@ -2489,8 +2501,8 @@ function Import-PsAvdFSLogixADMXViaCmdlet {
     [CmdletBinding(PositionalBinding = $false)]
     Param (
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Powershell Cmdlets
     #Checking if the ADMX is already present
@@ -2653,6 +2665,7 @@ function Set-PsAvdGPRegistryValue {
         [uint16] $TimeoutInSeconds = 30
     )
 
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Name: $Name'"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Key: $Key'"
@@ -2660,7 +2673,6 @@ function Set-PsAvdGPRegistryValue {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Type: $Type'"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Value: $Value'"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TimeoutInSeconds: $TimeoutInSeconds'"
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     $Timer = [System.Diagnostics.Stopwatch]::StartNew()
     Do {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Timer: $($Timer | Out-String)"
@@ -2691,8 +2703,8 @@ function Update-PsAvdMgBetaUserUsageLocation {
         [Alias('All')]
         [switch] $Force
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     if ($Force) {
         #Updating UsageLocation for all users
@@ -2719,8 +2731,8 @@ function Set-PsAvdMgBetaUsersGroupLicense {
         [ValidateScript({ $_ -in $((Get-MgBetaGroup).DisplayName) })]
         [string] $GroupDisplayName 
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $SubscribedSku = Get-MgBetaSubscribedSku -All | Where-Object -FilterScript { $_.SkuPartNumber -eq $SkuPartNumber }
     if (($SubscribedSku.PrepaidUnits.Enabled - $SubscribedSku.ConsumedUnits) -gt 0) {
@@ -2868,8 +2880,8 @@ function Test-DomainController {
     Param (
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $null -ne (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'")
@@ -2883,8 +2895,8 @@ function Get-PsAvdLatestOperationalInsightsData {
         #[HostPool[]] $HostPool
     )
     
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #Querying the latest HeartBeat, Performance Counter and Event Log entry sent per Computer
     [string[]] $Queries = @("Heartbeat | summarize arg_max(TimeGenerated, *) by Computer", "Perf | summarize arg_max(TimeGenerated, *) by Computer", "Event | summarize arg_max(TimeGenerated, *) by Computer")
@@ -2918,8 +2930,8 @@ function Set-AdminConsent {
         [object]$context
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $token = [Microsoft.Azure.Commands.Common.Authentication.AzureSession]::Instance.AuthenticationFactory.Authenticate($context.Account, $context.Environment, $context.Tenant.Id, $null, "Never", $null, "74658136-14ec-4630-ad9b-26e160ff0fc6")
     $headers = @{
@@ -2942,8 +2954,8 @@ function Test-PsAvdStorageAccountNameAvailability {
         [HostPool[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Pester Tests for Host Pool - Class Instantiation
     $ModuleBase = Get-ModuleBase
@@ -2991,8 +3003,8 @@ function Test-PsAvdKeyVaultNameAvailability {
         [HostPool[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $result = $true
     foreach ($CurrentHostPool in $($HostPool | Where-Object -FilterScript { $null -ne $_ })) {
@@ -3019,8 +3031,8 @@ function Get-LocalAdminCredential {
         [int]$Attempts = 10
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #Any negative value means infinite loop. 
     if ($Attempts -lt 0) {
@@ -3055,8 +3067,8 @@ function Get-AdjoinCredential {
         [int]$Attempts = 10
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #Any negative value means infinite loop. 
     if ($Attempts -lt 0) {
@@ -3113,8 +3125,8 @@ function New-PsAvdPrivateDnsZoneSetup {
     Param(
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     [HostPool]::BuildAzureLocationSortNameHashtable()
 
     $PrivateDnsZoneSetup = @{}
@@ -3163,8 +3175,8 @@ function New-PsAvdPrivateEndpointSetup {
         [Microsoft.Azure.Commands.Management.Storage.Models.PSStorageAccount] $StorageAccount
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     foreach ($CurrentSubnetId in $SubnetId) {
         $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $CurrentSubnetId
@@ -3283,8 +3295,8 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
         [Microsoft.Azure.Commands.Network.Models.PSSubnet] $Subnet
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $VirtualNetwork = Get-AzResource -ResourceId $($Subnet.Id -replace "/subnets/.*$") | Get-AzVirtualNetwork
     $Location = $VirtualNetwork.Location
@@ -3438,8 +3450,8 @@ function New-PsAvdHostPoolCredentialKeyVault {
         [HostPool] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Key Vault
     #region Key Vault Name Setup
@@ -3523,8 +3535,8 @@ function New-RandomPassword {
         [switch] $ClipBoard
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Add-Type -AssemblyName 'System.Web'
     $length = Get-Random -Minimum $minLength -Maximum $maxLength
@@ -3553,8 +3565,8 @@ function Get-PsAvdKeyVaultNameAvailability {
         [string]$VaultName
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Azure Context
     # Log in first with Connect-AzAccount if not using Cloud Shell
@@ -3611,8 +3623,8 @@ function Expand-PsAvdMSIXImage {
         [string]$Uri
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Azure Context
     # Log in first with Connect-AzAccount if not using Cloud Shell
@@ -3666,8 +3678,8 @@ function Grant-PsAvdADJoinPermission {
         [string]$OrganizationalUnit
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     # Import the Active Directory module
     Import-Module ActiveDirectory #-DisableNameChecking
@@ -4186,8 +4198,8 @@ function Update-PsAvdSystemAssignedAzVM {
         [Microsoft.Azure.Commands.Compute.Models.PSVirtualMachine] $VM = $(Get-AzVMCompute | Get-AzVM)
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     if ($null -eq $VM.Identity) {
         # Enable system-assigned managed identity
@@ -4211,8 +4223,8 @@ function Get-AzVMVirtualNetwork {
         [Microsoft.Azure.Commands.Compute.Models.PSVirtualMachine] $VM = $(Get-AzVMCompute | Get-AzVM)
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     # Get the VM's network interface
     $VMNetworkInterfaceId = $VM.NetworkProfile.NetworkInterfaces[0].Id
@@ -4234,8 +4246,8 @@ function Get-AzVMSubnet {
         [Microsoft.Azure.Commands.Compute.Models.PSVirtualMachine] $VM = $(Get-AzVMCompute | Get-AzVM)
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     # Get the VM's network interface
     $VMNetworkInterfaceId = $VM.NetworkProfile.NetworkInterfaces[0].Id
@@ -4253,8 +4265,8 @@ function Get-AzVMCompute {
     Param(
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $uri = "http://169.254.169.254/metadata/instance?api-version=2021-02-01"
 
@@ -4313,8 +4325,8 @@ function New-PsAvdSessionHost {
         [switch] $Intune
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $OSDiskSize = [HostPool]::VMProfileOsdiskSizeGb
     $OSDiskType = "Premium_LRS"
@@ -4558,8 +4570,8 @@ function Get-PsAvdNextSessionHostName {
         [int]$VMNumberOfInstances
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolId: $HostPoolId"
     $HostPool = Get-AzResource -ResourceId $HostPoolId
@@ -4637,8 +4649,8 @@ function Add-PsAvdSessionHost {
         [switch]$AsJob
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #HibernationEnabled can't be used with Spot VMs
     if ($Spot) {
@@ -4704,7 +4716,7 @@ function Add-PsAvdSessionHost {
             #From https://stackoverflow.com/questions/7162090/how-do-i-start-a-job-of-a-function-i-just-defined
             #From https://stackoverflow.com/questions/76844912/how-to-call-a-class-object-in-powershell-jobs
             $ExportedFunctions = [scriptblock]::Create(@"
-                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global
+                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global -Force
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
                 Function New-PsAvdSessionHost { ${Function:New-PsAvdSessionHost} }          
@@ -4753,8 +4765,8 @@ function Get-GitFile {
         [string]$Destination
     )   
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region URI transformation (in case of the end-user doesn't give an https://api.github.com/repos/... URI
     if ($URI -match "^https://(www\.)?github.com/(?<organisation>[^/]+)/(?<repository>[^/]+)/tree/master/(?<contents>.*)") {
@@ -4843,8 +4855,8 @@ function Get-WebSiteFile {
         [string]$Destination
     )   
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Getting all request files
     $Response = Invoke-WebRequest -Uri $URI -UseBasicParsing
@@ -4873,8 +4885,8 @@ function Copy-PsAvdMSIXDemoAppAttachPackage {
         [string]$Destination
     )   
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Source: $Source"
 
@@ -4911,8 +4923,8 @@ function Copy-PsAvdMSIXDemoPFXFile {
         [System.Security.SecureString]$SecurePassword = $(ConvertTo-SecureString -String "P@ssw0rd" -AsPlainText -Force)
     )   
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
     if ($Source -eq 'GitHub') {
@@ -4972,8 +4984,8 @@ function Wait-PSSession {
         [switch]$PassThru
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #Any negative value means infinite loop. 
     if ($Attempts -lt 0) {
@@ -5030,8 +5042,8 @@ function Wait-PsAvdRunPowerShell {
         [int]$Attempts = 10
     ) 
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #Any negative value means infinite loop. 
     if ($Attempts -lt 0) {
@@ -5072,9 +5084,9 @@ function Start-MicrosoftEntraIDConnectSync {
     [CmdletBinding(PositionalBinding = $false)]
     Param()
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    
     if (Get-Service -Name ADSync -ErrorAction Ignore) {
         Start-Service -Name ADSync
         Import-Module -Name "C:\Program Files\Microsoft Azure AD Sync\Bin\ADSync" #-DisableNameChecking
@@ -5112,8 +5124,8 @@ Function Remove-PsAvdAzRecoveryServicesAsrReplicationProtectedItem {
         [array] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $HostPoolWithAzureSiteRecovery = $HostPool | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_.ASRFailOverVNetId)) }
     foreach ($CurrentHostPoolWithAzureSiteRecovery in $HostPoolWithAzureSiteRecovery) {
@@ -5180,8 +5192,8 @@ function Revoke-ActiveSASDiskAccess {
         [string[]] $ResourceGroupName
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     if ([string]::IsNullOrEmpty($ResourceGroupName)) {
         $Disks = Get-AzDisk
@@ -5243,8 +5255,8 @@ function Remove-PsAvdHostPoolSetup {
         [string[]]$FullName
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Write-Host -Object "HostPool Removal"
     $StartTime = Get-Date
@@ -5421,8 +5433,8 @@ function New-PsAvdPersonalHostPoolSetup {
     )
 
     begin {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
         Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
         $StartTime = Get-Date
         $AzContext = Get-AzContext
@@ -5583,6 +5595,34 @@ function New-PsAvdPersonalHostPoolSetup {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating Registration Token (Expiration: '$RegistrationInfoExpirationTime') for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
             $RegistrationInfoToken = New-AzWvdRegistrationInfo -ResourceGroupName $CurrentHostPoolResourceGroupName -HostPoolName $CurrentHostPool.Name -ExpirationTime $RegistrationInfoExpirationTime -ErrorAction SilentlyContinue
 
+            #region RDP ShortPath (STUN)
+            if ($CurrentHostPool.RDPShortPath) {
+                $parameters = @{
+                       Name = $CurrentHostPool.Name
+                       ResourceGroupName = $CurrentHostPoolResourceGroupName
+                       ManagedPrivateUdp = "Disabled"
+                       DirectUdp = "Disabled"
+                       PublicUdp = "Enabled"
+                       RelayUdp = "Enabled"
+                }
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling RDP Shortpath (STUN) for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                Update-AzWvdHostPool @parameters
+            }
+            <#
+            else {
+                $parameters = @{
+                       Name = $CurrentHostPool.Name
+                       ResourceGroupName = $CurrentHostPoolResourceGroupName
+                       ManagedPrivateUdp = "Default"
+                       DirectUdp = "Default"
+                       PublicUdp = "Default"
+                       RelayUdp = "Default"
+                }
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling RDP Shortpath (STUN) for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                Update-AzWvdHostPool @parameters
+            }
+            #>
+            #endregion
 
             #region Scale session hosts using Azure Automation
             #TODO : https://learn.microsoft.com/en-us/training/modules/automate-azure-virtual-desktop-management-tasks/1-introduction
@@ -6012,8 +6052,8 @@ function New-PsAvdPooledHostPoolSetup {
     )
 
     begin {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
         Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
         $StartTime = Get-Date
         $AzContext = Get-AzContext
@@ -6229,6 +6269,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Verbose -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ValueName "frxtray" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value "C:\Program Files\FSLogix\Apps\frxtray.exe"
 
                     if ($CurrentHostPool.FSLogixCloudCache) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting FSLogixCloudCache related registry values for '$($CurrentHostPoolFSLogixGPO.DisplayName)' GPO (linked to '$($CurrentHostPoolOU.DistinguishedName)' OU)"
                         $CCDLocations = @(
                             "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $CurrentHostPoolStorageAccountName, $StorageEndpointSuffix
                             "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName(), $StorageEndpointSuffix
@@ -7998,8 +8039,8 @@ function New-PsAvdHostPoolSetup {
     )
 
     begin {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
         Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
         $StartTime = Get-Date
         $AzContext = Get-AzContext
@@ -8139,14 +8180,15 @@ function New-PsAvdHostPoolSetup {
         #endregion
         #endregion
 
-        #region Assigning the Desktop Virtualization Power On Off Contributor
+        #region Assigning the "Desktop Virtualization Power On Off Contributor" RBAC Role
         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/start-virtual-machine-connect?tabs=azure-portal#assign-the-desktop-virtualization-power-on-contributor-role-with-the-azure-portal
         $objId = (Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Virtual Desktop'").Id
+        $DesktopVirtualizationPowerOnOffContributorRole = Get-AzRoleDefinition "Desktop Virtualization Power On Off Contributor"
         $SubscriptionId = $AzContext.Subscription.Id
         $Scope = "/subscriptions/$SubscriptionId"
-        if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName "Desktop Virtualization Power On Off Contributor" -Scope $Scope)) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the 'Desktop Virtualization Power On Off Contributor' RBAC role to Service Principal '$objId' on the Subscription '$SubscriptionId'"
-            $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName "Desktop Virtualization Power On Off Contributor" -Scope $Scope
+        if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationPowerOnOffContributorRole.Name -Scope $Scope)) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($DesktopVirtualizationPowerOnOffContributorRole.Name)' RBAC role to Service Principal '$objId' on the '$SubscriptionId' Subscription"
+            $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationPowerOnOffContributorRole.Name -Scope $Scope
         }
         #endregion
 
@@ -8167,8 +8209,8 @@ function New-PsAvdHostPoolSetup {
 
             $ExportedFunctions = [scriptblock]::Create(@"
                 Set-Variable -Name MaximumFunctionCount -Value 32768 -Scope Global -Force
-                New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global
-                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global
+                New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global -Force
+                New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global -Force
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
                 Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }
@@ -8334,8 +8376,8 @@ function Invoke-PsAvdErrorLogFilePester {
         [ValidateScript({ Test-Path -Path $_ -PathType Container })]
         [string] $LogDir
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Pester Tests Errors - Log Files
     $ModuleBase = Get-ModuleBase
@@ -8360,11 +8402,11 @@ function Restart-PsAvdSessionHost {
         [switch] $Wait
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $SessionHostNames = foreach ($CurrentHostPool in $HostPool) {
- (Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName() -ErrorAction Ignore).ResourceId -replace ".*/" | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_)) } 
+        (Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName() -ErrorAction Ignore).ResourceId -replace ".*/" | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_)) } 
     }
 
     $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
@@ -8392,8 +8434,8 @@ function New-PsAvdHostPoolBackup {
         [string]$Directory = [Environment]::GetFolderPath("MyDocuments")
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $null = New-Item -Path $Directory -ItemType Directory -Force
     $JSONFilePath = Join-Path -Path $Directory -ChildPath $("HostPool_{0:yyyyMMddHHmmss}.json" -f (Get-Date))
@@ -8421,8 +8463,8 @@ function New-PsAvdRdcMan {
         [switch] $Update
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $null = Add-Type -AssemblyName System.Security
     #region variables
@@ -8649,8 +8691,8 @@ function New-PsAvdRdcManV2 {
         [switch] $Update
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $null = Add-Type -AssemblyName System.Security
     #region variables
@@ -8866,8 +8908,8 @@ function Get-PsAvdFSLogixProfileShare {
         [HostPool[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     $ThisDomainControllerSubnet = Get-AzVMSubnet
 
     foreach ($CurrentHostPool in $HostPool) {
@@ -8911,8 +8953,8 @@ function Get-PsAvdMSIXProfileShare {
         [HostPool[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     $ThisDomainControllerSubnet = Get-AzVMSubnet
 
     foreach ($CurrentHostPool in $HostPool) {
@@ -8957,8 +8999,8 @@ function New-PsAvdScalingPlan {
         [HostPool[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $HostPoolWithScalingPlan = $HostPool | Where-Object -FilterScript { $_.ScalingPlan }
     foreach ($CurrentHostPoolWithScalingPlan in $HostPoolWithScalingPlan) {
@@ -9094,8 +9136,8 @@ function New-PsAvdAzureSiteRecoveryPolicyAssignement {
         [HostPool[]] $HostPool
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Building an Hashtable to get the azure region pairs
     [HostPool]::BuildAzurePairedRegionHashtable()
@@ -9200,8 +9242,8 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         [switch] $PassThru
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $StartTime = Get-Date
 
@@ -9297,8 +9339,8 @@ function Import-PsAvdWorkbook {
         [Parameter(Mandatory = $false)]
         [string] $Location = "EastUs"
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $WorkBooks = @{
         #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
@@ -9352,8 +9394,8 @@ function Get-ModuleBase {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
     )
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     if (-not([string]::IsNullOrEmpty($Global:ModuleBase))) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Global:ModuleBase: $Global:ModuleBase"
         $ModuleBase = $Global:ModuleBase
@@ -9371,8 +9413,8 @@ function Get-AzurePairedRegion {
     Param(
     )
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     (Get-AzLocation -OutVariable locations) | Select-Object -Property Location, PhysicalLocation, @{Name = 'PairedRegion'; Expression = { $_.PairedRegion.Name } }, @{Name = 'PairedRegionPhysicalLocation'; Expression = { ($locations | Where-Object -FilterScript { $_.location -eq $_.PairedRegion.Name }).PhysicalLocation } } | Where-Object -FilterScript { $_.PairedRegion } | Group-Object -Property Location -AsHashTable -AsString
 
@@ -9394,13 +9436,13 @@ function Get-PsAvdAzGalleryImageDefinition {
         $RegionDisplayName = (Get-AzLocation | Where-Object { $_.Location -in $Region }).DisplayName
     }
     
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Get-AzGallery | Select-Object -Property ResourceGroupName, @{Name = "GalleryName"; Expression = { $_.Name } } | Get-AzGalleryImageDefinition | Where-Object -FilterScript { 
         [string[]]$TargetRegionNames = (Get-AzGalleryImageVersion -ResourceGroupName $_.ResourceGroupName -GalleryName $($_.Id -replace "^.*/galleries/" -replace "/images/.*$") -GalleryImageDefinitionName $_.Name).PublishingProfile.TargetRegions.Name 
         $count = $0;
-        foreach ( $TargetRegionName in $TargetRegionNames) { 
+        foreach ($TargetRegionName in $TargetRegionNames) { 
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TargetRegionName: $TargetRegionName"
             if ($RegionDisplayName -contains $TargetRegionName) {
                 $count++
@@ -9414,6 +9456,8 @@ function Get-PsAvdAzGalleryImageDefinition {
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
+#endregion
+
 #endregion
 
 #endregion
