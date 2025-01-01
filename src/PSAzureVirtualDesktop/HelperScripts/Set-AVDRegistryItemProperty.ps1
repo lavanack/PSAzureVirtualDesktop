@@ -20,7 +20,11 @@ of the Sample Code.
 
 [CmdletBinding()]
 param(
-    [switch] $Watermarking
+    [Parameter(ParameterSetName = 'Switch')]
+    [switch] $Watermarking,
+    #For using in the context of a Invoke-AzVMRunCommand call (Invoke-AzVMRunCommand supports only string as parameter type for ScriptPath/ScriptString)
+    [Parameter(ParameterSetName = 'String')]
+    [string] $WatermarkingBooleanString = [boolean]::FalseString
 )
 
 Clear-Host
@@ -70,7 +74,7 @@ Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Se
 #>
 
 #region Enable Watermarking
-if ($Watermarking) {
+if (($WatermarkingBooleanString -eq [boolean]::TrueString) -or ($Watermarking)) {
     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/watermarking#enable-watermarking
     Write-Verbose -Message "Setting some 'Enable Watermarking' related registry values ..."
     Set-ItemProperty -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -Name "fEnableWatermarking" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1

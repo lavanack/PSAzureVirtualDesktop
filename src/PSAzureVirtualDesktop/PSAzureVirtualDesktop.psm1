@@ -552,11 +552,8 @@ class PooledHostPool : HostPool {
     }
 
     [PooledHostPool]EnableAppAttach() {
-        #if (-not($this.IsMicrosoftEntraIdJoined())) {
-        if ($this.IsActiveDirectoryJoined()) {
-            $this.AppAttach = $true
-            $this.DisableMSIX()
-        }
+        $this.AppAttach = $true
+        $this.DisableMSIX()
         return $this
     }
 
@@ -4768,6 +4765,8 @@ function Get-GitFile {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
+    $null = New-Item -Path $Destination -ItemType Directory -Force -ErrorAction Ignore
+
     #region URI transformation (in case of the end-user doesn't give an https://api.github.com/repos/... URI
     if ($URI -match "^https://(www\.)?github.com/(?<organisation>[^/]+)/(?<repository>[^/]+)/tree/master/(?<contents>.*)") {
         #https://github.com/lavanack/laurentvanacker.com/tree/master/Azure/Azure%20Virtual%20Desktop/MSIX
@@ -4858,17 +4857,16 @@ function Get-WebSiteFile {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
+    $null = New-Item -Path $Destination -ItemType Directory -Force -ErrorAction Ignore
+
     #region Getting all request files
     $Response = Invoke-WebRequest -Uri $URI -UseBasicParsing
     $Files = $Response.Links.href | Where-Object -FilterScript { $_ -match $FileRegExPattern }
     $FileURIs = $Files | ForEach-Object -Process { "{0}/{1}" -f $URI.Trim("/"), $_ }
     Start-BitsTransfer -Source $FileURIs -Destination $(@($Destination) * $($FileURIs.Count))
-    $DestinationFiles = $FileURIs | ForEach-Object -Process { Join-Path -Path $Destination -ChildPath $($_ -replace ".*/") }
+    $WebSiteFile = $FileURIs | ForEach-Object -Process { Get-Item -Path $(Join-Path -Path $Destination -ChildPath $($_ -replace ".*/")) }
     #endregion
 
-    $WebSiteFile = foreach ($CurrentDestinationFile in $DestinationFiles) {
-        Get-Item -Path $CurrentDestinationFile 
-    }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $WebSiteFile
 }
@@ -6425,8 +6423,9 @@ function New-PsAvdPooledHostPoolSetup {
                     $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
                 }
-
-                #Registering the Storage Account with your active directory environment under the target
+                #endregion 
+                
+                #region Registering the Storage Account with your active directory environment under the target
                 if ($CurrentHostPool.IsActiveDirectoryJoined()) {
                     if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
                         if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
@@ -6512,6 +6511,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                 # Save the password so the drive will persist on reboot
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
+                
                 #region Getting the Storage Account Key from the Storage Account
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Azure Key Vault"
                 $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
@@ -6798,6 +6798,31 @@ function New-PsAvdPooledHostPoolSetup {
             if ($CurrentHostPool.IsActiveDirectoryJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
+                    #region MSIX Storage Account Name Setup
+                    $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetMSIXStorageAccountName()
+                    #endregion 
+
+                    #region Dedicated Resource Group Management (1 per HostPool)
+                    $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
+
+                    $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
+                    if (-not($CurrentHostPoolResourceGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolResourceGroupName' Resource Group"
+                        $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
+                    }
+                    #endregion
+
+                    #region Dedicated Storage Account Setup
+                    $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore
+                    if (-not($CurrentHostPoolStorageAccount)) {
+                        if (-not(Get-AzStorageAccountNameAvailability -Name $CurrentHostPoolStorageAccountName).NameAvailable) {
+                            Write-Error "The storage account name '$CurrentHostPoolStorageAccountName' is not available !" -ErrorAction Stop
+                        }
+                        $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
+                    }
+                    #endregion 
+
                     #region MSIX AD Management
                     #region Dedicated HostPool AD group
 
@@ -6825,16 +6850,11 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersAzADGroupName' AD group to the '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
                     $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolDAGUsersAzADGroupName
                     #endregion
+
                     #region Run a sync with Azure AD
                     Start-MicrosoftEntraIDConnectSync
                     #endregion 
                     #endregion
-                    #endregion 
-
-                    #region MSIX Storage Account Management
-                    #region MSIX Storage Account Name Setup
-                    $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetMSIXStorageAccountName()
-                    #endregion 
 
                     #region Dedicated Host Pool AD GPO Management (1 GPO per Host Pool for setting up MSIX)
                     if (-not($CurrentHostPoolMSIXGPO)) {
@@ -6867,27 +6887,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
                     #endregion
 
-                    #region Dedicated Resource Group Management (1 per HostPool)
-                    $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
-
-                    $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
-                    if (-not($CurrentHostPoolResourceGroup)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolResourceGroupName' Resource Group"
-                        $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
-                    }
-                    #endregion
-
-                    #region Dedicated Storage Account Setup
-                    $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore
-                    if (-not($CurrentHostPoolStorageAccount)) {
-                        if (-not(Get-AzStorageAccountNameAvailability -Name $CurrentHostPoolStorageAccountName).NameAvailable) {
-                            Write-Error "The storage account name '$CurrentHostPoolStorageAccountName' is not available !" -ErrorAction Stop
-                        }
-                        $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
-                    }
-
-                    #Registering the Storage Account with your active directory environment under the target
+                    #region Registering the Storage Account with your AD environment under the target
                     if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
                         if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
                             $AzFilesHybridZipName = 'AzFilesHybrid.zip'
@@ -6919,13 +6919,15 @@ function New-PsAvdPooledHostPoolSetup {
 
                     # List the directory domain information if the storage account has enabled AD authentication for file shares
                     #$CurrentHostPoolStorageAccount.AzureFilesIdentityBasedAuth.ActiveDirectoryProperties
+                    #endregion 
 
+                    #endregion 
 
+                    #region Dedicated Share Management
                     # Save the password so the drive will persist on reboot
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
                     #region Storage Account Key
 
-                    #region Storage Account Key
                     #region Getting the Storage Account Key from the Storage Account
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Storage Account"
                     $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
@@ -6933,62 +6935,11 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion 
 
                     Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
-                    #endregion 
 
-                    <#
-                    #region Private endpoint for Storage Setup
-                    #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
-                    #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
-                    #From https://ystatit.medium.com/azure-key-vault-with-azure-service-endpoints-and-private-link-part-1-bcc84b4c5fbc
-                    ## Create the private endpoint connection. ## 
-
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($CurrentHostPoolResourceGroupName)' Resource Group)"
-                    $PrivateEndpointName = "pep{0}" -f $($CurrentHostPoolStorageAccountName -replace "\W")
-                    $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
-                    $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $HostPool.SubnetId
-                    $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $CurrentHostPoolStorageAccount.Id -GroupId $GroupId
-                    $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
-
-                    ## Create the private DNS zone. ##
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                    $PrivateDnsZoneName = "privatelink.$GroupId.$StorageEndpointSuffix"
-                    $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
-                    if ($null -eq $PrivateDnsZone) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                        $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName
-                    }
-
-                    $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($ThisDomainControllerVirtualNetwork.Name -replace "\W")
-                    $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
-                    if ($null -eq $PrivateDnsVirtualNetworkLink) {
-                        $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerVirtualNetwork.Id
-                        ## Create a DNS network link. ##
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS VNet Link for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                        $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $ThisDomainControllerVirtualNetworkId
-                    }
-
-
-                    ## Configure the DNS zone. ##
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the Private Dns Zone Group for the Storage Account '$CurrentHostPoolStorageAccountName'"
-                    $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZone.Name -PrivateDnsZoneId $PrivateDnsZone.ResourceId
-
-                    ## Create the DNS zone group. ##
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                    $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $CurrentHostPoolResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-
-                    #Storage Account - Disabling Public Access
-                    #From https://www.jorgebernhardt.com/azure-storage-public-access/
-                    #From https://learn.microsoft.com/en-us/azure/storage/common/storage-network-security?tabs=azure-powershell#change-the-default-network-access-rule
-                    #From https://github.com/adstuart/azure-privatelink-dns-microhack
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                    $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -PublicNetworkAccess Disabled
-                    #(Get-AzStorageAccount -Name $CurrentHostPoolResourceGroupName -ResourceGroupName $CurrentHostPoolStorageAccountName ).AllowBlobPublicAccess
-                    #endregion
-                    #>
                     #endregion
                     Start-Sleep -Seconds 60
+
                     $MSIXDemoPackages = $null
-                    #region Dedicated Share Management
                     $MSIXShareName | ForEach-Object -Process { 
                         $CurrentHostPoolShareName = $_
                         #Create a share for MSIX
@@ -7133,16 +7084,17 @@ function New-PsAvdPooledHostPoolSetup {
                         #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
                     }
                     #endregion
-
-                    #endregion
             
-                    #endregion
                 }
                 else {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX AppAttach Or Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
                 }
             }
             else {
+                #region MSIX Storage Account Name Setup
+                $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetMSIXStorageAccountName()
+                #endregion 
+
                 #region Dedicated Resource Group Management (1 per HostPool)
                 $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
 
@@ -7161,6 +7113,37 @@ function New-PsAvdPooledHostPoolSetup {
                     }
                     $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account (in the '$($CurrentHostPoolStorageAccount.ResourceGroupName)' Resource Group)"
+                }
+                #endregion 
+
+                #region Dedicated Share Management
+                # Save the password so the drive will persist on reboot
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
+                #region Storage Account Key
+
+                #region Getting the Storage Account Key from the Storage Account
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the Storage Account"
+                $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                #endregion 
+
+                Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
+
+                #endregion
+                Start-Sleep -Seconds 60
+
+                $MSIXDemoPackages = $null
+                $MSIXShareName | ForEach-Object -Process { 
+                    $CurrentHostPoolShareName = $_
+                    #Create a share for MSIX
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                    #$CurrentHostPoolStorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }
+                    #$storageContext = New-AzStorageContext -StorageAccountName $CurrentHostPoolStorageAccountName -StorageAccountKey $CurrentHostPoolStorageAccountKey.Value
+                    $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
+                    $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
+
+                    # Copying the  Demo MSIX Packages from my dedicated GitHub repository
+                    $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                 }
                 #endregion
 
@@ -7181,16 +7164,6 @@ function New-PsAvdPooledHostPoolSetup {
                      }
                 }
                 #endregion
-            }
-            #endregion
-
-            #region Dedicated Resource Group Management (1 per HostPool)
-            $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
-
-            $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
-            if (-not($CurrentHostPoolResourceGroup)) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolResourceGroupName' Resource Group"
-                $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
             }
             #endregion
 
@@ -7489,7 +7462,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $ScriptString = 'Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters" -Name "CloudKerberosTicketRetrievalEnabled" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
                     # Run PowerShell script on the VM
                     $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
-                    Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptString, ($Result | Out-String))
+                    Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptString, ($Result | Out-String))
                     #endregion
 
                     #region Excluding Administrators from FSLogix
@@ -7498,7 +7471,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $ScriptString = "Add-LocalGroupMember -Group 'FSLogix Profile Exclude List' -Member $LocalAdminUserName, Administrators -ErrorAction Ignore; Add-LocalGroupMember -Group 'FSLogix ODFC Exclude List' -Member $LocalAdminUserName, Administrators -ErrorAction Ignore"
                     # Run PowerShell script on the VM
                     $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
-                    Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptString, ($Result | Out-String))
+                    Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptString, ($Result | Out-String))
                     #endregion
 
                     #region For loading your profile on many different VMs instead of being limited to just one
@@ -7506,7 +7479,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $ScriptString = '$null = New-Item -Path "HKLM:\Software\Policies\Microsoft\AzureADAccount" -Force; Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\AzureADAccount" -Name "LoadCredKeyFromProfile" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
                     # Run PowerShell script on the VM
                     $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
-                    Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptString, ($Result | Out-String))
+                    Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptString, ($Result | Out-String))
                     #endregion
                 }
                 #endregion
@@ -7520,8 +7493,8 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-AVDRegistryItemProperty.ps1"
-                        $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{Watermarking = $CurrentHostPool.Watermarking }
-                        Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptPath, ($Result | Out-String))
+                        $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{WatermarkingBooleanString = $CurrentHostPool.Watermarking -as [string]}
+                        Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptPath, ($Result | Out-String))
                         #Remove-Item -Path $ScriptPath -Force
                         #endregion
                         #endregion
@@ -7534,7 +7507,7 @@ function New-PsAvdPooledHostPoolSetup {
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixRegistryItemProperty.ps1"
                         $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{HostPoolStorageAccountName = $CurrentHostPoolStorageAccountName }
-                        Write-Verbose -Message $("{0}:`r`n{1}" -f $ScriptPath, ($Result | Out-String))
+                        Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptPath, ($Result | Out-String))
                         #Remove-Item -Path $ScriptPath -Force
                         #endregion
                         #endregion
@@ -7756,34 +7729,43 @@ function New-PsAvdPooledHostPoolSetup {
                 if ($CurrentHostPool.AppAttach) {
                     $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     $VM = $SessionHosts.ResourceId | Get-AzVM
-                    
-                    #$LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
-                    #$LocalAdminPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminPassword).SecretValue
-                    #$LocalAdminCredential = New-Object System.Management.Automation.PSCredential -ArgumentList ($LocalAdminUserName, $LocalAdminPassword)
 
-                    $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
+                    foreach ($currentVM in $VM) {
+                        $ResourceGroupName = $currentVM.ResourceGroupName
+                        $VMName = $currentVM.Name
 
-                    $PrivateIpAddress = $VM | ForEach-Object -Process {
-                        $NIC = Get-AzNetworkInterface -Name $($_.NetworkProfile.NetworkInterfaces.Id -replace ".*/")
-                        $NIC.IpConfigurations.PrivateIPAddress
+                        #region Run PowerShell Script: Downloading PFX file(s)
+                        $ScriptBlock = [scriptblock]::create($((Get-Content Function:Get-WebSiteFile) -replace "(Get-CallerPreference)", '#$1'))
+                        $ClearTextPassword = "P@ssw0rd"
+                        $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
+                        $URI = "https://laurentvanacker.com/downloads/Azure/Azure%20Virtual%20Desktop/MSIX"
+
+                        $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock -Parameter @{'URI' = $URI; 'FileRegExPattern' = "\.pfx?$"; 'Destination'=$TempFolder}
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RunPowerShellScript:`r`n$($RunPowerShellScript | Out-String)"
+                        #endregion
+
+                        #region Run PowerShell Script: Importing PFX file(s)
+                        $ScriptBlock = {
+                            param
+                            (
+                                [Parameter(Mandatory = $true)]
+                                [string]$Filter,
+                                [Parameter(Mandatory = $true)]
+                                [string]$Destination,
+                                [Parameter(Mandatory = $true)]
+                                [String]$ClearTextPassword
+                            ) 
+                            $SecurePassword = $(ConvertTo-SecureString -String $ClearTextPassword -AsPlainText -Force)
+                            Get-ChildItem -Path $Destination -File -Filter $Filter -Recurse | ForEach-Object -Process { 
+                                #Adding the self-signed certificate to the Trusted People (To validate this certificate)
+                                Import-PfxCertificate $_.FullName -CertStoreLocation Cert:\LocalMachine\TrustedPeople\ -Password $SecurePassword 
+                            }
+                        }
+
+                        $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock -Parameter @{'Filter' = "*.pfx"; 'Destination'=$TempFolder; 'ClearTextPassword'=$ClearTextPassword}
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RunPowerShellScript:`r`n$($RunPowerShellScript | Out-String)"
+                        #endregion
                     }
-                    #Backing up the trustedhosts value before modifying it
-                    $Trustedhosts = (Get-Item -Path WSMan:localhost\client\trustedhosts).Value
-                    Set-Item -Path WSMan:localhost\client\trustedhosts -Value $($PrivateIpAddress -join ",") -Force
-
-                    #Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
-                    #$result = Wait-PSSession -ComputerName $SessionHostNames
-                    #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
-                    Copy-PsAvdMSIXDemoPFXFile -Source WebSite -ComputerName $PrivateIpAddress -Credential $LocalAdminCredential
-
-                    #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
-                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
-                    $CimSession = New-CimSession -ComputerName $PrivateIpAddress -Credential $LocalAdminCredential
-                    $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" -CimSession $CimSession
-                    #endregion 
-
-                    #Restoring the previous trustedhosts value
-                    Set-Item -Path WSMan:localhost\client\trustedhosts -Value $Trustedhosts -Force
                 }
             }
             #endregion
