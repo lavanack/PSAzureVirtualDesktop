@@ -3187,7 +3187,7 @@ function New-PsAvdPrivateEndpointSetup {
         if ($null -ne $StorageAccount) {
             $PrivateDnsZoneName = 'privatelink.file.core.windows.net' 
             $AzResource = $StorageAccount | Get-AzResource
-            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
+            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
         }
         $ResourceGroupName = $AzResource.ResourceGroupName
     	
@@ -6521,57 +6521,6 @@ function New-PsAvdPooledHostPoolSetup {
                 Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
                 #endregion
 
-                <#
-                #region Private endpoint for Storage Setup
-                #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
-                #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
-                #From https://ystatit.medium.com/azure-key-vault-with-azure-service-endpoints-and-private-link-part-1-bcc84b4c5fbc
-                ## Create the private endpoint connection. ## 
-
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private Endpoint for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($CurrentHostPoolResourceGroupName)' Resource Group)"
-                $PrivateEndpointName = "pep{0}" -f $($CurrentHostPoolStorageAccountName -replace "\W")
-                $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $CurrentHostPoolStorageAccount.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
-                $Subnet = Get-AzVirtualNetworkSubnetConfig -ResourceId $CurrentHostPool.SubnetId
-                $PrivateLinkServiceConnection = New-AzPrivateLinkServiceConnection -Name $PrivateEndpointName -PrivateLinkServiceId $CurrentHostPoolStorageAccount.Id -GroupId $GroupId
-                $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
-
-
-                ## Create the private DNS zone. ##
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                $PrivateDnsZoneName = "privatelink.$GroupId.$StorageEndpointSuffix"
-                $PrivateDnsZone = Get-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName -ErrorAction Ignore
-                if ($null -eq $PrivateDnsZone) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                    $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsZoneName
-                }
-
-                $PrivateDnsVirtualNetworkLinkName = "pdvnl{0}" -f $($ThisDomainControllerVirtualNetwork.Name -replace "\W")
-                $PrivateDnsVirtualNetworkLink = Get-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -ErrorAction Ignore
-                if ($null -eq $PrivateDnsVirtualNetworkLink) {
-                    $ThisDomainControllerVirtualNetworkId = $ThisDomainControllerVirtualNetwork.Id
-                    ## Create a DNS network link. ##
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS VNet Link for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$($ThisDomainController.ResourceGroupName)' Resource Group)"
-                    $PrivateDnsVirtualNetworkLink = New-AzPrivateDnsVirtualNetworkLink -ResourceGroupName $ThisDomainController.ResourceGroupName -Name $PrivateDnsVirtualNetworkLinkName -ZoneName $PrivateDnsZone.Name -VirtualNetworkId $ThisDomainControllerVirtualNetworkId
-                }
-
-
-                ## Configure the DNS zone. ##
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the DNS Zone Configuration of the Private Dns Zone Group for the Storage Account '$CurrentHostPoolStorageAccountName'"
-                $PrivateDnsZoneConfig = New-AzPrivateDnsZoneConfig -Name $PrivateDnsZone.Name -PrivateDnsZoneId $PrivateDnsZone.ResourceId
-
-                ## Create the DNS zone group. ##
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $CurrentHostPoolResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-
-                #Storage Account - Disabling Public Access
-                #From https://www.jorgebernhardt.com/azure-storage-public-access/
-                #From https://learn.microsoft.com/en-us/azure/storage/common/storage-network-security?tabs=azure-powershell#change-the-default-network-access-rule
-                #From https://github.com/adstuart/azure-privatelink-dns-microhack
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling the Public Access for the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -PublicNetworkAccess Disabled
-                #(Get-AzStorageAccount -Name $CurrentHostPoolResourceGroupName -ResourceGroupName $CurrentHostPoolStorageAccountName ).AllowBlobPublicAccess
-                #endregion
-                #>
                 Start-Sleep -Seconds 60
                 #region Dedicated Share Management
                 $FSLogixShareName | ForEach-Object -Process { 
@@ -7506,7 +7455,12 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixRegistryItemProperty.ps1"
-                        $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{HostPoolStorageAccountName = $CurrentHostPoolStorageAccountName }
+                        if ($CurrentHostPool.FSLogixCloudCache) {
+                            $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName(); RecoveryLocationFSLogixStorageAccountName = $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()}
+                        }
+                        else {
+                            $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName() }
+                        }
                         Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptPath, ($Result | Out-String))
                         #Remove-Item -Path $ScriptPath -Force
                         #endregion
@@ -7600,21 +7554,19 @@ function New-PsAvdPooledHostPoolSetup {
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
                         foreach ($CurrentMSIXDemoPackage in $HighestVersionMSIXDemoPackages) {
                             $obj = $null
-                                                                                    While ($null -eq $obj) {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
-                            #Temporary Allowing storage account key access(disabled due to SFI)
-                            $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPool.GetFSLogixStorageAccountName() -AllowSharedKeyAccess $true
-                            $MyError = $null
-                            #$obj = Expand-PsAvdMSIXImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage
-                            $obj = Expand-AzWvdMsixImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
-                            if (($null -eq $obj)) {
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                                Start-Sleep -Seconds 30
+                            While ($null -eq $obj) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
+                                #Temporary Allowing storage account key access(disabled due to SFI)
+                                $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPool.GetFSLogixStorageAccountName() -AllowSharedKeyAccess $true
+                                $MyError = $null
+                                #$obj = Expand-PsAvdMSIXImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage
+                                $obj = Expand-AzWvdMsixImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
+                                if (($null -eq $obj)) {
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                                    Start-Sleep -Seconds 30
+                                }
                             }
-                            #Not Allowing storage account key access (SFI compliant)
-                            #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
-                        }
 
                             $DisplayName = "{0} (v{1})" -f $obj.PackageApplication.FriendlyName, $obj.Version
                             #$DisplayName = $obj.PackageApplication.FriendlyName
@@ -7657,8 +7609,6 @@ function New-PsAvdPooledHostPoolSetup {
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                                     Start-Sleep -Seconds 30
                                 }
-                                #Not Allowing storage account key access (SFI compliant)
-                                #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
                             }
 
                             if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias })) {
