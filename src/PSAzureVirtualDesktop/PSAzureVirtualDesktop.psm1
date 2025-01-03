@@ -4130,8 +4130,7 @@ function New-AzureComputeGallery {
     #endregion
 	
     Write-Verbose -Message "Waiting for jobs to complete ..."
-    $Jobs | Wait-Job | Out-Null
-`	
+    $Jobs | Wait-Job | Out-Null	
 
     #region imageTemplateName01 status 
     #To determine whenever or not the template upload process was successful, run the following command.
@@ -5059,6 +5058,7 @@ function Wait-PsAvdRunPowerShell {
         $Jobs = foreach ($CurrentSessionHost in $SessionHosts) {
             $CurrentSessionHostVM = $CurrentSessionHost.ResourceId | Get-AzVM
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)'"
+            While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $CurrentSessionHostVM.Name) { Start-Sleep -Seconds 10 }
             Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $CurrentSessionHostVM.Name -CommandId 'RunPowerShellScript' -ScriptString 'return $true' -AsJob
         }
         $Jobs | Wait-Job | Out-Null
@@ -5372,8 +5372,7 @@ function Remove-PsAvdHostPoolSetup {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Resource Group(s) (As a Job): $($ResourceGroupName -join, ', ')"
     $Jobs = $ResourceGroup | Remove-AzResourceGroup -Force -AsJob
-    $Jobs | Wait-Job | Out-Null
-    $Jobs | Remove-Job
+    $Jobs | Receive-Job -Wait -AutoRemoveJob
 
     <#
     #region Removing HostPool Session Credentials Key Vault
@@ -5392,8 +5391,7 @@ function Remove-PsAvdHostPoolSetup {
     else {
         $Jobs = Get-AzKeyVault -InRemovedState | Where-Object -FilterScript { ($_.VaultName -in $HostPool.GetKeyVaultName()) } | Remove-AzKeyVault -InRemovedState -AsJob -Force 
     }
-    $Jobs | Wait-Job | Out-Null
-    $Jobs | Remove-Job
+    $Jobs | Receive-Job -Wait -AutoRemoveJob
     #endregion
     #endregion
 
@@ -5772,15 +5770,12 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
-            $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
+            $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+            $SessionHostNames = $SessionHostVMs.Name
             #endregion 
 
             #region Restarting the Session Hosts
-            $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
-                Restart-AzVM -Name $CurrentSessionHostName -ResourceGroupName $CurrentHostPoolResourceGroupName -Confirm:$false -AsJob
-            }
-            $Jobs | Wait-Job | Out-Null
-            $Jobs | Remove-Job -Force
+            Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
             #endregion 
 
             #region Run a sync with Azure AD
@@ -5843,7 +5838,7 @@ function New-PsAvdPersonalHostPoolSetup {
             #region Installing Azure Monitor Windows Agent on Virtual Machine(s)
             #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             if (-not([string]::IsNullOrEmpty($SessionHosts.ResourceId))) {
-                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                #$SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
                 $Jobs = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Installing AzureMonitorWindowsAgent on the '$($CurrentSessionHostVM.Name)' Virtual Machine (in the '$CurrentHostPoolResourceGroupName' Resource Group) (As A Job)"
                     $ExtensionName = "AzureMonitorWindowsAgent_{0:yyyyMMddHHmmss}" -f (Get-Date)
@@ -5861,29 +5856,10 @@ function New-PsAvdPersonalHostPoolSetup {
                     Set-AzVMExtension  @Params
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting all jobs completes"
-                $Jobs | Wait-Job | Out-Null
-                $Jobs | Remove-Job -Force
+                $Jobs | Receive-Job -Wait -AutoRemoveJob
             }
             #endregion
 
-            <#
-            #region Installing Log Analytics Agent on Virtual Machine(s)
-            #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
-            if (-not([string]::IsNullOrEmpty($SessionHosts.ResourceId))) {
-                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
-                $LogAnalyticsWorkSpaceKey = ($LogAnalyticsWorkSpace | Get-AzOperationalInsightsWorkspaceSharedKey).PrimarySharedKey
-                $PublicSettings = @{ "workspaceId" = $LogAnalyticsWorkSpace.CustomerId }
-                $ProtectedSettings = @{ "workspaceKey" = $LogAnalyticsWorkSpaceKey }
-                $Jobs = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Installing Log Analytics Agent on the '$($CurrentSessionHostVM.Name)' Virtual Machine (in the '$CurrentHostPoolResourceGroupName' Resource Group) (As A Job)"
-                    Set-AzVMExtension -ExtensionName "MicrosoftMonitoringAgent" -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostVM.Name -Publisher "Microsoft.EnterpriseCloud.Monitoring" -ExtensionType "MicrosoftMonitoringAgent" -Settings $PublicSettings -TypeHandlerVersion "1.0" -ProtectedSettings $ProtectedSettings -Location $CurrentHostPool.Location -AsJob
-                }
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting all jobs completes"
-                $Jobs | Wait-Job | Out-Null
-                $Jobs | Remove-Job -Force
-            }
-            #endregion
-            #>
             #region Data Collection Rules
             #region Event Logs
             #From https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.tracing.eventlevel?view=net-8.0
@@ -5998,9 +5974,8 @@ function New-PsAvdPersonalHostPoolSetup {
             $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounter -DestinationLogAnalytic $DestinationLogAnalytic
             #endregion
 
-            #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             if (-not([string]::IsNullOrEmpty($SessionHosts.ResourceId))) {
-                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                #$SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
                 foreach ($CurrentSessionHostVM in $SessionHostVMs) {
                     $Parameters = @{
                         SubscriptionId                           = (Get-AzContext).Subscription.Id
@@ -7395,7 +7370,8 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
-            $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
+            $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+            $SessionHostNames = $SessionHostVMs.Name
             #endregion 
 
             if (($CurrentHostPool.IsMicrosoftEntraIdJoined()) -and ($CurrentHostPool.FSLogix)) {
@@ -7408,10 +7384,12 @@ function New-PsAvdPooledHostPoolSetup {
                 $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
                 $LocalAdminUserName = $LocalAdminCredential.UserName
                 foreach ($CurrentSessionHostName in $SessionHostNames) {
+                    Write-Verbose -Message $("Processing {0}" -f $CurrentSessionHostName)
                     $ScriptString = 'Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters" -Name "CloudKerberosTicketRetrievalEnabled" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
                     # Run PowerShell script on the VM
+                    Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
                     $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
-                    Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptString, ($Result | Out-String))
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$CurrentSessionHostName] $($ScriptString):`r`n$($Result | Out-String)"
                     #endregion
 
                     #region Excluding Administrators from FSLogix
@@ -7419,16 +7397,18 @@ function New-PsAvdPooledHostPoolSetup {
                     #$ScriptString = "Add-LocalGroupMember -Group 'FSLogix Profile Exclude List' -Member Administrators -ErrorAction Ignore; Add-LocalGroupMember -Group 'FSLogix ODFC Exclude List' -Member Administrators -ErrorAction Ignore"
                     $ScriptString = "Add-LocalGroupMember -Group 'FSLogix Profile Exclude List' -Member $LocalAdminUserName, Administrators -ErrorAction Ignore; Add-LocalGroupMember -Group 'FSLogix ODFC Exclude List' -Member $LocalAdminUserName, Administrators -ErrorAction Ignore"
                     # Run PowerShell script on the VM
+                    Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
                     $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
-                    Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptString, ($Result | Out-String))
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$CurrentSessionHostName] $($ScriptString):`r`n$($Result | Out-String)"
                     #endregion
 
                     #region For loading your profile on many different VMs instead of being limited to just one
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/create-profile-container-azure-ad#configure-the-session-hosts
                     $ScriptString = '$null = New-Item -Path "HKLM:\Software\Policies\Microsoft\AzureADAccount" -Force; Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\AzureADAccount" -Name "LoadCredKeyFromProfile" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
                     # Run PowerShell script on the VM
+                    Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
                     $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
-                    Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptString, ($Result | Out-String))
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$CurrentSessionHostName] $($ScriptString):`r`n$($Result | Out-String)"
                     #endregion
                 }
                 #endregion
@@ -7442,8 +7422,9 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-AVDRegistryItemProperty.ps1"
+                        Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
                         $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{WatermarkingBooleanString = $CurrentHostPool.Watermarking -as [string]}
-                        Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptPath, ($Result | Out-String))
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($CurrentSessionHostName)] $($ScriptPath):`r`n$($Result | Out-String)"
                         #Remove-Item -Path $ScriptPath -Force
                         #endregion
                         #endregion
@@ -7455,13 +7436,14 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixRegistryItemProperty.ps1"
+                        Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
                         if ($CurrentHostPool.FSLogixCloudCache) {
                             $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName(); RecoveryLocationFSLogixStorageAccountName = $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()}
                         }
                         else {
                             $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName() }
                         }
-                        Write-Verbose -Message $("[{0}] {1}:`r`n{2}" -f $CurrentSessionHostName, $ScriptPath, ($Result | Out-String))
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($CurrentSessionHostName)] $($ScriptPath):`r`n$($Result | Out-String)"
                         #Remove-Item -Path $ScriptPath -Force
                         #endregion
                         #endregion
@@ -7505,11 +7487,7 @@ function New-PsAvdPooledHostPoolSetup {
             }
 
             #region Restarting the Session Hosts
-            $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
-                Restart-AzVM -Name $CurrentSessionHostName -ResourceGroupName $CurrentHostPoolResourceGroupName -Confirm:$false -AsJob
-            }
-            $Jobs | Wait-Job | Out-Null
-            $Jobs | Remove-Job -Force
+            Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
             #endregion 
 
             #region MSIX AppAttach / Azure AppAttach
@@ -7519,30 +7497,31 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPool : $($CurrentHostPool.Name)"
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames : $($SessionHostNames -join ',')"
 
-                    #Adding the Session Hosts to the dedicated ADGroup for MSIX 
+                    #region Adding the Session Hosts to the dedicated ADGroup for MSIX 
                     #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     #$SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
                     #Adding Session Hosts to the dedicated AD MSIX Host group
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the Session Hosts Session Hosts to the '$($CurrentHostPoolMSIXHostsADGroup.Name)' AD Group"
                     $CurrentHostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
                     Start-MicrosoftEntraIDConnectSync
-                    #Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
+                    #endregion
+
+                    #region Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
                     #$result = Wait-PSSession -ComputerName $SessionHostNames
                     #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
                     Copy-PsAvdMSIXDemoPFXFile -Source WebSite -ComputerName $SessionHostNames
                     #Copy-PsAvdMSIXDemoPFXFile -Source WebSite -HostPool $CurrentHostPool
+                    #endregion 
 
                     #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
                     $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" -CimSession $SessionHostNames
                     #endregion 
+
                     #region Restarting the Session Hosts
-                    $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
-                        Restart-AzVM -Name $CurrentSessionHostName -ResourceGroupName $CurrentHostPoolResourceGroupName -Confirm:$false -AsJob
-                    }
-                    $Jobs | Wait-Job | Out-Null
-                    $Jobs | Remove-Job -Force
+                    Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
                     #endregion 
+
 
                     #region MSIX
                     if ($CurrentHostPool.MSIX) {
@@ -7586,9 +7565,6 @@ function New-PsAvdPooledHostPoolSetup {
                         $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $obj.PackageApplication.AppId
                         #endregion 
                     }
-
-                    #Creating a Private EndPoint for this Storage Account on the HostPool Subnet and the Subnet used by this DC
-                    New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
                     #endregion
 
                     #region AppAttach
@@ -7669,6 +7645,9 @@ function New-PsAvdPooledHostPoolSetup {
                         #endregion 
                     }
                     #endregion
+
+                    #Creating a Private EndPoint for this Storage Account on the HostPool Subnet and the Subnet used by this DC
+                    New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
                 }
                 else {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX AppAttach Or Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
@@ -7677,10 +7656,11 @@ function New-PsAvdPooledHostPoolSetup {
             else {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' is not AD joined"
                 if ($CurrentHostPool.AppAttach) {
-                    $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
-                    $VM = $SessionHosts.ResourceId | Get-AzVM
+                    #region Copying, Installing the MSIX Demo PFX File(s) (for signing MSIX Packages) on Session Host(s)
+                    #$SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                    #$VM = $SessionHosts.ResourceId | Get-AzVM
 
-                    foreach ($currentVM in $VM) {
+                    foreach ($currentVM in $SessionHostVMs) {
                         $ResourceGroupName = $currentVM.ResourceGroupName
                         $VMName = $currentVM.Name
 
@@ -7690,8 +7670,9 @@ function New-PsAvdPooledHostPoolSetup {
                         $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
                         $URI = "https://laurentvanacker.com/downloads/Azure/Azure%20Virtual%20Desktop/MSIX"
 
+                        While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) { Start-Sleep -Seconds 10 }
                         $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock -Parameter @{'URI' = $URI; 'FileRegExPattern' = "\.pfx?$"; 'Destination'=$TempFolder}
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RunPowerShellScript:`r`n$($RunPowerShellScript | Out-String)"
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion
 
                         #region Run PowerShell Script: Importing PFX file(s)
@@ -7712,10 +7693,105 @@ function New-PsAvdPooledHostPoolSetup {
                             }
                         }
 
+                        While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) { Start-Sleep -Seconds 10 }
                         $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock -Parameter @{'Filter' = "*.pfx"; 'Destination'=$TempFolder; 'ClearTextPassword'=$ClearTextPassword}
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RunPowerShellScript:`r`n$($RunPowerShellScript | Out-String)"
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion
+
+                        #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
+                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
+                        $ScriptBlock = { $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start"}
+                        While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) { Start-Sleep -Seconds 10 }
+                        $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
+                        #endregion 
                     }
+                    #endregion
+
+                    #region Restarting the Session Hosts
+                    Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
+                    #endregion 
+
+                    #region Adding the application(s) to the Host Pool
+
+                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
+                    foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
+                        $app = $null
+                        While ($null -eq $app) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing MSIX Image '$CurrentMSIXDemoPackage'"
+                            #Temporary Allowing storage account key access(disabled due to SFI)
+                            $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPool.GetFSLogixStorageAccountName() -AllowSharedKeyAccess $true
+                            $MyError = $null
+                            $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
+                            if (($null -eq $app)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                                Start-Sleep -Seconds 30
+                            }
+                        }
+
+                        if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias })) {
+                            #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
+                            $DisplayName = "{0} (v{1})" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
+                            #$DisplayName = "{0}" -f $app.ImagePackageApplication.FriendlyName
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                            $parameters = @{
+                                Name                            = $app.ImagePackageAlias
+                                ResourceGroupName               = $CurrentHostPoolResourceGroupName
+                                Location                        = $CurrentHostPool.Location
+                                FailHealthCheckOnStagingFailure = 'NeedsAssistance'
+                                ImageIsRegularRegistration      = $false
+                                ImageDisplayName                = $DisplayName
+                                ImageIsActive                   = $true
+                            }
+                            New-AzWvdAppAttachPackage -AppAttachPackage $app @parameters
+                            #Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName
+                        }
+
+                        #region Assigning an app attach package
+                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
+                        #region Host pools
+                        $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                        $parameters = @{
+                            Name              = $app.ImagePackageAlias
+                            ResourceGroupName = $CurrentHostPoolResourceGroupName
+                            HostPoolReference = $AzWvdHostPool.Id
+                        }
+
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the MSIX Image '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
+                        Update-AzWvdAppAttachPackage @parameters
+                        #endregion
+
+                        #region Groups and users
+                        $parameters = @{
+                            Name              = $app.ImagePackageAlias
+                            ResourceGroupName = $CurrentHostPoolResourceGroupName
+                        }
+
+                        $appAttachPackage = Get-AzWvdAppAttachPackage @parameters
+                        $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersAzADGroupName'"
+                        foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the MSIX Image '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
+                            New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName "Desktop Virtualization User" -Scope $appAttachPackage.Id
+                        }
+                        #endregion
+                        #endregion
+
+                        #region Publishing AppAttach application to a RemoteApp application group
+                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
+                        if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
+                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
+                        }
+                        #endregion 
+
+                    }
+                    #endregion 
+
+                    #Creating a Private EndPoint for this Storage Account on the HostPool Subnet and the Subnet used by this DC
+                    New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
+                }
+                else {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
                 }
             }
             #endregion
@@ -7808,7 +7884,7 @@ function New-PsAvdPooledHostPoolSetup {
             #region Installing Azure Monitor Windows Agent on Virtual Machine(s)
             #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             if (-not([string]::IsNullOrEmpty($SessionHosts.ResourceId))) {
-                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                #$SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
                 $Jobs = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Installing AzureMonitorWindowsAgent on the '$($CurrentSessionHostVM.Name)' Virtual Machine (in the '$CurrentHostPoolResourceGroupName' Resource Group) (As A Job)"
                     $ExtensionName = "AzureMonitorWindowsAgent_{0:yyyyMMddHHmmss}" -f (Get-Date)
@@ -7826,8 +7902,7 @@ function New-PsAvdPooledHostPoolSetup {
                     Set-AzVMExtension  @Params
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting all jobs completes"
-                $Jobs | Wait-Job | Out-Null
-                $Jobs | Remove-Job -Force
+                $Jobs | Receive-Job -Wait -AutoRemoveJob
             }
             #endregion
 
@@ -7962,7 +8037,7 @@ function New-PsAvdPooledHostPoolSetup {
 
             #$SessionHosts = Get-AzWvdSessionHost -HostpoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             if (-not([string]::IsNullOrEmpty($SessionHosts.ResourceId))) {
-                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                #$SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
                 foreach ($CurrentSessionHostVM in $SessionHostVMs) {
                     $Parameters = @{
                         SubscriptionId                           = (Get-AzContext).Subscription.Id
@@ -8223,6 +8298,7 @@ function New-PsAvdHostPoolSetup {
                 Function New-PsAvdPrivateEndpointSetup { ${Function:New-PsAvdPrivateEndpointSetup} }
                 Function Get-PsAvdPrivateDnsResourceGroupName { ${Function:Get-PsAvdPrivateDnsResourceGroupName} }
                 Function Get-AzVMSubnet { ${Function:Get-AzVMSubnet} }
+                Function Restart-PsAvdSessionHost { ${Function:Restart-PsAvdSessionHost} }
 "@)
             $Jobs = @()
             $Jobs += foreach ($CurrentPooledHostPool in $PooledHostPools) {
@@ -8379,19 +8455,18 @@ function Restart-PsAvdSessionHost {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
-    $SessionHostNames = foreach ($CurrentHostPool in $HostPool) {
-        (Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName() -ErrorAction Ignore).ResourceId -replace ".*/" | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_)) } 
+    $SessionHostVMs = foreach ($CurrentHostPool in $HostPool) {
+            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+            $SessionHosts.ResourceId | Get-AzVM
     }
 
-    $Jobs = foreach ($CurrentSessionHostName in $SessionHostNames) {
-        Write-Host -Object "Restarting '$CurrentSessionHostName' Azure VM"
-        Get-AzVM -Name $CurrentSessionHostName | Restart-AzVM -AsJob
-    }
+    Write-Host -Object "Restarting the Azure VM(s): $($SessionHostVMs.Name -join ', ')"
+    $Jobs = $SessionHostVMs | Restart-AzVM -confirm:$false -AsJob
+
     if ($Wait) {
         Write-Host -Object "Waiting for all restarts"
-        $Jobs | Wait-Job | Out-Null
+        $Jobs | Receive-Job -Wait -AutoRemoveJob
         Write-Host -Object "All restarts complete"
-        $Jobs | Remove-Job -Force
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -8596,13 +8671,12 @@ function New-PsAvdRdcMan {
         if ($null -eq $Machines) {
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
             if ($null -ne $SessionHosts) {
-                $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
-                $Machines = foreach ($CurrentSessionHostName in $SessionHostNames) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentSessionHostName' Session Host"
-                    $VM = Get-AzVM -Name $CurrentSessionHostName -ResourceGroupName $resourceGroupName
-                    $NIC = Get-AzNetworkInterface -Name $($VM.NetworkProfile.NetworkInterfaces.Id -replace ".*/")
+                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                $Machines = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)' Session Host"
+                    $NIC = Get-AzNetworkInterface -Name $($CurrentSessionHostVM.NetworkProfile.NetworkInterfaces.Id -replace ".*/")
                     $PrivateIpAddress = $NIC.IpConfigurations.PrivateIPAddress
-                    [pscustomobject]@{DisplayName = $CurrentSessionHostName; Name = $PrivateIpAddress }
+                    [PSCustomObject]@{DisplayName = $CurrentSessionHostVM.Name; Name = $PrivateIpAddress }
                 }
             }
         }
@@ -8823,13 +8897,12 @@ function New-PsAvdRdcManV2 {
         if ($null -eq $Machines) {
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
             if ($null -ne $SessionHosts) {
-                $SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
-                $Machines = foreach ($CurrentSessionHostName in $SessionHostNames) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentSessionHostName' Session Host"
-                    $VM = Get-AzVM -Name $CurrentSessionHostName -ResourceGroupName $resourceGroupName
-                    $NIC = Get-AzNetworkInterface -Name $($VM.NetworkProfile.NetworkInterfaces.Id -replace ".*/")
+                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+                $Machines = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)' Session Host"
+                    $NIC = Get-AzNetworkInterface -Name $($CurrentSessionHostVM.NetworkProfile.NetworkInterfaces.Id -replace ".*/")
                     $PrivateIpAddress = $NIC.IpConfigurations.PrivateIPAddress
-                    [pscustomobject]@{DisplayName = $CurrentSessionHostName; Name = $PrivateIpAddress }
+                    [PSCustomObject]@{DisplayName = $CurrentSessionHostVM.Name; Name = $PrivateIpAddress }
                 }
             }
         }
