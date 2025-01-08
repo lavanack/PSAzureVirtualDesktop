@@ -829,7 +829,7 @@ function Connect-PsAvdAzure {
     }
     catch {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Connecting to Microsoft Graph with all required Scopes"
-        Connect-MgGraph -NoWelcome -Scopes Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Policy.ReadWrite.MobilityManagement
+        Connect-MgGraph -NoWelcome -Scopes Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Group.Read.All, Group.ReadWrite.All, GroupMember.Read.All, Policy.ReadWrite.MobilityManagement
     }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -872,8 +872,10 @@ function Register-PsAvdRequiredResourceProvider {
     #endregion
 
     #region Preview Resource Providers
-    foreach ($CurrentRequiredPreviewResourceProviders in $RequiredPreviewResourceProviders) {
-        $ProviderNamespace, $FeatureName = $CurrentRequiredPreviewResourceProviders -split "/"
+    foreach ($CurrentRequiredPreviewResourceProvider in $RequiredPreviewResourceProviders) {
+        $ProviderNamespace, $FeatureName = $CurrentRequiredPreviewResourceProvider -split "/"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] ProviderNamespace: `$ProviderNamespace: $ProviderNamespace"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] ProviderNamespace: `$FeatureName: $FeatureName"
         $FeatureStatus = (Get-AzProviderFeature -ProviderNamespace $ProviderNamespace -FeatureName $FeatureName).RegistrationState
         if ($FeatureStatus -ne "Registered") {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering '$RequiredPreviewResourceProviders' Resource Provider"
@@ -883,10 +885,10 @@ function Register-PsAvdRequiredResourceProvider {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for '$CurrentRequiredPreviewResourceProvider' Resource Providers to be registered ... Waiting 10 seconds"
                 Start-Sleep -Seconds 10
             } until ($FeatureStatus -eq "Registered")
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Wait is over for registration of the '$CurrentRequiredPreviewResourceProviders' Resource Provider"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Wait is over for registration of the '$CurrentRequiredPreviewResourceProvider' Resource Provider"
         }
         else {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$CurrentRequiredPreviewResourceProviders' Resource Provider is already regsitered"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$CurrentRequiredPreviewResourceProvider' Resource Provider is already regsitered"
         }
 
     }
