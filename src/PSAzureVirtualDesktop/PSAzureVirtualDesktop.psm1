@@ -4153,7 +4153,7 @@ function New-AzureComputeGallery {
         Customize              = $Customize
         Location               = $location
         UserAssignedIdentityId = $AssignedIdentity.Id
-        VMProfileVmsize        = "Standard_D4s_v5"
+        VMProfileVmsize        = "Standard_D4s_v4"
         VMProfileOsdiskSizeGb  = 127
     }
     Write-Verbose -Message "Creating Azure Image Builder Template from '$imageTemplateName02' Image Template Name ..."
@@ -8462,7 +8462,7 @@ function New-PsAvdHostPoolSetup {
             Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "gpmc.msc" -Wait -NoNewWindow
             #>
             $OutFile = Join-Path -Path $env:Temp -ChildPath StarterGPOs.zip
-            Invoke-WebRequest -Uri https://raw.githubusercontent.com/lavanack/PSAzureVirtualDesktop/master/StarterGPOs.zip -UseBasicParsing -OutFile $OutFile
+            Invoke-WebRequest -Uri "https://github.com/lavanack/PSAzureVirtualDesktop/raw/refs/heads/main/StarterGPOs.zip?download=" -UseBasicParsing -OutFile $OutFile
             #$DomainName = (Get-ADDomain).DNSRoot
             #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
             $DestinationPath = "\\{0}\SYSVOL\{0}" -f $DomainName
