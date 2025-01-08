@@ -2672,7 +2672,9 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 #endregion
+#endregion 
 
+#region Miscellanous
 #This function was only created because sometimes Set-GPRegistryValue returns "Access Denied" so I implemented a retry.
 function Set-PsAvdGPRegistryValue {
     [CmdletBinding(PositionalBinding = $false)]
@@ -4817,7 +4819,7 @@ function Get-GitFile {
         $GitHubURI = "https://api.github.com/repos/$Organisation/$Repository/contents/$Contents"
     }
     else {
-        $GitHubURI = $URI
+        $GitHubURI = $URI 
     }
     #endregion
     #region Getting all request files
@@ -4989,20 +4991,25 @@ function Copy-PsAvdMSIXDemoPFXFile {
     }
 
     #Copying the PFX to all session hosts
-    $Session | ForEach-Object -Process { Copy-Item -Path $DownloadedPFXFiles.FullName -Destination C:\ -ToSession $_ -Force }
+    $Session | ForEach-Object -Process { 
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($DownloadedPFXFiles.FullName -join ', ' )' to C:\"
+        Copy-Item -Path $DownloadedPFXFiles.FullName -Destination C:\ -ToSession $_ -Force
+    }
 
-    Invoke-Command -Session $Session -ScriptBlock {
+    $ImportPfxCertificates = Invoke-Command -Session $Session -ScriptBlock {
         $using:DownloadedPFXFiles | ForEach-Object -Process { 
             $LocalFile = $(Join-Path -Path C: -ChildPath $_.Name)
             #Adding the self-signed certificate to the Trusted People (To validate this certificate)
+            #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Importing '$LocalFile' to Cert:\LocalMachine\TrustedPeople\"
             $ImportPfxCertificates = Import-PfxCertificate $LocalFile -CertStoreLocation Cert:\LocalMachine\TrustedPeople\ -Password $using:SecurePassword 
-            Write-Verbose -Message $($ImportPfxCertificates | Out-String)
             #Removing the PFX file (useless now)
             Remove-Item -Path $LocalFile -Force
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Updating GPO"
+            #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Updating GPO"
             gpupdate /force /wait:-1 /target:computer | Out-Null
+            return $ImportPfxCertificates
         }
     }
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ImportPfxCertificates: $($ImportPfxCertificates | Out-String)"
     $Session | Remove-PSSession
     #Removing the Temp folder (useless now)
     Remove-Item -Path $TempFolder -Recurse -Force -ErrorAction Ignore
@@ -5061,9 +5068,11 @@ function Wait-PSSession {
     } While ((-not($Result)) -and ($Loop -lt $Attempts))
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     if (-not($PassThru)) {   
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result'"
         return $result
     } 
     else {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Session: $($Session | Out-String)'"
         return $Session
     }
 }
@@ -5104,8 +5113,8 @@ function Wait-PsAvdRunPowerShell {
         $Jobs = foreach ($CurrentSessionHost in $SessionHosts) {
             $CurrentSessionHostVM = $CurrentSessionHost.ResourceId | Get-AzVM
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)'"
-            While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $CurrentSessionHostVM.Name) { Start-Sleep -Seconds 10 }
-            Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $CurrentSessionHostVM.Name -CommandId 'RunPowerShellScript' -ScriptString 'return $true' -AsJob
+            #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
+            Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $CurrentSessionHostVM.Name -ScriptString 'return $true' -AsJob
         }
         $Jobs | Wait-Job | Out-Null
         #Write-Host "Job State: $($Jobs.State -join ', ')" 
@@ -6780,6 +6789,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #region MSIX Storage Account and ResourceGroup Names Setup
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
+                    #TODO: If Appattach =+> test if a AD Account already and the realted Storage Accounts already exist with the pattern and then reuse them
                     #endregion 
 
                     #region Dedicated Resource Group Management (1 per HostPool)
@@ -6901,39 +6911,69 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
                     #endregion
 
-                    #region Registering the Storage Account with your AD environment under the target
-                    if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
-                        if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
-                            $AzFilesHybridZipName = 'AzFilesHybrid.zip'
-                            $OutFile = Join-Path -Path $env:TEMP -ChildPath $AzFilesHybridZipName
-                            Start-BitsTransfer https://github.com/Azure-Samples/azure-files-samples/releases/latest/download/AzFilesHybrid.zip -Destination $OutFile
-                            Expand-Archive -Path $OutFile -DestinationPath $env:TEMP\AzFilesHybrid -Force
-                            Push-Location -Path $env:TEMP\AzFilesHybrid
-                            .\CopyToPSPath.ps1
-                            Pop-Location
+                    #region Storage Account Share Mutex
+                        $JoinAzStorageAccountForAuthMutex = $null
+                        $MutexName = "JoinAzStorageAccountForAuthMutex"
+                        $JoinAzStorageAccountForAuthMutex = New-Object System.Threading.Mutex($false, $MutexName)
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
+
+                        try {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
+                            If ($JoinAzStorageAccountForAuthMutex.WaitOne()) { 
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
+
+                                #region Registering the Storage Account with your AD environment under the target
+                                if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'")) {
+                                    if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
+                                        $AzFilesHybridZipName = 'AzFilesHybrid.zip'
+                                        $OutFile = Join-Path -Path $env:TEMP -ChildPath $AzFilesHybridZipName
+                                        Start-BitsTransfer https://github.com/Azure-Samples/azure-files-samples/releases/latest/download/AzFilesHybrid.zip -Destination $OutFile
+                                        Expand-Archive -Path $OutFile -DestinationPath $env:TEMP\AzFilesHybrid -Force
+                                        Push-Location -Path $env:TEMP\AzFilesHybrid
+                                        .\CopyToPSPath.ps1
+                                        Pop-Location
+                                    }
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
+                                    Import-Module AzFilesHybrid #-DisableNameChecking #-Force
+                                    #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
+                                    if ($CurrentHostPool.MSIX) {
+                                        $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false #-OverwriteExistingADObject
+                                    }
+                                    else {
+                                        $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $PooledDesktopsOU.DistinguishedName -Confirm:$false #-OverwriteExistingADObject
+                                    }
+                                    # You can run the Debug-AzStorageAccountAuth cmdlet to conduct a set of basic checks on your AD configuration 
+                                    # with the logged on AD user. This cmdlet is supported on AzFilesHybrid v0.1.2+ version. For more details on 
+                                    # the checks performed in this cmdlet, see Azure Files Windows troubleshooting guide.
+                                    #Debug-AzStorageAccountAuth -StorageAccountName $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName
+
+                                    #$KerbKeys = Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ListKerbKey 
+                                }
+
+                                # Get the target storage account
+                                #$storageaccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName
+
+                                # List the directory service of the selected service account
+                                #$CurrentHostPoolStorageAccount.AzureFilesIdentityBasedAuth.DirectoryServiceOptions
+
+                                # List the directory domain information if the storage account has enabled AD authentication for file shares
+                                #$CurrentHostPoolStorageAccount.AzureFilesIdentityBasedAuth.ActiveDirectoryProperties
+                                #endregion 
+
+                                $null = $JoinAzStorageAccountForAuthMutex.ReleaseMutex()
+                                #$JoinAzStorageAccountForAuthMutex.Dispose()
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+                            }
+                            else {
+                                Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
+                            }
                         }
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
-                        Import-Module AzFilesHybrid #-DisableNameChecking #-Force
-                        #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
-                        $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
-
-                        # You can run the Debug-AzStorageAccountAuth cmdlet to conduct a set of basic checks on your AD configuration 
-                        # with the logged on AD user. This cmdlet is supported on AzFilesHybrid v0.1.2+ version. For more details on 
-                        # the checks performed in this cmdlet, see Azure Files Windows troubleshooting guide.
-                        #Debug-AzStorageAccountAuth -StorageAccountName $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName
-
-                        #$KerbKeys = Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ListKerbKey 
-                    }
-
-                    # Get the target storage account
-                    #$storageaccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName
-
-                    # List the directory service of the selected service account
-                    #$CurrentHostPoolStorageAccount.AzureFilesIdentityBasedAuth.DirectoryServiceOptions
-
-                    # List the directory domain information if the storage account has enabled AD authentication for file shares
-                    #$CurrentHostPoolStorageAccount.AzureFilesIdentityBasedAuth.ActiveDirectoryProperties
-                    #endregion 
+                        catch [System.Threading.AbandonedMutexException] {
+                            #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
+                            $null = $JoinAzStorageAccountForAuthMutex.ReleaseMutex()
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+                        }
+                        #endregion
 
                     #endregion 
 
@@ -7590,8 +7630,8 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message $("Processing {0}" -f $CurrentSessionHostName)
                     $ScriptString = 'Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters" -Name "CloudKerberosTicketRetrievalEnabled" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
                     # Run PowerShell script on the VM
-                    Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
-                    $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
+                    #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
+                    $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptString $ScriptString
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$CurrentSessionHostName] $($ScriptString):`r`n$($Result | Out-String)"
                     #endregion
 
@@ -7600,8 +7640,8 @@ function New-PsAvdPooledHostPoolSetup {
                     #$ScriptString = "Add-LocalGroupMember -Group 'FSLogix Profile Exclude List' -Member Administrators -ErrorAction Ignore; Add-LocalGroupMember -Group 'FSLogix ODFC Exclude List' -Member Administrators -ErrorAction Ignore"
                     $ScriptString = "Add-LocalGroupMember -Group 'FSLogix Profile Exclude List' -Member $LocalAdminUserName, Administrators -ErrorAction Ignore; Add-LocalGroupMember -Group 'FSLogix ODFC Exclude List' -Member $LocalAdminUserName, Administrators -ErrorAction Ignore"
                     # Run PowerShell script on the VM
-                    Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
-                    $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
+                    #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
+                    $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptString $ScriptString
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$CurrentSessionHostName] $($ScriptString):`r`n$($Result | Out-String)"
                     #endregion
 
@@ -7609,8 +7649,8 @@ function New-PsAvdPooledHostPoolSetup {
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/create-profile-container-azure-ad#configure-the-session-hosts
                     $ScriptString = '$null = New-Item -Path "HKLM:\Software\Policies\Microsoft\AzureADAccount" -Force; Set-ItemProperty -Path "HKLM:\Software\Policies\Microsoft\AzureADAccount" -Name "LoadCredKeyFromProfile" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
                     # Run PowerShell script on the VM
-                    Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
-                    $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
+                    #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
+                    $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptString $ScriptString
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$CurrentSessionHostName] $($ScriptString):`r`n$($Result | Out-String)"
                     #endregion
                 }
@@ -7625,8 +7665,8 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-AVDRegistryItemProperty.ps1"
-                        Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
-                        $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{WatermarkingBooleanString = $CurrentHostPool.Watermarking -as [string]}
+                        #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
+                        $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{WatermarkingBooleanString = $CurrentHostPool.Watermarking -as [string]}
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($CurrentSessionHostName)] $($ScriptPath):`r`n$($Result | Out-String)"
                         #Remove-Item -Path $ScriptPath -Force
                         #endregion
@@ -7639,12 +7679,12 @@ function New-PsAvdPooledHostPoolSetup {
                         #$ScriptPath = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $URI -Leaf)
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixRegistryItemProperty.ps1"
-                        Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
+                        #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
                         if ($CurrentHostPool.FSLogixCloudCache) {
-                            $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName(); RecoveryLocationFSLogixStorageAccountName = $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()}
+                            $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName(); RecoveryLocationFSLogixStorageAccountName = $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()}
                         }
                         else {
-                            $Result = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName() }
+                            $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName() }
                         }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($CurrentSessionHostName)] $($ScriptPath):`r`n$($Result | Out-String)"
                         #Remove-Item -Path $ScriptPath -Force
@@ -7655,7 +7695,7 @@ function New-PsAvdPooledHostPoolSetup {
                         #region Configuring the clients to disable FSLogix
                         $ScriptString = "Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Name 'Enabled' -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 0"
                         # Run PowerShell script on the VM
-                        $null = Invoke-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
+                        $null = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -CommandId 'RunPowerShellScript' -ScriptString $ScriptString
                         #endregion
                         #>
                     }
@@ -7728,8 +7768,8 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #region Restarting the Session Hosts
                     Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
+                    Wait-PsAvdRunPowerShell -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     #endregion 
-
 
                     #region MSIX
                     if ($CurrentHostPool.MSIX) {
@@ -7747,7 +7787,7 @@ function New-PsAvdPooledHostPoolSetup {
                                 $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                                 $MyError = $null
                                 #$obj = Expand-PsAvdMSIXImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage
-                                $obj = Expand-AzWvdMsixImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
+                                $obj = Expand-AzWvdMsixImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage -ErrorVariable MyError
                                 if (($null -eq $obj)) {
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -7777,7 +7817,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #region AppAttach
                     if ($CurrentHostPool.AppAttach) {
-
+                        $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
                         foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
                             #region Adding the application(s) to the Host Pool
@@ -7787,7 +7827,8 @@ function New-PsAvdPooledHostPoolSetup {
                                 #Temporary Allowing storage account key access (disabled due to SFI)
                                 $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                                 $MyError = $null
-                                $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
+                                $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorVariable MyError
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$app: $($app | Out-String)"
                                 if (($null -eq $app)) {
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -7795,44 +7836,50 @@ function New-PsAvdPooledHostPoolSetup {
                                 }
                             }
 
-                            if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias })) {
+                            $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias}
+                            if (-not($AppAttachPackage)) {
                                 #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
                                 $DisplayName = "{0} (v{1})" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
                                 #$DisplayName = "{0}" -f $app.ImagePackageApplication.FriendlyName
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding the package '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                                $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                                 $parameters = @{
                                     Name                            = $app.ImagePackageAlias
-                                    ResourceGroupName               = $CurrentHostPoolResourceGroupName
+                                    ResourceGroupName               = $CurrentHostPoolStorageAccountResourceGroupName
                                     Location                        = $CurrentHostPool.Location
                                     FailHealthCheckOnStagingFailure = 'NeedsAssistance'
                                     ImageIsRegularRegistration      = $false
                                     ImageDisplayName                = $DisplayName
                                     ImageIsActive                   = $true
+                                    HostPoolReference               = $AzWvdHostPool.Id
+                                    AppAttachPackage                = $app
                                 }
-                                New-AzWvdAppAttachPackage -AppAttachPackage $app @parameters
+                                $AppAttachPackage = New-AzWvdAppAttachPackage @parameters
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
                                 #Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName
                             }
-                            #endregion 
-
-                            #region Assigning an app attach package
-                            #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
-                            #region Host pools
-                            $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
-                            $parameters = @{
-                                Name              = $app.ImagePackageAlias
-                                ResourceGroupName = $CurrentHostPoolResourceGroupName
-                                HostPoolReference = $AzWvdHostPool.Id
+                            else {
+                                if ($AzWvdHostPool.Id -notin $AppAttachPackage.HostPoolReference) {
+                                    $HostPoolReference = $AppAttachPackage.HostPoolReference + $AzWvdHostPool.Id
+                                    #region Updating an app attach package
+                                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
+                                    $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                                    $parameters = @{
+                                        Name              = $app.ImagePackageAlias
+                                        ResourceGroupName = $CurrentHostPoolStorageAccountResourceGroupName
+                                        HostPoolReference = $HostPoolReference
+                                    }
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Updating the package '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
+                                    Update-AzWvdAppAttachPackage @parameters
+                                    #endregion
+                                }
                             }
-
-                            Start-Sleep -Seconds 30
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the MSIX Image '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
-                            Update-AzWvdAppAttachPackage @parameters
-                            #endregion
+                            #endregion 
 
                             #region Groups and users
                             $parameters = @{
                                 Name              = $app.ImagePackageAlias
-                                ResourceGroupName = $CurrentHostPoolResourceGroupName
+                                ResourceGroupName = $CurrentHostPoolStorageAccountResourceGroupName
                             }
 
                             $appAttachPackage = Get-AzWvdAppAttachPackage @parameters
@@ -7841,17 +7888,16 @@ function New-PsAvdPooledHostPoolSetup {
                                 $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
                                 $Scope =  $appAttachPackage.Id
                                 if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($appAttachPackage)' AppAttach Application"
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($appAttachPackage)' AppAttach Application"
                                     $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
                                 }
                             }
-                            #endregion
                             #endregion
 
                             #region Publishing AppAttach application to a RemoteApp application group
                             #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
                             if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
-                                $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
+                                $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
                             }
                             #endregion 
 
@@ -7888,8 +7934,8 @@ function New-PsAvdPooledHostPoolSetup {
                         $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
                         $URI = "https://laurentvanacker.com/downloads/Azure/Azure%20Virtual%20Desktop/MSIX"
 
-                        Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
-                        $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock -Parameter @{'URI' = $URI; 'FileRegExPattern' = "\.pfx?$"; 'Destination'=$TempFolder}
+                        Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
+                        $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'URI' = $URI; 'FileRegExPattern' = "\.pfx?$"; 'Destination'=$TempFolder}
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion
 
@@ -7911,16 +7957,16 @@ function New-PsAvdPooledHostPoolSetup {
                             }
                         }
 
-                        Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
-                        $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock -Parameter @{'Filter' = "*.pfx"; 'Destination'=$TempFolder; 'ClearTextPassword'=$ClearTextPassword}
+                        Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
+                        $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'Filter' = "*.pfx"; 'Destination'=$TempFolder; 'ClearTextPassword'=$ClearTextPassword}
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion
 
                         #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
                         $ScriptBlock = { $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start"}
-                        Do { Start-Sleep -Seconds 10 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
-                        $RunPowerShellScript = Invoke-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName -CommandId 'RunPowerShellScript' -ScriptString $ScriptBlock
+                        Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
+                        $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion 
                     }
@@ -7928,19 +7974,21 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #region Restarting the Session Hosts
                     Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
+                    Wait-PsAvdRunPowerShell -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     #endregion 
 
 
+                    $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
                     foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
                         #region Adding the application(s) to the Host Pool
                         $app = $null
                         While ($null -eq $app) {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing tMSIX Image '$CurrentMSIXDemoPackage'"
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing the MSIX Image '$CurrentMSIXDemoPackage'"
                             #Temporary Allowing storage account key access (disabled due to SFI)
                             $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                             $MyError = $null
-                            $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorAction Ignore -ErrorVariable MyError
+                            $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorVariable MyError
                             if (($null -eq $app)) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -7948,63 +7996,49 @@ function New-PsAvdPooledHostPoolSetup {
                             }
                         }
 
-                        if (-not(Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias })) {
+                        $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias}
+                        if (-not($AppAttachPackage)) {
                             #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
                             $DisplayName = "{0} (v{1})" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
                             #$DisplayName = "{0}" -f $app.ImagePackageApplication.FriendlyName
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding the package '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                            $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                             $parameters = @{
                                 Name                            = $app.ImagePackageAlias
-                                ResourceGroupName               = $CurrentHostPoolResourceGroupName
+                                ResourceGroupName               = $CurrentHostPoolStorageAccountResourceGroupName
                                 Location                        = $CurrentHostPool.Location
                                 FailHealthCheckOnStagingFailure = 'NeedsAssistance'
                                 ImageIsRegularRegistration      = $false
                                 ImageDisplayName                = $DisplayName
                                 ImageIsActive                   = $true
+                                HostPoolReference               = $AzWvdHostPool.Id
                             }
-                            New-AzWvdAppAttachPackage -AppAttachPackage $app @parameters
+                            $AppAttachPackage = New-AzWvdAppAttachPackage -AppAttachPackage $app @parameters
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
                             #Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName
                         }
-                        #endregion 
-
-                        #region Assigning an app attach package
-                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
-                        #region Host pools
-                        $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
-                        $parameters = @{
-                            Name              = $app.ImagePackageAlias
-                            ResourceGroupName = $CurrentHostPoolResourceGroupName
-                            HostPoolReference = $AzWvdHostPool.Id
-                        }
-                        
-                        Start-Sleep -Seconds 30
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the MSIX Image '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
-                        Update-AzWvdAppAttachPackage @parameters
-                        #endregion
-
-                        #region Groups and users
-                        $parameters = @{
-                            Name              = $app.ImagePackageAlias
-                            ResourceGroupName = $CurrentHostPoolResourceGroupName
-                        }
-
-                        $appAttachPackage = Get-AzWvdAppAttachPackage @parameters
-                        $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersAzADGroupName'"
-                        foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
-                            $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
-                            $Scope =  $appAttachPackage.Id
-                            if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($appAttachPackage)' AppAttach Application"
-                                $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
+                        else {
+                            if ($AzWvdHostPool.Id -notin $AppAttachPackage.HostPoolReference) {
+                                $HostPoolReference = $AppAttachPackage.HostPoolReference + $AzWvdHostPool.Id
+                                #region Updating an app attach package
+                                #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
+                                $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                                $parameters = @{
+                                    Name              = $app.ImagePackageAlias
+                                    ResourceGroupName = $CurrentHostPoolStorageAccountResourceGroupName
+                                    HostPoolReference = $HostPoolReference
+                                }
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Updating the package '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
+                                Update-AzWvdAppAttachPackage @parameters
+                                #endregion
                             }
                         }
-                        #endregion
-                        #endregion
+                        #endregion 
 
                         #region Publishing AppAttach application to a RemoteApp application group
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
                         if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
-                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
+                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
                         }
                         #endregion 
 
@@ -8523,6 +8557,7 @@ function New-PsAvdHostPoolSetup {
                 Function Get-PsAvdPrivateDnsResourceGroupName { ${Function:Get-PsAvdPrivateDnsResourceGroupName} }
                 Function Get-AzVMSubnet { ${Function:Get-AzVMSubnet} }
                 Function Restart-PsAvdSessionHost { ${Function:Restart-PsAvdSessionHost} }
+                Function Invoke-PsAvdAzVMRunPowerShellScript { ${Function:Invoke-PsAvdAzVMRunPowerShellScript} }
 "@)
             $Jobs = @()
             $Jobs += foreach ($CurrentPooledHostPool in $PooledHostPools) {
@@ -9726,6 +9761,70 @@ function Get-PsAvdAzGalleryImageDefinition {
         }
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
+function Invoke-PsAvdAzVMRunPowerShellScript {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string] $ResourceGroupName,
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [string] $VMName,
+        [Parameter(Mandatory = $false, ParameterSetName = 'ScriptPath')]
+        [ValidateNotNullOrEmpty()]
+        [string] $ScriptPath,
+        [Parameter(Mandatory = $false, ParameterSetName = 'ScriptString')]
+        [ValidateNotNullOrEmpty()]
+        [string] $ScriptString,
+        [Parameter(Mandatory = $false)]
+        [hashtable] $Parameter,
+        [switch] $AsJob
+    )
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ResourceGroupName: $ResourceGroupName"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$VMName: $VMName"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptString: $ScriptString"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptPath: $ScriptPath"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Parameter: $($Parameter | Out-String)"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AsJob: $AsJob"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] ParameterSetName: $($psCmdlet.ParameterSetName)"
+
+    $Parameters = @{
+        ResourceGroupName = $ResourceGroupName 
+        VMName = $VMName 
+        CommandId = 'RunPowerShellScript' 
+        Parameter = $Parameter 
+    }
+    <#
+    if ($psCmdlet.ParameterSetName -eq 'ScriptString') {
+        $Parameters['ScriptString'] = $ScriptString
+    }
+    else {
+        $Parameters['ScriptPath'] = $ScriptPath
+    }
+    #>
+    $Parameters[$psCmdlet.ParameterSetName] = (Get-Variable -Name $psCmdlet.ParameterSetName -Scope Local).Value
+    Do { 
+        if ($AsJob) {
+            $Result = Invoke-AzVMRunCommand @Parameters -AsJob
+        }
+        else {
+            $Result = Invoke-AzVMRunCommand @Parameters -ErrorAction Ignore
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $Result"
+            if ([string]::IsNullOrEmpty($Result)) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] No result received (Probably another Invoke-AzVMRunCommand is running)  ..."
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds ..."
+                Start-Sleep -Seconds 30
+            }
+        }
+    } While ([string]::IsNullOrEmpty($Result))
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    $Result
 }
 #endregion
 
