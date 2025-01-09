@@ -471,7 +471,9 @@ class PooledHostPool : HostPool {
 
     [string] GetAppAttachStorageAccountResourceGroupName() {
         if ($this.MSIX) {
-            return $this.GetResourceGroupName()
+            #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
+            #return $this.GetResourceGroupName()
+            return "rg-avd-{0}" -f $($this.Name.ToLower())
         }
         elseif ($this.AppAttach) {
             return "rg-avd-appattach-poc-{0}-001" -f [HostPool]::AzLocationShortNameHT[$this.Location].shortName
@@ -6791,7 +6793,9 @@ function New-PsAvdPooledHostPoolSetup {
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX Storage Account and ResourceGroup Names Setup
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountResourceGroupName: $CurrentHostPoolStorageAccountResourceGroupName"
                     #TODO: If Appattach =+> test if a AD Account already and the realted Storage Accounts already exist with the pattern and then reuse them
                     #endregion 
 
