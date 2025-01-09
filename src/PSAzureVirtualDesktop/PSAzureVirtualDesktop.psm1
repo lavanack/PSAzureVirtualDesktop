@@ -2719,6 +2719,7 @@ function Set-PsAvdGPRegistryValue {
         }
     } While (-not($Result) -and $($Timer.Elapsed.Seconds -lt $TimeoutInSeconds))
     $Timer.Stop()
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Timer: $($Timer | Out-String)"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $Result"
     $Output
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -4153,7 +4154,7 @@ function New-AzureComputeGallery {
         Customize              = $Customize
         Location               = $location
         UserAssignedIdentityId = $AssignedIdentity.Id
-        VMProfileVmsize        = "Standard_D4s_v4"
+        VMProfileVmsize        = "Standard_D4s_v5"
         VMProfileOsdiskSizeGb  = 127
     }
     Write-Verbose -Message "Creating Azure Image Builder Template from '$imageTemplateName02' Image Template Name ..."
@@ -6476,7 +6477,7 @@ function New-PsAvdPooledHostPoolSetup {
                             Pop-Location
                         }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
-                        Import-Module AzFilesHybrid  #-DisableNameChecking #-Force
+                        Import-Module AzFilesHybrid  -DisableNameChecking #-Force
                         #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"#
                         $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false
                         #Debug-AzStorageAccountAuth -StorageAccountName $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName
