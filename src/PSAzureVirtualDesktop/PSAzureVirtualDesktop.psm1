@@ -4158,7 +4158,9 @@ function New-AzureComputeGallery {
         Customize              = $Customize
         Location               = $location
         UserAssignedIdentityId = $AssignedIdentity.Id
-        VMProfileVmsize        = "Standard_D4s_v5"
+        #Not available everywhere
+        #VMProfileVmsize        = "Standard_D4s_v5"
+        VMProfileVmsize        = "Standard_D4s_v4"
         VMProfileOsdiskSizeGb  = 127
     }
     Write-Verbose -Message "Creating Azure Image Builder Template from '$imageTemplateName02' Image Template Name ..."
@@ -4469,7 +4471,7 @@ function New-PsAvdSessionHost {
 
     if ($IsMicrosoftEntraIdJoined) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$VMName' VM will be Microsoft Entra ID joined"
-        $aadJoin = [boolean]::TrueString
+        #$aadJoin = [boolean]::TrueString
     }
     else {
         $ExtensionName = "joindomain_{0:yyyyMMddHHmmss}" -f (Get-Date)
@@ -4491,8 +4493,9 @@ function New-PsAvdSessionHost {
         else {
             $ADDomainJoinUPNCredential = New-Object System.Management.Automation.PSCredential -ArgumentList($ADDomainJoinUser.UserPrincipalName, $AdJoinPassword)
         }
-        $null = Set-AzVMADDomainExtension -Name $ExtensionName -DomainName $DomainName -OUPath $OUPath -VMName $VMName -Credential $ADDomainJoinUPNCredential -ResourceGroupName $ResourceGroupName -JoinOption 0x00000003 -Restart
-        $aadJoin = [boolean]::FalseString
+        $Result = Set-AzVMADDomainExtension -Name $ExtensionName -DomainName $DomainName -OUPath $OUPath -VMName $VMName -Credential $ADDomainJoinUPNCredential -ResourceGroupName $ResourceGroupName -JoinOption 0x00000003 -Restart
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result:`r`n$($Result | Out-String)"
+        #$aadJoin = [boolean]::FalseString
     }
     # Adding local admin Credentials to the Credential Manager (and escaping the password)
     #Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "cmdkey /generic:$VMName /user:$($LocalAdminCredential.UserName) /pass:$($LocalAdminCredential.GetNetworkCredential().Password -replace "(\W)", '^$1')" -Wait -NoNewWindow
@@ -4750,6 +4753,7 @@ function Add-PsAvdSessionHost {
                 #Verbose                  = $true
             }
         }
+        #Uncomment the line below for a serial processing (instead of a parallel one)
         #$AsJob = $false
         if ($AsJob) {
             #From https://stackoverflow.com/questions/7162090/how-do-i-start-a-job-of-a-function-i-just-defined
@@ -5838,6 +5842,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
             #endregion 
 
             #region Restarting the Session Hosts
