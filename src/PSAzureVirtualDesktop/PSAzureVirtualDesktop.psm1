@@ -486,6 +486,8 @@ class PooledHostPool : HostPool {
     [string] GetAppAttachStorageAccountName() {
         $StorageAccountNameMaxLength = 24
         if ($this.MSIX) {
+            #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
+            #return $this.GetResourceGroupName()
             $StorageAccountName = "msix{0}" -f $($this.Name.ToLower() -replace "\W")
             $StorageAccountName = $StorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $StorageAccountName.Length)).ToLower()
             return $StorageAccountName
@@ -890,7 +892,7 @@ function Register-PsAvdRequiredResourceProvider {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Wait is over for registration of the '$CurrentRequiredPreviewResourceProvider' Resource Provider"
         }
         else {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$CurrentRequiredPreviewResourceProvider' Resource Provider is already regsitered"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$CurrentRequiredPreviewResourceProvider' Resource Provider is already registered"
         }
 
     }
