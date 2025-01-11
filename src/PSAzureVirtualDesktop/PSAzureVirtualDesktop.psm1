@@ -1,4 +1,4 @@
-#region PowerShell HostPool classes
+ #region PowerShell HostPool classes
 enum IdentityProvider {
     ActiveDirectory
     MicrosoftEntraID
@@ -23,29 +23,46 @@ Class HostPool {
     [ValidateNotNullOrEmpty()] [string] $Name
     [ValidateNotNullOrEmpty()] [HostPoolType] $Type
     [ValidateNotNullOrEmpty()] [string] $Location
-    [ValidateNotNullOrEmpty()] [string] $PairedRegion
-    [ValidateNotNullOrEmpty()][ValidatePattern("/subscriptions/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/resourceGroups/.*/providers/Microsoft\.Network/virtualNetworks/.*/subnets/.*")] [string] $SubnetId
+    [ValidateNotNullOrEmpty()] [ValidatePattern("/subscriptions/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/resourceGroups/.*/providers/Microsoft\.Network/virtualNetworks/.*/subnets/.*")] [string] $SubnetId
     [ValidateLength(3, 11)] [string] $NamePrefix
     [ValidateRange(1, 10)] [uint16]    $VMNumberOfInstances
     [ValidateNotNullOrEmpty()] [Object] $KeyVault
+    [ValidateNotNullOrEmpty()] [string] $VMSize
+
     [boolean] $Intune
     [boolean] $Spot
     [boolean] $ScalingPlan
     [boolean] $Watermarking
     [boolean] $RDPShortPath
-    [ValidateNotNullOrEmpty()] [string] $VMSize
+
+    hidden [string] $PairedRegion
+    hidden [string] $ResourceGroupName
+    hidden [string] $KeyVaultName
+    hidden [string] $RecoveryServiceVaultName
+    hidden [string] $LogAnalyticsWorkSpaceName
+    hidden [string] $RecoveryLocationResourceGroupName
+    hidden [string] $WorkSpaceName
+    hidden [string] $ScalingPlanName
+
     [string] $ImagePublisherName
     [string] $ImageOffer
     [string] $ImageSku
     [string] $VMSourceImageId
     [String] $LoadBalancerType
-    [string] $ASRFailOverVNetId = $null
-    [DiffDiskPlacement] $DiffDiskPlacement = [DiffDiskPlacement]::None
-    static [hashtable] $AzLocationShortNameHT = $null     
+    [string] $ASRFailOverVNetId
+
+    [DiffDiskPlacement] $DiffDiskPlacement
+
+    hidden static [hashtable] $AzLocationShortNameHT = $null     
     static [hashtable] $AzEphemeralOsDiskSkuHT = $null
     static [hashtable] $AzPairedRegionHT = $null
     static [uint16] $VMProfileOsdiskSizeGb = 127
     
+    static [string] GetAzLocationShortName([string] $Location) {
+        [HostPool]::BuildAzureLocationSortNameHashtable()        
+        return [HostPool]::AzLocationShortNameHT[$Location].shortName
+    }
+
     hidden static BuildAzureLocationSortNameHashtable() {
         if ($null -eq [HostPool]::AzLocationShortNameHT) {
             $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
@@ -101,7 +118,7 @@ Class HostPool {
         if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
         }
-        $this.VMSize = "Standard_D2s_v5"
+        $this.VMSize = "Standard_D2s_v4"
         $this.SubnetId = $SubnetId        
         #Getting the VNet from the Subnet
         $VirtualNetwork = $this.GetVirtualNetwork()
@@ -115,6 +132,7 @@ Class HostPool {
         $this.KeyVault = $KeyVault
         $this.IdentityProvider = [IdentityProvider]::ActiveDirectory
         $this.ASRFailOverVNetId = $null
+        $this.DiffDiskPlacement = [DiffDiskPlacement]::None
     }
         
     HostPool([Object] $KeyVault, [string] $SubnetId) {
@@ -134,12 +152,12 @@ Class HostPool {
 
 
     [string] GetAzAvdWorkSpaceName() {
-        return "ws-{0}" -f $($this.Name.ToLower())
+        return $this.WorkSpaceName
     }
 
     [string] GetAzAvdScalingPlanName() {
         if ($this.ScalingPlan) {
-            return "sp-{0}" -f $($this.Name.ToLower())
+            return $this.ScalingPlanName
         }
         else {
             return $null
@@ -147,48 +165,31 @@ Class HostPool {
     }
 
     [string] GetLogAnalyticsWorkSpaceName() {
-        return "log{0}" -f $($this.Name.ToLower() -replace "\W")
+        return $this.LogAnalyticsWorkSpaceName
     }
 
     [string] GetResourceGroupName() {
-        return "rg-avd-{0}" -f $($this.Name.ToLower())
+        return $this.ResourceGroupName
     }
 
     [string] GetKeyVaultName() {
-        $KeyVaultNameMaxLength = 24
-        $KeyVaultName = "kv{0}" -f $($this.Name.ToLower() -replace "\W")
-        $KeyVaultName = $KeyVaultName.Substring(0, [system.math]::min($KeyVaultNameMaxLength, $KeyVaultName.Length)).ToLower()
-        return $KeyVaultName
-    }
-
-    static [string] GetAzurePairedRegion([string] $Location) {
-        [HostPool]::BuildAzurePairedRegionHashtable()
-        return ([HostPool]::AzPairedRegionHT[$Location].PairedRegion -as [string])
+        return $this.KeyVaultName
     }
 
     [string] GetAzurePairedRegion() {
-        #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
-        #return [HostPool]::GetAzurePairedRegion($this.Location)
-        [HostPool]::BuildAzurePairedRegionHashtable()
-        return ([HostPool]::AzPairedRegionHT[$this.Location].PairedRegion -as [string])
+        return $this.PairedRegion
     }
 
     [string] GetRecoveryLocationResourceGroupName() {
-        $AzurePairedRegion = $this.GetAzurePairedRegion()
-        if ([string]::IsNullOrEmpty($AzurePairedRegion)) {
-            return $null
-        }
-        else {
-            return $this.GetResourceGroupName() -replace [HostPool]::AzLocationShortNameHT[$this.Location].shortName, [HostPool]::AzLocationShortNameHT[$AzurePairedRegion].shortName
-        }
+        return $this.RecoveryLocationResourceGroupName
     }
 
     [string] GetRecoveryServiceVaultName() {
-        return $this.GetRecoveryLocationResourceGroupName() -replace "^rg", "rsv"
+        return $this.RecoveryServiceVaultName
     }
 
     [object] GetPropertyForJSON() {
-        return $this | Select-Object -Property *, @{Name = "ResourceGroupName"; Expression = { $_.GetResourceGroupName() } }, @{Name = "KeyVaultName"; Expression = { $_.GetKeyVaultName() } }, @{Name = "LogAnalyticsWorkSpaceName"; Expression = { $_.GetLogAnalyticsWorkSpaceName() } }, @{Name = "RecoveryLocationResourceGroupName"; Expression = { $_.GetRecoveryLocationResourceGroupName() } }, @{Name = "RecoveryServiceVaultName"; Expression = { $_.GetRecoveryServiceVaultName() } }, @{Name = "CredentialKeyVault"; Expression = { $_.KeyVault.VaultName } } -ExcludeProperty "KeyVault", "FSLogixCloudCachePairedPooledHostPool"
+        return $this | Select-Object -Property *,  @{Name = "CredentialKeyVault"; Expression = { $_.KeyVault.VaultName } } -ExcludeProperty "KeyVault", "FSLogixCloudCachePairedPooledHostPool"
     }
 
     [HostPool] SetVMNumberOfInstances([uint16] $VMNumberOfInstances) {
@@ -321,8 +322,8 @@ Class HostPool {
         if ([HostPool]::AzLocationShortNameHT.ContainsKey($Location)) {
             if ($this.VMSize -in (Get-AzVMSize -Location $Location).Name) {
                 $this.Location = $Location
-                $this.PairedRegion = $this.GetAzurePairedRegion()
-                $this.RefreshNames()
+                [HostPool]::BuildAzurePairedRegionHashtable()
+                $this.PairedRegion = ([HostPool]::AzPairedRegionHT[$this.Location].PairedRegion -as [string])
             }
             else {
                 Write-Warning "The specified '$($Location)' Azure region doesn't allow the '$($this.VMSize)'. We keep the previously set location: '$($this.Location)' ..."
@@ -332,14 +333,18 @@ Class HostPool {
             Write-Warning -Message "Unknown Azure Location: '$($Location)'. We keep the previously set location: '$($this.Location)'"
         }
 
+        if ([string]::IsNullOrEmpty($this.PairedRegion)) {
+            $this.RecoveryLocationResourceGroupName = $null
+            $this.RecoveryServiceVaultName = $null
+        }
+        else {
+            $this.RecoveryLocationResourceGroupName = $this.ResourceGroupName -replace [HostPool]::GetAzLocationShortName($this.Location), [HostPool]::GetAzLocationShortName($this.PairedRegion)
+            $this.RecoveryServiceVaultName = $this.RecoveryLocationResourceGroupName -replace "^rg", "rsv"
+        }
+
         [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
 
-        return $this
-    }
-
-    [HostPool] SetName([string] $Name, [string] $NamePrefix) {
-        $this.Name = $Name
-        $this.NamePrefix = $NamePrefix
+        $this.RefreshNames()
         return $this
     }
 
@@ -391,8 +396,12 @@ class PooledHostPool : HostPool {
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
     [String] $PreferredAppGroupType  
     [PooledHostPool] $FSLogixCloudCachePairedPooledHostPool  
-    [String] $FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
-    static [hashtable] $AppAttachStorageAccountName = @{}
+    hidden [string] $FSLogixStorageAccountName
+    hidden [String] $FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
+    hidden [String] $AppAttachStorageAccountName
+    hidden [String] $AppAttachStorageAccountResourceGroupName
+
+    static [hashtable] $AppAttachStorageAccountNameHT = @{}
 
     hidden Init() {
         if ($null -eq [PooledHostPool]::IndexHT) {
@@ -413,9 +422,9 @@ class PooledHostPool : HostPool {
         $this.AppAttach = $false
         $this.LoadBalancerType = "BreadthFirst"
         $this.PreferredAppGroupType = "Desktop"
-        $this.RefreshNames()
         $this.FSLogixCloudCachePairedPooledHostPool = $null
-
+        $this.FSLogixStorageAccountName = $null
+        $this.RefreshNames()
     }
 
     PooledHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
@@ -432,10 +441,7 @@ class PooledHostPool : HostPool {
 
     [string] GetFSLogixStorageAccountName() {
         if ($this.FSlogix) {
-            $StorageAccountNameMaxLength = 24
-            $StorageAccountName = "fsl{0}" -f $($this.Name.ToLower() -replace "\W")
-            $StorageAccountName = $StorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $StorageAccountName.Length)).ToLower()
-            return $StorageAccountName
+            return $this.FSLogixStorageAccountName
         }
         else {
             return $null
@@ -470,13 +476,8 @@ class PooledHostPool : HostPool {
     }
 
     [string] GetAppAttachStorageAccountResourceGroupName() {
-        if ($this.MSIX) {
-            #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
-            #return $this.GetResourceGroupName()
-            return "rg-avd-{0}" -f $($this.Name.ToLower())
-        }
-        elseif ($this.AppAttach) {
-            return "rg-avd-appattach-poc-{0}-001" -f [HostPool]::AzLocationShortNameHT[$this.Location].shortName
+        if (($this.MSIX) -or ($this.AppAttach)) {
+            return $this.AppAttachStorageAccountResourceGroupName
         }
         else {
             return $null
@@ -484,27 +485,8 @@ class PooledHostPool : HostPool {
     }
 
     [string] GetAppAttachStorageAccountName() {
-        $StorageAccountNameMaxLength = 24
-        if ($this.MSIX) {
-            #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
-            #return $this.GetResourceGroupName()
-            $StorageAccountName = "msix{0}" -f $($this.Name.ToLower() -replace "\W")
-            $StorageAccountName = $StorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $StorageAccountName.Length)).ToLower()
-            return $StorageAccountName
-        }
-        elseif ($this.AppAttach) {
-            if (-not([PooledHostPool]::AppAttachStorageAccountName[$this.Location])) {
-                $StorageAccountName = $null
-                Do {
-                    $RandomNumber = Get-Random -Minimum 1 -Maximum 1000
-                    $StorageAccountName = "saavdappattachpoc{0}{1:D3}" -f [HostPool]::AzLocationShortNameHT[$this.Location].shortName, $RandomNumber
-                    $StorageAccountName = $StorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $StorageAccountName.Length)).ToLower()
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$StorageAccountName: $StorageAccountName"
-                } While (-not(Get-AzStorageAccountNameAvailability -Name $StorageAccountName).NameAvailable)
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [PooledHostPool]::AppAttachStorageAccountName: $([PooledHostPool]::AppAttachStorageAccountName)"
-                [PooledHostPool]::AppAttachStorageAccountName[$this.Location] =  $StorageAccountName
-            }
-            return [PooledHostPool]::AppAttachStorageAccountName[$this.Location]
+        if (($this.MSIX) -or ($this.AppAttach)) {
+            return $this.AppAttachStorageAccountName
         }
         else {
             return $null
@@ -537,11 +519,13 @@ class PooledHostPool : HostPool {
     [PooledHostPool]DisableFSLogix() {
         $this.FSLogix = $false
         $this.DisableFSLogixCloudCache()
+        $this.RefreshNames()        
         return $this
     }
 
     [PooledHostPool]EnableFSLogix() {
         $this.FSLogix = $true
+        $this.RefreshNames()        
         return $this
     }
 
@@ -565,30 +549,26 @@ class PooledHostPool : HostPool {
     [PooledHostPool]EnableFSLogixCloudCache() {
         $this.EnableFSLogix()
         $this.FSLogixCloudCache = $true
-        if ([string]::IsNullOrEmpty($this.PairedRegion)) {
-            $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName()
-        }
-        else 
-        {
-            $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName() -replace [HostPool]::AzLocationShortNameHT[$this.Location].shortName, [HostPool]::AzLocationShortNameHT[$this.PairedRegion].shortName
-        }
-
+        $this.RefreshNames()
         return $this
     }
 
     [PooledHostPool]DisableAppAttach() {
         $this.AppAttach = $false
+        $this.RefreshNames()        
         return $this
     }
 
     [PooledHostPool]EnableAppAttach() {
         $this.AppAttach = $true
         $this.DisableMSIX()
+        #$this.RefreshNames()        
         return $this
     }
 
     [PooledHostPool]DisableMSIX() {
         $this.MSIX = $false
+        $this.RefreshNames()        
         return $this
     }
 
@@ -597,6 +577,7 @@ class PooledHostPool : HostPool {
         if ($this.IsActiveDirectoryJoined()) {
             $this.MSIX = $true
             $this.DisableAppAttach()
+            $this.RefreshNames()        
         }
         return $this
     }
@@ -612,6 +593,9 @@ class PooledHostPool : HostPool {
     }
 
     hidden RefreshNames() {
+        $KeyVaultNameMaxLength = 24
+        $StorageAccountNameMaxLength = 24
+
         $TempName = "hp-np"
         $TempNamePrefix = "n"
 
@@ -636,8 +620,62 @@ class PooledHostPool : HostPool {
             $TempNamePrefix += "m"
         }
 
-        $this.Name = "{0}-{1}-{2:D3}" -f $TempName, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PooledHostPool]::IndexHT[$this.Location]
-        $this.NamePrefix = "{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PooledHostPool]::IndexHT[$this.Location]
+        $this.Name = $("{0}-{1}-{2:D3}" -f $TempName, [HostPool]::GetAzLocationShortName($this.Location), [PooledHostPool]::IndexHT[$this.Location]).ToLower()
+        $this.NamePrefix = $("{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::GetAzLocationShortName($this.Location), [PooledHostPool]::IndexHT[$this.Location]).ToLower()
+        $this.ResourceGroupName = "rg-avd-{0}" -f $this.Name
+        $this.KeyVaultName = "kv{0}" -f $($this.Name -replace "\W")
+        $this.KeyVaultName = $this.KeyVaultName.Substring(0, [system.math]::min($KeyVaultNameMaxLength, $this.KeyVaultName.Length)).ToLower()
+        $this.LogAnalyticsWorkSpaceName = "log{0}" -f $($this.Name -replace "\W")
+        $this.WorkSpaceName = "ws-{0}" -f $this.Name
+        $this.ScalingPlanName = "sp-{0}" -f $this.Name
+
+        if ($this.FSlogix) {
+            $this.FSLogixStorageAccountName = "fsl{0}" -f $($this.Name -replace "\W")
+            $this.FSLogixStorageAccountName = $this.FSLogixStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.FSLogixStorageAccountName.Length)).ToLower()
+        }
+        else
+        {
+            $this.FSLogixStorageAccountName = $null
+        }
+
+
+        if ($this.FSLogixCloudCache) {
+            if ([string]::IsNullOrEmpty($this.PairedRegion)) {
+                $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName()
+            }
+            else 
+            {
+                $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName() -replace [HostPool]::GetAzLocationShortName($this.Location), [HostPool]::GetAzLocationShortName($this.PairedRegion)
+            }
+        }
+        else
+        {
+            $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $null
+        }
+
+
+        if ($this.MSIX) {
+            $this.AppAttachStorageAccountResourceGroupName = "rg-avd-{0}" -f $this.Name
+            $this.AppAttachStorageAccountName = "msix{0}" -f $($this.Name -replace "\W")
+            $this.AppAttachStorageAccountName = $this.AppAttachStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.AppAttachStorageAccountName.Length))
+        }
+        elseif ($this.AppAttach) {
+            $this.AppAttachStorageAccountResourceGroupName = "rg-avd-appattach-poc-{0}-001" -f [HostPool]::GetAzLocationShortName($this.Location)
+            $this.AppAttachStorageAccountName = [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location]
+            if (-not($this.AppAttachStorageAccountName)) {
+                Do {
+                    $RandomNumber = Get-Random -Minimum 1 -Maximum 1000
+                    $this.AppAttachStorageAccountName = "saavdappattachpoc{0}{1:D3}" -f [HostPool]::GetAzLocationShortName($this.Location), $RandomNumber
+                    $this.AppAttachStorageAccountName = $this.AppAttachStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.AppAttachStorageAccountName.Length)).ToLower()
+                } While (-not(Get-AzStorageAccountNameAvailability -Name $this.AppAttachStorageAccountName).NameAvailable)
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [PooledHostPool]::AppAttachStorageAccountNameHT: $([PooledHostPool]::AppAttachStorageAccountNameHT)"
+                [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location] =  $this.AppAttachStorageAccountName
+            }
+        }
+        else {
+            $this.AppAttachStorageAccountResourceGroupName = $null
+            $this.AppAttachStorageAccountName = $null
+        }
     }
 
     <#
@@ -720,6 +758,8 @@ class PersonalHostPool : HostPool {
     }
 
     hidden RefreshNames() {
+        $KeyVaultNameMaxLength = 24
+        $StorageAccountNameMaxLength = 24
         $TempName = "hp-pd"
         $TempNamePrefix = "p"
 
@@ -744,8 +784,14 @@ class PersonalHostPool : HostPool {
             $TempNamePrefix += "m"
         }
 
-        $this.Name = "{0}-{1}-{2:D3}" -f $TempName, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PersonalHostPool]::IndexHT[$this.Location]
-        $this.NamePrefix = "{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::AzLocationShortNameHT[$this.Location].shortname, [PersonalHostPool]::IndexHT[$this.Location]
+        $this.Name = $("{0}-{1}-{2:D3}" -f $TempName, [HostPool]::GetAzLocationShortName($this.Location), [PersonalHostPool]::IndexHT[$this.Location]).ToLower()
+        $this.NamePrefix = $("{0}{1}{2:D3}" -f $TempNamePrefix, [HostPool]::GetAzLocationShortName($this.Location), [PersonalHostPool]::IndexHT[$this.Location]).ToLower()
+        $this.ResourceGroupName = "rg-avd-{0}" -f $this.Name
+        $this.KeyVaultName = "kv{0}" -f $($this.Name -replace "\W")
+        $this.KeyVaultName = $this.KeyVaultName.Substring(0, [system.math]::min($KeyVaultNameMaxLength, $this.KeyVaultName.Length)).ToLower()
+        $this.LogAnalyticsWorkSpaceName = "log{0}" -f $($this.Name -replace "\W")
+        $this.WorkSpaceName = "ws-{0}" -f $this.Name
+        $this.ScalingPlanName = "sp-{0}" -f $this.Name
     }
 
     <#
@@ -3350,14 +3396,14 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     Do {
         $Index++
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Index: $Index"
-        $KeyVaultName = "kvavdhpcred{0}{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
+        $KeyVaultName = "kvavdhpcred{0}{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
         $KeyVaultName = $KeyVaultName.ToLower()
         if ($Index -gt 999) {
             Write-Error "No name available for HostPool Credential Keyvault" -ErrorAction Stop
         }
     } While (-not(Test-AzKeyVaultNameAvailability -Name $KeyVaultName).NameAvailable)
     Write-Host -Object "Azure Key Vault Name for Credentials: $KeyVaultName"
-    $ResourceGroupName = "rg-avd-kv-poc-{0}-{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
+    $ResourceGroupName = "rg-avd-kv-poc-{0}-{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
 
     $ResourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Ignore 
     if ($null -eq $ResourceGroup) {
@@ -4344,7 +4390,7 @@ function New-PsAvdSessionHost {
         [ValidateNotNullOrEmpty()]
         [string]$SubnetId,
         [Parameter(Mandatory = $false)]
-        [string]$VMSize = "Standard_D2s_v5",
+        [string]$VMSize = "Standard_D2s_v4",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
         [string]$ImagePublisherName = "microsoftwindowsdesktop",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
@@ -4669,7 +4715,7 @@ function Add-PsAvdSessionHost {
         [ValidateNotNullOrEmpty()]
         [string]$SubnetId,
         [Parameter(Mandatory = $false)]
-        [string]$VMSize = "Standard_D2s_v5",
+        [string]$VMSize = "Standard_D2s_v4",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
         [string]$ImagePublisherName = "microsoftwindowsdesktop",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
@@ -9572,8 +9618,8 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     #endregion
 
     $Index = 1
-    $ResourceGroupName = "rg-avd-amba-poc-{0}-{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
-    $LogAnalyticsWorkSpaceName = "logavdambapoc{0}{1:D3}" -f [HostPool]::AzLocationShortNameHT[$Location].shortName, $Index
+    $ResourceGroupName = "rg-avd-amba-poc-{0}-{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
+    $LogAnalyticsWorkSpaceName = "logavdambapoc{0}{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
 
     $ResourceGroup = Get-AzResourceGroup -Name $ResourceGroupName -ErrorAction Ignore 
     if ($null -eq $ResourceGroup) {
@@ -9677,7 +9723,7 @@ function Import-PsAvdWorkbook {
     }
 
     [HostPool]::BuildAzureLocationSortNameHashtable()
-    $ResourceGroupName = "rg-avd-workbook-poc-{0}-001" -f [HostPool]::AzLocationShortNameHT[$Location].shortname
+    $ResourceGroupName = "rg-avd-workbook-poc-{0}-001" -f [HostPool]::GetAzLocationShortName($Location)
     if ($null -eq (Get-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Ignore)) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group in the '$Location' Location"
         $null = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
