@@ -1,4 +1,4 @@
- #region PowerShell HostPool classes
+#region PowerShell HostPool classes
 enum IdentityProvider {
     ActiveDirectory
     MicrosoftEntraID
@@ -59,7 +59,7 @@ Class HostPool {
     static [uint16] $VMProfileOsdiskSizeGb = 127
     
     static [string] GetAzLocationShortName([string] $Location) {
-        [HostPool]::BuildAzureLocationSortNameHashtable()        
+        #[HostPool]::BuildAzureLocationSortNameHashtable()    
         return [HostPool]::AzLocationShortNameHT[$Location].shortName
     }
 
@@ -2746,12 +2746,12 @@ function Set-PsAvdGPRegistryValue {
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Name: $Name'"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Key: $Key'"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ValueName: $ValueName'"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Type: $Type'"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Value: $Value'"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TimeoutInSeconds: $TimeoutInSeconds'"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Name: $Name"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Key: $Key"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ValueName: $ValueName"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Type: $Type"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Value: $Value"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TimeoutInSeconds: $TimeoutInSeconds"
     $Timer = [System.Diagnostics.Stopwatch]::StartNew()
     Do {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Timer: $($Timer | Out-String)"
@@ -7877,34 +7877,40 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #region AppAttach
                     if ($CurrentHostPool.AppAttach) {
+                        #region duplicated code
                         $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
                         foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentMSIXDemoPackage':`r`n$(Get-ChildItem -Path $CurrentMSIXDemoPackage | Out-String)"
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Get-AzWvdAppAttachPackage:`r`n$(Get-AzWvdAppAttachPackage | Out-String)"
                             #region Adding the application(s) to the Host Pool
-                            $app = $null
-                            While ($null -eq $app) {
+
+                            $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.ImagePath -eq $CurrentMSIXDemoPackage}
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
+                            if ($null -eq $AppAttachPackage) {
+                                #region Importing the App Attach Package
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing the MSIX Image '$CurrentMSIXDemoPackage'"
                                 #Temporary Allowing storage account key access (disabled due to SFI)
                                 $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                                 $MyError = $null
-                                $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorVariable MyError
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$app: $($app | Out-String)"
-                                if (($null -eq $app)) {
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                                    Start-Sleep -Seconds 30
-                                }
-                            }
+                                $DebugPreference = "Continue"
+                                $AppAttachPackage = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage
+                                $DebugPreference = "SilentlyContinue"
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: The MSIX Image '$CurrentMSIXDemoPackage' was imported"
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
+                                #endregion
 
-                            $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias}
-                            if (-not($AppAttachPackage)) {
-                                #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
-                                $DisplayName = "{0} (v{1})" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
-                                #$DisplayName = "{0}" -f $app.ImagePackageApplication.FriendlyName
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding the package '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                                #region Adding the App Attach Package
+                                $AppAttachPackageName = "{0}_{1}" -f $AppAttachPackage.ImagePackageAlias, [HostPool]::GetAzLocationShortName($CurrentHostPool.Location)
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackageName: $AppAttachPackageName"
                                 $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AzWvdHostPool.Id: $($AzWvdHostPool.Id)"
+
+                                $DisplayName = "{0} (v{1})" -f $AppAttachPackage.ImagePackageApplication.FriendlyName, $AppAttachPackage.ImageVersion
+                                #$DisplayName = "{0}" -f $AppAttachPackage.ImagePackageApplication.FriendlyName
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding the package '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
                                 $parameters = @{
-                                    Name                            = $app.ImagePackageAlias
+                                    Name                            = $AppAttachPackageName
                                     ResourceGroupName               = $CurrentHostPoolStorageAccountResourceGroupName
                                     Location                        = $CurrentHostPool.Location
                                     FailHealthCheckOnStagingFailure = 'NeedsAssistance'
@@ -7912,41 +7918,42 @@ function New-PsAvdPooledHostPoolSetup {
                                     ImageDisplayName                = $DisplayName
                                     ImageIsActive                   = $true
                                     HostPoolReference               = $AzWvdHostPool.Id
-                                    AppAttachPackage                = $app
+                                    AppAttachPackage                = $AppAttachPackage
+                                    PassThru                        = $true
                                 }
                                 $AppAttachPackage = New-AzWvdAppAttachPackage @parameters
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
-                                #Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName
+                                #endregion
                             }
                             else {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: The MSIX Image '$CurrentMSIXDemoPackage' already exists"
                                 if ($AzWvdHostPool.Id -notin $AppAttachPackage.HostPoolReference) {
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage.HostPoolReference:`r`n$($AppAttachPackage.HostPoolReference -join ', ')"
                                     $HostPoolReference = $AppAttachPackage.HostPoolReference + $AzWvdHostPool.Id
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolReference:`r`n$($HostPoolReference -join ', ')"
                                     #region Updating an app attach package
                                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
-                                    $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                                    $AppAttachPackageName = "{0}_{1}" -f $AppAttachPackage.ImagePackageAlias, [HostPool]::GetAzLocationShortName($CurrentHostPool.Location)
                                     $parameters = @{
-                                        Name              = $app.ImagePackageAlias
+                                        Name              = $AppAttachPackageName
                                         ResourceGroupName = $CurrentHostPoolStorageAccountResourceGroupName
                                         HostPoolReference = $HostPoolReference
+                                        AppAttachPackage  = $AppAttachPackage
+                                        PassThru          = $true
                                     }
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Updating the package '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
-                                    Update-AzWvdAppAttachPackage @parameters
+                                    $AppAttachPackage = Update-AzWvdAppAttachPackage @parameters
                                     #endregion
                                 }
                             }
                             #endregion 
 
                             #region Groups and users
-                            $parameters = @{
-                                Name              = $app.ImagePackageAlias
-                                ResourceGroupName = $CurrentHostPoolStorageAccountResourceGroupName
-                            }
-
-                            $appAttachPackage = Get-AzWvdAppAttachPackage @parameters
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
                             $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersAzADGroupName'"
                             foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
                                 $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
-                                $Scope =  $appAttachPackage.Id
+                                $Scope =  $AppAttachPackage.Id
                                 if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($appAttachPackage)' AppAttach Application"
                                     $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
@@ -7957,11 +7964,12 @@ function New-PsAvdPooledHostPoolSetup {
                             #region Publishing AppAttach application to a RemoteApp application group
                             #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
                             if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
-                                $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
+                                $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -SubscriptionId $SubscriptionId -Name $AppAttachPackage.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $AppAttachPackage.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $AppAttachPackage.ImagePackageApplication.AppId
                             }
                             #endregion 
 
                         }
+                        #endregion
                     }
                     #endregion
 
@@ -8037,34 +8045,38 @@ function New-PsAvdPooledHostPoolSetup {
                     Wait-PsAvdRunPowerShell -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     #endregion 
 
-
+                    #region duplicated code
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
                     foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentMSIXDemoPackage':`r`n$(Get-ChildItem -Path $CurrentMSIXDemoPackage | Out-String)"
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Get-AzWvdAppAttachPackage:`r`n$(Get-AzWvdAppAttachPackage | Out-String)"
                         #region Adding the application(s) to the Host Pool
-                        $app = $null
-                        While ($null -eq $app) {
+
+                        $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.ImagePath -eq $CurrentMSIXDemoPackage}
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
+                        if ($null -eq $AppAttachPackage) {
+                            #region Importing the App Attach Package
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing the MSIX Image '$CurrentMSIXDemoPackage'"
                             #Temporary Allowing storage account key access (disabled due to SFI)
                             $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                             $MyError = $null
-                            $app = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage -ErrorVariable MyError
-                            if (($null -eq $app)) {
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                                Start-Sleep -Seconds 30
-                            }
-                        }
+                            $AppAttachPackage = Import-AzWvdAppAttachPackageInfo -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Path $CurrentMSIXDemoPackage
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: The MSIX Image '$CurrentMSIXDemoPackage' was imported"
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
+                            #endregion
 
-                        $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.Name -eq $app.ImagePackageAlias}
-                        if (-not($AppAttachPackage)) {
-                            #if (-not(Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore)) {
-                            $DisplayName = "{0} (v{1})" -f $app.ImagePackageApplication.FriendlyName, $app.ImageVersion
-                            #$DisplayName = "{0}" -f $app.ImagePackageApplication.FriendlyName
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding the package '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
+                            #region Adding the App Attach Package
+                            $AppAttachPackageName = "{0}_{1}" -f $AppAttachPackage.ImagePackageAlias, [HostPool]::GetAzLocationShortName($CurrentHostPool.Location)
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackageName: $AppAttachPackageName"
                             $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AzWvdHostPool.Id: $($AzWvdHostPool.Id)"
+
+                            $DisplayName = "{0} (v{1})" -f $AppAttachPackage.ImagePackageApplication.FriendlyName, $AppAttachPackage.ImageVersion
+                            #$DisplayName = "{0}" -f $AppAttachPackage.ImagePackageApplication.FriendlyName
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Adding the package '$CurrentMSIXDemoPackage' as '$DisplayName' ..."
                             $parameters = @{
-                                Name                            = $app.ImagePackageAlias
+                                Name                            = $AppAttachPackageName
                                 ResourceGroupName               = $CurrentHostPoolStorageAccountResourceGroupName
                                 Location                        = $CurrentHostPool.Location
                                 FailHealthCheckOnStagingFailure = 'NeedsAssistance'
@@ -8072,37 +8084,58 @@ function New-PsAvdPooledHostPoolSetup {
                                 ImageDisplayName                = $DisplayName
                                 ImageIsActive                   = $true
                                 HostPoolReference               = $AzWvdHostPool.Id
+                                AppAttachPackage                = $AppAttachPackage
+                                PassThru                        = $true
                             }
-                            $AppAttachPackage = New-AzWvdAppAttachPackage -AppAttachPackage $app @parameters
+                            $AppAttachPackage = New-AzWvdAppAttachPackage @parameters
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
-                            #Get-AzWvdAppAttachPackage -Name $app.ImagePackageAlias -ResourceGroupName $CurrentHostPoolResourceGroupName
+                            #endregion
+
                         }
                         else {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: The MSIX Image '$CurrentMSIXDemoPackage' already exists"
                             if ($AzWvdHostPool.Id -notin $AppAttachPackage.HostPoolReference) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage.HostPoolReference:`r`n$($AppAttachPackage.HostPoolReference -join ', ')"
                                 $HostPoolReference = $AppAttachPackage.HostPoolReference + $AzWvdHostPool.Id
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolReference:`r`n$($HostPoolReference -join ', ')"
                                 #region Updating an app attach package
                                 #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#assign-an-app-attach-package
-                                $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
+                                $AppAttachPackageName = "{0}_{1}" -f $AppAttachPackage.ImagePackageAlias, [HostPool]::GetAzLocationShortName($CurrentHostPool.Location)
                                 $parameters = @{
-                                    Name              = $app.ImagePackageAlias
+                                    Name              = $AppAttachPackageName
                                     ResourceGroupName = $CurrentHostPoolStorageAccountResourceGroupName
                                     HostPoolReference = $HostPoolReference
+                                    AppAttachPackage  = $AppAttachPackage
+                                    PassThru          = $true
                                 }
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Updating the package '$CurrentMSIXDemoPackage' to the '$($CurrentHostPool.Name)' HostPool ..."
-                                Update-AzWvdAppAttachPackage @parameters
+                                $AppAttachPackage = Update-AzWvdAppAttachPackage @parameters
                                 #endregion
                             }
                         }
                         #endregion 
 
+                        #region Groups and users
+                        $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersAzADGroupName'"
+                        foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
+                            $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
+                            $Scope =  $AppAttachPackage.Id
+                            if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($appAttachPackage)' AppAttach Application"
+                                $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
+                            }
+                        }
+                        #endregion
+
                         #region Publishing AppAttach application to a RemoteApp application group
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
                         if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
-                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -SubscriptionId $SubscriptionId -Name $app.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $app.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $app.ImagePackageApplication.AppId
+                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -SubscriptionId $SubscriptionId -Name $AppAttachPackage.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $AppAttachPackage.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $AppAttachPackage.ImagePackageApplication.AppId
                         }
                         #endregion 
 
                     }
+                    #endregion
 
                     #Creating a Private EndPoint for this Storage Account on the HostPool Subnet and the Subnet used by this DC
                     New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
