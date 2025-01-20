@@ -661,13 +661,16 @@ class PooledHostPool : HostPool {
         }
         elseif ($this.AppAttach) {
             $this.AppAttachStorageAccountResourceGroupName = "rg-avd-appattach-poc-{0}-001" -f [HostPool]::GetAzLocationShortName($this.Location)
+            #Checking if a StorageAccount have been already configured for this Azure location in this configuration. If yes we are reusing it.
             $this.AppAttachStorageAccountName = [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location]
             if (-not($this.AppAttachStorageAccountName)) {
-                #Checking if an existing StorageAccount already exising in this Azure location. If yes we are reusing it.
+                #Checking if an existing StorageAccount already exists in this Azure location. If yes we are reusing it.
                 $LatestExistingStorageAccount = Get-AzStorageAccount -ResourceGroupName $this.AppAttachStorageAccountResourceGroupName -ErrorAction Ignore | Where-Object -FilterScript { $_.StorageAccountName -match $("saavdappattachpoc{0}" -f [HostPool]::GetAzLocationShortName($this.Location)) } | Sort-Object -Property CreationTime -Descending | Select-Object -First 1
                 if ($null -ne $LatestExistingStorageAccount) {
-                    [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location] = $LatestExistingStorageAccount.StorageAccountName
+                    $this.AppAttachStorageAccountName = $LatestExistingStorageAccount.StorageAccountName
+                    [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location] = $this.AppAttachStorageAccountName
                 }
+                #else creating a new one
                 else {
                     Do {
                         $RandomNumber = Get-Random -Minimum 1 -Maximum 1000
@@ -3058,11 +3061,18 @@ function Test-PsAvdStorageAccountNameAvailability {
 
     $result = $true
     foreach ($CurrentHostPool in $HostPool) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)'"
         if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
             $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
             if (-not(Get-AzStorageAccountNameAvailability -Name $CurrentHostPoolStorageAccountName).NameAvailable) {
-                Write-Error -Message "The '$CurrentHostPoolStorageAccountName' Storage Account Name is NOT available"
-                $result = $false
+                if ($CurrentHostPool.AppAttach) {
+                    Write-Warning -Message "The '$CurrentHostPoolStorageAccountName' Storage Account Name is already taken but will be reused as Azure AppAttach Storage Account"
+                }
+                else {
+                    Write-Error -Message "The '$CurrentHostPoolStorageAccountName' Storage Account Name is NOT available"
+                    $result = $false
+                }
             }
             else {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolStorageAccountName' Storage Account Name is available"
