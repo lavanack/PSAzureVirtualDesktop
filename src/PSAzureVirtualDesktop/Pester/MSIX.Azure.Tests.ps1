@@ -9,7 +9,7 @@ BeforeDiscovery {
 
 Describe "<_.Name> HostPool - MSIX File Shares" -ForEach $MSIXHostPools {
         BeforeEach {
-            $StorageAccount = Get-AzStorageAccount -Name $_.GetMSIXStorageAccountName() -ResourceGroupName $_.GetResourceGroupName()
+            $StorageAccount = Get-AzStorageAccount -Name $_.GetAppAttachStorageAccountName() -ResourceGroupName $_.GetResourceGroupName()
             # Get the list of file shares in the storage account
             $StorageShare = Get-AzStorageShare -Context $StorageAccount.Context
             $MSIXStorageShare = $StorageShare | Where-Object  -FilterScript {$_.Name -eq "msix"}
@@ -17,7 +17,7 @@ Describe "<_.Name> HostPool - MSIX File Shares" -ForEach $MSIXHostPools {
         }
         Context '<_.Name>' {
             It  '<_.Name> HostPool has the right MSIX File Share' {
-                $StorageAccountName | Should -Be $_.GetMSIXStorageAccountName() #-ErrorAction Stop
+                $StorageAccountName | Should -Be $_.GetAppAttachStorageAccountName() #-ErrorAction Stop
         }
     }
 }
