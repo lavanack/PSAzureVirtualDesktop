@@ -7404,88 +7404,89 @@ function New-PsAvdPooledHostPoolSetup {
                 }
             }
             else {
-                #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
-                $CurrentHostPoolStorageAccountName = $null
-                $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
-                $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountResourceGroupName: $CurrentHostPoolStorageAccountResourceGroupName"
-                #endregion 
+                if ($CurrentHostPool.AppAttach) {
+                    #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                    $CurrentHostPoolStorageAccountName = $null
+                    $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
+                    $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountResourceGroupName: $CurrentHostPoolStorageAccountResourceGroupName"
+                    #endregion 
 
-                #region Dedicated Resource Group Management (1 per HostPool)
-                $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
+                    #region Dedicated Resource Group Management (1 per HostPool)
+                    $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
 
-                $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
-                if (-not($CurrentHostPoolResourceGroup)) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolResourceGroupName' Resource Group"
-                    $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
-                }
-                #endregion
+                    $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
+                    if (-not($CurrentHostPoolResourceGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolResourceGroupName' Resource Group"
+                        $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
+                    }
+                    #endregion
 
-                #region Dedicated Storage Account Setup
-                $null = New-AzResourceGroup -Name $CurrentHostPoolStorageAccountResourceGroupName -Location $CurrentHostPool.Location -Force
+                    #region Dedicated Storage Account Setup
+                    $null = New-AzResourceGroup -Name $CurrentHostPoolStorageAccountResourceGroupName -Location $CurrentHostPool.Location -Force
 
-                #region Storage Account Mutex
-                $StorageAccountMutex = $null
-                #$MutexName = "StorageAccountMutex"
-                $MutexName = $CurrentHostPoolStorageAccountName
-                $StorageAccountMutex = New-Object System.Threading.Mutex($false, $MutexName)
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
+                    #region Storage Account Mutex
+                    $StorageAccountMutex = $null
+                    #$MutexName = "StorageAccountMutex"
+                    $MutexName = $CurrentHostPoolStorageAccountName
+                    $StorageAccountMutex = New-Object System.Threading.Mutex($false, $MutexName)
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
 
-                try {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
-                    If ($StorageAccountMutex.WaitOne()) { 
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
+                    try {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
+                        If ($StorageAccountMutex.WaitOne()) { 
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
-                        $CurrentHostPoolStorageAccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ErrorAction Ignore
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount:`r`n$($CurrentHostPoolStorageAccount | Out-String)"
-                        if ($null -eq $CurrentHostPoolStorageAccount) {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$CurrentHostPoolStorageAccountName' StorageAccount"
-                            $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -ErrorAction Ignore #-AllowSharedKeyAccess $false
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolStorageAccountName' StorageAccount is created"
+                            $CurrentHostPoolStorageAccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ErrorAction Ignore
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount:`r`n$($CurrentHostPoolStorageAccount | Out-String)"
+                            if ($null -eq $CurrentHostPoolStorageAccount) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$CurrentHostPoolStorageAccountName' StorageAccount"
+                                $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -ErrorAction Ignore #-AllowSharedKeyAccess $false
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolStorageAccountName' StorageAccount is created"
+                            }
+                            else {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
+                            }
+                            $null = $StorageAccountMutex.ReleaseMutex()
+                            #$StorageAccountMutex.Dispose()
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
                         }
                         else {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
+                            Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
                         }
+                    }
+                    catch [System.Threading.AbandonedMutexException] {
+                        #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
                         $null = $StorageAccountMutex.ReleaseMutex()
-                        #$StorageAccountMutex.Dispose()
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
                     }
-                    else {
-                        Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
-                    }
-                }
-                catch [System.Threading.AbandonedMutexException] {
-                    #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
-                    $null = $StorageAccountMutex.ReleaseMutex()
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
-                }
-                $CurrentHostPoolStorageAccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ErrorAction Ignore
-                #endregion
+                    $CurrentHostPoolStorageAccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ErrorAction Ignore
+                    #endregion
 
-                #$CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
-                #endregion 
+                    #$CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true #-AllowSharedKeyAccess $false
+                    #endregion 
 
-                #region Dedicated Share Management
-                # Save the password so the drive will persist on reboot
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
-                #region Storage Account Key
+                    #region Dedicated Share Management
+                    # Save the password so the drive will persist on reboot
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Saving the credentials for accessing to the Storage Account '$CurrentHostPoolStorageAccountName' in the Windows Credential Manager"
+                    #region Storage Account Key
 
-                #region Getting the Storage Account Key from the Storage Account
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the '$CurrentHostPoolStorageAccountName' Storage Account"
-                $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
-                #$CurrentHostPoolStorageAccountKey = $CurrentHostPoolStorageAccount | Get-AzStorageAccountKey | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
-                #endregion 
+                    #region Getting the Storage Account Key from the Storage Account
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the '$CurrentHostPoolStorageAccountName' Storage Account"
+                    $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                    #$CurrentHostPoolStorageAccountKey = $CurrentHostPoolStorageAccount | Get-AzStorageAccountKey | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+                    #endregion 
 
-                Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
+                    Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$CurrentHostPoolStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
 
-                #endregion
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 60 seconds ..."
-                Start-Sleep -Seconds 60
+                    #endregion
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 60 seconds ..."
+                    Start-Sleep -Seconds 60
 
-                $MSIXDemoPackages = $null
-                $MSIXShareName | ForEach-Object -Process { 
+                    $MSIXDemoPackages = $null
+                                                                                                                                                                                        $MSIXShareName | ForEach-Object -Process { 
                     $CurrentHostPoolShareName = $_
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolShareName:  $CurrentHostPoolShareName"
                     #region Storage Account Share Mutex
@@ -7531,25 +7532,26 @@ function New-PsAvdPooledHostPoolSetup {
                     }
                     #endregion
                 }
-                #endregion
+                    #endregion
 
-                #region RBAC Management
-                #From https://www.stefandingemanse.com/2024/03/18/app-attach-with-entra-id-joined-hosts/
-                foreach ($DisplayName in 'Azure Virtual Desktop ARM Provider', 'Azure Virtual Desktop', 'Windows Virtual Desktop ARM Provider', 'Windows Virtual Desktop') {
-                    $objId = (Get-MgBetaServicePrincipal -Filter "DisplayName eq '$DisplayName'").Id
-                    if ($null -ne $objId) {
-                        $ReaderAndDataAccessRole = Get-AzRoleDefinition "Reader and Data Access"
-                        $Scope =  $CurrentHostPoolStorageAccount.Id
-                        if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope)) {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($ReaderAndDataAccessRole.Name)' RBAC role to Service Principal '$objId' on the '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account"
-                            $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
+                    #region RBAC Management
+                    #From https://www.stefandingemanse.com/2024/03/18/app-attach-with-entra-id-joined-hosts/
+                    foreach ($DisplayName in 'Azure Virtual Desktop ARM Provider', 'Azure Virtual Desktop', 'Windows Virtual Desktop ARM Provider', 'Windows Virtual Desktop') {
+                        $objId = (Get-MgBetaServicePrincipal -Filter "DisplayName eq '$DisplayName'").Id
+                        if ($null -ne $objId) {
+                            $ReaderAndDataAccessRole = Get-AzRoleDefinition "Reader and Data Access"
+                            $Scope =  $CurrentHostPoolStorageAccount.Id
+                            if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($ReaderAndDataAccessRole.Name)' RBAC role to Service Principal '$objId' on the '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account"
+                                $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
+                            }
                         }
+                        else {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unknown '$DisplayName' Service Principal"
+                         }
                     }
-                    else {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unknown '$DisplayName' Service Principal"
-                     }
+                    #endregion
                 }
-                #endregion
             }
             #endregion
 
