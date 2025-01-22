@@ -3063,6 +3063,7 @@ function Test-PsAvdStorageAccountNameAvailability {
     foreach ($CurrentHostPool in $HostPool) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)'"
         if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
+            $CurrentHostPoolStorageAccountName = $null
             $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
             if (-not(Get-AzStorageAccountNameAvailability -Name $CurrentHostPoolStorageAccountName).NameAvailable) {
@@ -3409,14 +3410,39 @@ function New-PsAvdPrivateEndpointSetup {
         #endregion
 
         #region Create the DNS zone group        
-        $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
-        if ([string]::IsNullOrEmpty($PrivateDnsZoneGroup)) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
-            $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) is created"
+        $PrivateDnsZoneGroupMutex = $null
+        #$MutexName = "PrivateDnsZoneGroupMutex"
+        $PrivateDnsZoneGroupName = "pdzg{0}" -f $PrivateEndpointName
+        $MutexName = $PrivateDnsZoneGroupName
+        $PrivateDnsZoneGroupMutex = New-Object System.Threading.Mutex($false, $MutexName)
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
+
+        try {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
+            If ($PrivateDnsZoneGroupMutex.WaitOne()) {         
+
+                $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
+                if ([string]::IsNullOrEmpty($PrivateDnsZoneGroup)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
+                    $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$PrivateDnsZoneGroup: $($PrivateDnsZoneGroup | Out-String)"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) is created"
+                }
+                else {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) already exists"
+                }
+
+                $null = $PrivateDnsZoneGroupMutex.ReleaseMutex()
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+            }
+            else {
+                Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
+            }
         }
-        else {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) already exists"
+        catch [System.Threading.AbandonedMutexException] {
+            #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
+            $null = $PrivateDnsZoneGroupMutex.ReleaseMutex()
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
         }
         #endregion
         #endregion
@@ -4811,7 +4837,7 @@ function Add-PsAvdSessionHost {
     }
     if ($AsJob) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdSessionHost' job to finish"
-        $Jobs | Receive-Job -Wait -AutoRemoveJob
+        $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The waiting is over for the 'New-PsAvdSessionHost' job"
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -5548,7 +5574,9 @@ function Add-PsAvdAzureAppAttach {
 
     $AzureAppAttachPooledHostPools = $HostPool | Where-Object { $_.AppAttach }
     $AzureAppAttachPooledHostPoolsPerLocation = $AzureAppAttachPooledHostPools | Group-Object -Property Location -AsHashTable -AsString
-
+    $AzContext = Get-AzContext
+    # Your subscription. This command gets your current subscription
+    $subscriptionID = $AzContext.Subscription.Id
     foreach ($Location in $AzureAppAttachPooledHostPoolsPerLocation.Keys) {
         $AllHostPoolsInthisLocation = $AzureAppAttachPooledHostPoolsPerLocation[$Location]
         $FirstHostPoolInthisLocation = $AllHostPoolsInthisLocation | Select-Object -First 1
@@ -5616,6 +5644,39 @@ function Add-PsAvdAzureAppAttach {
                     $AppAttachPackage = New-AzWvdAppAttachPackage @parameters
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
                     #endregion
+
+                    #region Groups and users
+                    foreach ($CurrentHostPool in $HostPool) {
+                        $CurrentHostPoolDAGUsersADGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
+                        $CurrentHostPoolRAGUsersADGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
+                        $CurrentHostPoolAGUsersADGroupName = $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName
+                        foreach ($CurrentHostPoolAGUsersADGroupName in $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the Application to Group '$CurrentHostPoolAGUsersADGroupName' to the '$($AppAttachPackageName)' AppAttach Application"
+                            $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolAGUsersADGroupName'"
+                            foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
+                                $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
+                                $Scope =  $AppAttachPackage.Id
+                                if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($AppAttachPackageName)' AppAttach Application"
+                                    $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
+                                }
+                            }
+                        }
+                        #endregion
+
+                        #region Publishing AppAttach application to a RemoteApp application group
+                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
+                        if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
+                            $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
+                            $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
+                            $ApplicationGroupName = "{0}-RAG" -f $CurrentHostPool.Name
+                            $CurrentAzRemoteApplicationGroup = Get-AzWvdApplicationGroup -Name $ApplicationGroupName -ResourceGroupName $CurrentHostPoolResourceGroupName
+                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -SubscriptionId $SubscriptionId -Name $AppAttachPackage.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $AppAttachPackage.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $AppAttachPackage.ImagePackageApplication.AppId
+
+                        }
+                    }
+                    #endregion 
                 }
                 else {
                     Write-Error -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentMSIXDemoPackage' could not be imported"
@@ -5874,7 +5935,7 @@ function New-PsAvdPersonalHostPoolSetup {
             }
             $null = Get-AzWvdDesktop @parameters | Update-AzWvdDesktop -FriendlyName $CurrentHostPool.Name
 
-            #region Assign 'Desktop Virtualization User RBAC role to application groups
+            #region Assign 'Desktop Virtualization User' RBAC role to application groups
             # Get the object ID of the user group you want to assign to the application group
             Do {
                 Start-MicrosoftEntraIDConnectSync
@@ -6947,6 +7008,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                    $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
@@ -7343,6 +7405,7 @@ function New-PsAvdPooledHostPoolSetup {
             }
             else {
                 #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                $CurrentHostPoolStorageAccountName = $null
                 $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
                 $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
@@ -7900,6 +7963,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                    $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                     #endregion 
@@ -7985,6 +8049,7 @@ function New-PsAvdPooledHostPoolSetup {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' is not AD joined"
                 if ($CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                    $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                     #endregion 
@@ -8680,7 +8745,8 @@ function New-PsAvdHostPoolSetup {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Starting background job for '$($CurrentPooledHostPool.Name)' Pooled HostPool Creation (via New-PsAvdPooledHostPoolSetup) ... "
                 $Verbose = $(( $PSBoundParameters['Verbose'] -or $VerbosePreference -eq 'Continue' ))
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Verbose: $Verbose"
-                Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPooledHostPoolSetup -HostPool $using:CurrentPooledHostPool -ADOrganizationalUnit $using:AVDRootOU -NoMFAEntraIDGroupName $using:NoMFAEntraIDGroupName -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPooledHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPooledHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
+                $Job = Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPooledHostPoolSetup -HostPool $using:CurrentPooledHostPool -ADOrganizationalUnit $using:AVDRootOU -NoMFAEntraIDGroupName $using:NoMFAEntraIDGroupName -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPooledHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPooledHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
+                $Job | Add-Member -Name HostPool -Value $CurrentPooledHostPool.Name -MemberType NoteProperty -PassThru | Add-Member -Name Duration -Value { $this.PSEndTime - $this.PSBeginTime} -MemberType ScriptProperty -PassThru
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdPooledHostPoolSetup' job to finish"
             }
 
@@ -8688,17 +8754,22 @@ function New-PsAvdHostPoolSetup {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Starting background job for '$($CurrentPersonalHostPool.Name)' Personal HostPool Creation (via New-PsAvdPersonalHostPoolSetup)"
                 $Verbose = $(( $PSBoundParameters['Verbose'] -or $VerbosePreference -eq 'Continue' ))
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Verbose: $Verbose"
-                Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPersonalHostPoolSetup -HostPool $using:CurrentPersonalHostPool -ADOrganizationalUnit $using:AVDRootOU -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPersonalHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPersonalHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
+                $Job = Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPersonalHostPoolSetup -HostPool $using:CurrentPersonalHostPool -ADOrganizationalUnit $using:AVDRootOU -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPersonalHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPersonalHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
+                $Job | Add-Member -Name HostPool -Value $CurrentPooledHostPool -MemberType NoteProperty -PassThru | Add-Member -Name Duration -Value { $this.PSEndTime - $this.PSBeginTime} -MemberType ScriptProperty -PassThru
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdPersonalHostPoolSetup' job to finish"
             }
 
-            $Jobs | Receive-Job -Wait -AutoRemoveJob
+            #$Jobs | Receive-Job -Wait -AutoRemoveJob
+            $null = $Jobs | Receive-Job -Wait
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Waiting is over for the 'New-PsAvdPersonalHostPoolSetup' and/or 'New-PsAvdPooledHostPoolSetup' job(s)"
-            #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing the background jobs"
-            #$Jobs | Remove-Job -Force
+            $Jobs | Format-Table -Property HostPool, PSBeginTime, PSEndTime, Duration
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing the background jobs"
+            $Jobs | Remove-Job -Force
 
             $AzureAppAttachPooledHostPools = $PooledHostPools | Where-Object { $_.AppAttach }
-            Add-PsAvdAzureAppAttach -HostPool $AzureAppAttachPooledHostPools
+            if ($null -ne $AzureAppAttachPooledHostPools) {
+                Add-PsAvdAzureAppAttach -HostPool $AzureAppAttachPooledHostPools
+            }
         }
         else {
             if ($null -ne $PooledHostPools) {
@@ -8843,7 +8914,7 @@ function Restart-PsAvdSessionHost {
 
     if ($Wait) {
         Write-Host -Object "Waiting for all restarts"
-        $Jobs | Receive-Job -Wait -AutoRemoveJob
+        $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
         Write-Host -Object "All restarts complete"
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
