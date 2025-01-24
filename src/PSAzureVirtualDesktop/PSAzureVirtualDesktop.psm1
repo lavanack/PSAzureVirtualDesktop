@@ -160,7 +160,7 @@ Class HostPool {
             return $this.ScalingPlanName
         }
         else {
-            return $null
+            return [String]::Empty
         }
     }
 
@@ -334,8 +334,8 @@ Class HostPool {
         }
 
         if ([string]::IsNullOrEmpty($this.PairedRegion)) {
-            $this.RecoveryLocationResourceGroupName = $null
-            $this.RecoveryServiceVaultName = $null
+            $this.RecoveryLocationResourceGroupName = [string]::Empty
+            $this.RecoveryServiceVaultName = [string]::Empty
         }
         else {
             $this.RecoveryLocationResourceGroupName = $this.ResourceGroupName -replace [HostPool]::GetAzLocationShortName($this.Location), [HostPool]::GetAzLocationShortName($this.PairedRegion)
@@ -444,7 +444,7 @@ class PooledHostPool : HostPool {
             return $this.FSLogixStorageAccountName
         }
         else {
-            return $null
+            return [String]::Empty
         }
     }
 
@@ -454,7 +454,7 @@ class PooledHostPool : HostPool {
             return $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
         }
         else {
-            return $null
+            return [String]::Empty
         }
 
         <#
@@ -480,7 +480,7 @@ class PooledHostPool : HostPool {
             return $this.AppAttachStorageAccountResourceGroupName
         }
         else {
-            return $null
+            return [String]::Empty
         }
     }
 
@@ -489,7 +489,7 @@ class PooledHostPool : HostPool {
             return $this.AppAttachStorageAccountName
         }
         else {
-            return $null
+            return [String]::Empty
         }
     }
 
@@ -531,7 +531,7 @@ class PooledHostPool : HostPool {
 
     [PooledHostPool]DisableFSLogixCloudCache() {
         $this.FSLogixCloudCache = $false
-        $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $null
+        $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = [string]::Empty
         return $this
     }
 
@@ -634,7 +634,7 @@ class PooledHostPool : HostPool {
             $this.FSLogixStorageAccountName = $this.FSLogixStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.FSLogixStorageAccountName.Length)).ToLower()
         }
         else {
-            $this.FSLogixStorageAccountName = $null
+            $this.FSLogixStorageAccountName = [string]::Empty
         }
 
 
@@ -647,7 +647,7 @@ class PooledHostPool : HostPool {
             }
         }
         else {
-            $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $null
+            $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = [string]::Empty
         }
 
 
@@ -680,8 +680,8 @@ class PooledHostPool : HostPool {
             }
         }
         else {
-            $this.AppAttachStorageAccountResourceGroupName = $null
-            $this.AppAttachStorageAccountName = $null
+            $this.AppAttachStorageAccountResourceGroupName = [string]::Empty
+            $this.AppAttachStorageAccountName = [string]::Empty
         }
     }
 
@@ -6374,6 +6374,7 @@ function New-PsAvdPooledHostPoolSetup {
         Foreach ($CurrentHostPool in $HostPool) {
             Write-Host -Object "Starting '$($CurrentHostPool.Name)' Setup"
             $CurrentHostPoolStartTime = Get-Date
+
             #Microsoft Entra ID
             <#
             if ($CurrentHostPool.IsMicrosoftEntraIdJoined()) {
@@ -6454,6 +6455,10 @@ function New-PsAvdPooledHostPoolSetup {
             #region FSLogix
             #From https://learn.microsoft.com/en-us/fslogix/reference-configuration-settings?tabs=profiles
             if ($CurrentHostPool.FSLogix) {
+                #region FSLogix Storage Account Name Setup
+                #$CurrentHostPoolStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName()
+                #endregion 
+
                 #region FSLogix AD Management
                 #region Dedicated HostPool AD group
                 #region Dedicated HostPool AD FSLogix groups
@@ -7010,7 +7015,6 @@ function New-PsAvdPooledHostPoolSetup {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
-                    $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
