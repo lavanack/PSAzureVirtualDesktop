@@ -633,8 +633,7 @@ class PooledHostPool : HostPool {
             $this.FSLogixStorageAccountName = "fsl{0}" -f $($this.Name -replace "\W")
             $this.FSLogixStorageAccountName = $this.FSLogixStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.FSLogixStorageAccountName.Length)).ToLower()
         }
-        else
-        {
+        else {
             $this.FSLogixStorageAccountName = $null
         }
 
@@ -643,13 +642,11 @@ class PooledHostPool : HostPool {
             if ([string]::IsNullOrEmpty($this.PairedRegion)) {
                 $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName()
             }
-            else 
-            {
+            else {
                 $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $this.GetFSLogixStorageAccountName() -replace [HostPool]::GetAzLocationShortName($this.Location), [HostPool]::GetAzLocationShortName($this.PairedRegion)
             }
         }
-        else
-        {
+        else {
             $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName = $null
         }
 
@@ -678,7 +675,7 @@ class PooledHostPool : HostPool {
                         $this.AppAttachStorageAccountName = $this.AppAttachStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.AppAttachStorageAccountName.Length)).ToLower()
                     } While (-not(Get-AzStorageAccountNameAvailability -Name $this.AppAttachStorageAccountName).NameAvailable)
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [PooledHostPool]::AppAttachStorageAccountNameHT: $([PooledHostPool]::AppAttachStorageAccountNameHT)"
-                    [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location] =  $this.AppAttachStorageAccountName
+                    [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location] = $this.AppAttachStorageAccountName
                 }
             }
         }
@@ -1113,6 +1110,7 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
                 Conditions      = @{
                     Applications = @{
                         IncludeApplications = @((Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Virtual Desktop'").AppId)
+                        ExcludeApplications = @((Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Windows VM Sign-In'").AppId)
                     }
                     Users        = @{
                         IncludeUsers  = $IncludeUsers
@@ -2061,15 +2059,15 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     [array] $settings += switch ($AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationSettings) {
         { $_.FullPath -eq '\Administrative Templates\Windows Components\Microsoft Defender Antivirus\Exclusions\Path Exclusions' } { 
             $Exclusions = @{
-                '%TEMP%\*\*.VHD'                                                                     = 0
-                '%TEMP%\*\*.VHDX'                                                                    = 0
-                '%Windir%\TEMP\*\*.VHD'                                                              = 0
-                '%Windir%\TEMP\*\*.VHDX'                                                             = 0
-                '%ProgramData%\FSLogix\Cache\*'                                                      = 0
-                '%ProgramData%\FSLogix\Proxy\*'                                                      = 0
-                '%ProgramFiles%\FSLogix\Apps\frxdrv.sys'                                             = 0
-                '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys'                                           = 0
-                '%ProgramFiles%\FSLogix\Apps\frxccd.sys'                                             = 0
+                '%TEMP%\*\*.VHD'                                            = 0
+                '%TEMP%\*\*.VHDX'                                           = 0
+                '%Windir%\TEMP\*\*.VHD'                                     = 0
+                '%Windir%\TEMP\*\*.VHDX'                                    = 0
+                '%ProgramData%\FSLogix\Cache\*'                             = 0
+                '%ProgramData%\FSLogix\Proxy\*'                             = 0
+                '%ProgramFiles%\FSLogix\Apps\frxdrv.sys'                    = 0
+                '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys'                  = 0
+                '%ProgramFiles%\FSLogix\Apps\frxccd.sys'                    = 0
                 "\\$HostPoolStorageAccountProfileShareName\*.VHD"           = 0
                 "\\$HostPoolStorageAccountProfileShareName\*.VHD.lock"      = 0
                 "\\$HostPoolStorageAccountProfileShareName\*.VHD.meta"      = 0
@@ -3318,7 +3316,7 @@ function New-PsAvdPrivateEndpointSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateEndpointName' Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group)"
                     $PrivateEndpoint = New-AzPrivateEndpoint -Name $PrivateEndpointName -ResourceGroupName $ResourceGroupName -Location $VirtualNetwork.Location -Subnet $Subnet -PrivateLinkServiceConnection $PrivateLinkServiceConnection -CustomNetworkInterfaceName $("{0}-nic" -f $PrivateEndpointName) -Force
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateEndpointName' Private Endpoint for the '$($AzResource.ResourceType)' '$($AzResource.Name)' (in the '$ResourceGroupName' Resource Group) is creating"
-                    While ($PrivateEndpoint.ProvisioningState -ne  "Succeeded") {
+                    While ($PrivateEndpoint.ProvisioningState -ne "Succeeded") {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting the '$PrivateEndpointName' Private Endpoint be in 'Succeeded' state"
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
@@ -3412,7 +3410,7 @@ function New-PsAvdPrivateEndpointSetup {
         #region Create the DNS zone group        
         $PrivateDnsZoneGroupMutex = $null
         #$MutexName = "PrivateDnsZoneGroupMutex"
-        $PrivateDnsZoneGroupName = "pdzg{0}" -f $PrivateEndpointName
+        $PrivateDnsZoneGroupName = "pdzg-{0}" -f $PrivateEndpointName
         $MutexName = $PrivateDnsZoneGroupName
         $PrivateDnsZoneGroupMutex = New-Object System.Threading.Mutex($false, $MutexName)
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
@@ -5366,7 +5364,7 @@ function Remove-PsAvdHostPoolSetup {
         [ValidateScript({ (Test-Path -Path $_ -PathType Leaf) -and ($_ -match "\.json$") })]
         [Alias('Path')]
         [string[]]$FullName,
-        [switch] $AppAttach
+        [switch] $KeepAzureAppAttachStorage
     )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -5405,7 +5403,7 @@ function Remove-PsAvdHostPoolSetup {
     if (-not([string]::IsNullOrEmpty($OUDistinguishedNames))) {
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
         $OUDistinguishedNames | ForEach-Object -Process {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing OU: '$_'"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing OU: '$_'"
         (Get-ADComputer -Filter 'DNSHostName -like "*"' -SearchBase $_).Name } | ForEach-Object -Process { 
             try {
                 if (-not([string]::IsNullOrEmpty($_))) {
@@ -5518,12 +5516,12 @@ function Remove-PsAvdHostPoolSetup {
     #endregion
 
     #region Azure AppAttach
-    if ($AppAttach) {
+    if (-not($KeepAzureAppAttachStorage.IsPresent)) {
         #region Storage Account Cleanup    
-        $AzureAppAttachPooledHostPools = $HostPools | Where-Object -FilterScript { ($_.Type -eq [HostPoolType]::Pooled)  -and ($_.AppAttach) }
+        $AzureAppAttachPooledHostPools = $HostPools | Where-Object -FilterScript { ($_.Type -eq [HostPoolType]::Pooled) -and ($_.AppAttach) }
         $AppAttachStorageAccountNames = $AzureAppAttachPooledHostPools.AppAttachStorageAccountName | Select-Object -Unique
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$($AppAttachStorageAccountNames -join ', ')' Storage Accounts"
-        $ResourceGroups = Get-AzResourceGroup -Name "rg-avd-appattach-poc-*" | Get-AzStorageAccount | Where-Object -FilterScript { $_.StorageAccountName -in $AppAttachStorageAccountNames} 
+        $ResourceGroups = Get-AzResourceGroup -Name "rg-avd-appattach-poc-*" | Get-AzStorageAccount | Where-Object -FilterScript { $_.StorageAccountName -in $AppAttachStorageAccountNames } 
         if ($ResourceGroups ) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$($ResourceGroup.Name -join ', ')' Resource Groups"
             $ResourceGroups | Remove-AzStorageAccount -Force -AsJob
@@ -5538,7 +5536,7 @@ function Remove-PsAvdHostPoolSetup {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentAzureLocation' Azure Location"
             $CurrentAzureLocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$CurrentAzureLocation'" -SearchBase $AVDRootOU.DistinguishedName
             $PooledDesktopsOU = Get-ADOrganizationalUnit -Filter 'Name -eq "PooledDesktops"' -SearchBase $CurrentAzureLocationOU.DistinguishedName
-            $ADComputers = Get-ADComputer -Filter * -SearchBase $PooledDesktopsOU.DistinguishedName | Where-Object -FilterScript { $_.Name -in $AppAttachStorageAccountNames}
+            $ADComputers = Get-ADComputer -Filter * -SearchBase $PooledDesktopsOU.DistinguishedName | Where-Object -FilterScript { $_.Name -in $AppAttachStorageAccountNames }
             if ($ADComputers) {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$($ADComputers.Name -join ', ')' AD Computer Accounts"
                 $ADComputers | Remove-ADComputer -Confirm:$false
@@ -5589,7 +5587,7 @@ function Add-PsAvdAzureAppAttach {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentMSIXDemoPackage': $CurrentMSIXDemoPackage"
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Get-AzWvdAppAttachPackage:`r`n$(Get-AzWvdAppAttachPackage | Out-String)"
 
-            $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.ImagePath -eq $CurrentMSIXDemoPackage}
+            $AppAttachPackage = Get-AzWvdAppAttachPackage | Where-Object -FilterScript { $_.ImagePath -eq $CurrentMSIXDemoPackage }
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
             if ($null -eq $AppAttachPackage) {
                 #region Importing the App Attach Package
@@ -5656,7 +5654,7 @@ function Add-PsAvdAzureAppAttach {
                             $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolAGUsersADGroupName'"
                             foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
                                 $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
-                                $Scope =  $AppAttachPackage.Id
+                                $Scope = $AppAttachPackage.Id
                                 if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($AppAttachPackageName)' AppAttach Application"
                                     $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
@@ -5669,6 +5667,7 @@ function Add-PsAvdAzureAppAttach {
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
                         if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
                             $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
                             $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
                             $ApplicationGroupName = "{0}-RAG" -f $CurrentHostPool.Name
                             $CurrentAzRemoteApplicationGroup = Get-AzWvdApplicationGroup -Name $ApplicationGroupName -ResourceGroupName $CurrentHostPoolResourceGroupName
@@ -5782,6 +5781,7 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             #region Dedicated Resource Group Management (1 per HostPool)
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
             $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
 
             $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
@@ -5872,12 +5872,12 @@ function New-PsAvdPersonalHostPoolSetup {
             #region RDP ShortPath (STUN)
             if ($CurrentHostPool.RDPShortPath) {
                 $parameters = @{
-                       Name = $CurrentHostPool.Name
-                       ResourceGroupName = $CurrentHostPoolResourceGroupName
-                       ManagedPrivateUdp = "Disabled"
-                       DirectUdp = "Disabled"
-                       PublicUdp = "Enabled"
-                       RelayUdp = "Enabled"
+                    Name              = $CurrentHostPool.Name
+                    ResourceGroupName = $CurrentHostPoolResourceGroupName
+                    ManagedPrivateUdp = "Disabled"
+                    DirectUdp         = "Disabled"
+                    PublicUdp         = "Enabled"
+                    RelayUdp          = "Enabled"
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling RDP Shortpath (STUN) for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
                 Update-AzWvdHostPool @parameters
@@ -6358,6 +6358,7 @@ function New-PsAvdPooledHostPoolSetup {
             $DomainInformation = Get-ADDomain -ErrorAction Stop
             $DomainGuid = $DomainInformation.ObjectGUID.ToString()
             $DomainName = $DomainInformation.DnsRoot
+            $DomainNetBIOSName = (Get-ADDomain).NetBIOSName
         }
         catch {
             # Load the necessary .NET namespace
@@ -6606,7 +6607,7 @@ function New-PsAvdPooledHostPoolSetup {
                         $CurrentADGroupToExcludeFromFSLogixSID = (Get-ADGroup -Filter "Name -eq '$CurrentADGroupToExcludeFromFSLogix'").SID.Value
                         if (-not([string]::IsNullOrEmpty($CurrentADGroupToExcludeFromFSLogixSID))) {
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Excluding '$CurrentADGroupToExcludeFromFSLogix' from '$GroupXMLGPOFilePath'"
-                            "<Member name=""$((Get-ADDomain).NetBIOSName)\$CurrentADGroupToExcludeFromFSLogix"" action=""ADD"" sid=""$CurrentADGroupToExcludeFromFSLogixSID""/>"
+                            "<Member name=""$DomainNetBIOSName\$CurrentADGroupToExcludeFromFSLogix"" action=""ADD"" sid=""$CurrentADGroupToExcludeFromFSLogixSID""/>"
                         }
                     }
                     $Members = $Members -join ""
@@ -6662,6 +6663,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion 
 
                 #region Dedicated Resource Group Management (1 per HostPool)
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
                 $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
 
                 $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
@@ -7016,7 +7018,8 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion 
 
                     #region Dedicated Resource Group Management (1 per HostPool)
-                    $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
+                    #$CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
 
                     $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
                     if (-not($CurrentHostPoolResourceGroup)) {
@@ -7414,6 +7417,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion 
 
                     #region Dedicated Resource Group Management (1 per HostPool)
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
                     $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
 
                     $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
@@ -7486,39 +7490,86 @@ function New-PsAvdPooledHostPoolSetup {
                     Start-Sleep -Seconds 60
 
                     $MSIXDemoPackages = $null
-                                                                                                                                                                                        $MSIXShareName | ForEach-Object -Process { 
-                    $CurrentHostPoolShareName = $_
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolShareName:  $CurrentHostPoolShareName"
-                    #region Storage Account Share Mutex
-                    $StorageAccountShareMutex = $null
-                    #$MutexName = "StorageAccountShareMutex"
-                    $MutexName = "{0}_{1}" -f $CurrentHostPoolStorageAccountName, $CurrentHostPoolShareName
-                    $StorageAccountShareMutex = New-Object System.Threading.Mutex($false, $MutexName)
+                    $MSIXShareName | ForEach-Object -Process { 
+                        $CurrentHostPoolShareName = $_
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolShareName:  $CurrentHostPoolShareName"
+                        #region Storage Account Share Mutex
+                        $StorageAccountShareMutex = $null
+                        #$MutexName = "StorageAccountShareMutex"
+                        $MutexName = "{0}_{1}" -f $CurrentHostPoolStorageAccountName, $CurrentHostPoolShareName
+                        $StorageAccountShareMutex = New-Object System.Threading.Mutex($false, $MutexName)
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
+
+                        try {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
+                            If ($StorageAccountShareMutex.WaitOne()) { 
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
+
+                                $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
+                                $CurrentHostPoolStorageAccountShare = Get-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext -ErrorAction Ignore
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountShare:`r`n$($CurrentHostPoolStorageAccountShare | Out-String)"
+                                if ($null -eq $CurrentHostPoolStorageAccountShare) {
+                                    #Create a share for MSIX
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group)"
+                                    $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
+
+                                    # Copying the  Demo MSIX Packages from my dedicated GitHub repository
+                                    $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+                                }
+                                else {
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolShareName' StorageAccount Share already exists"
+                                }
+
+                                $null = $StorageAccountShareMutex.ReleaseMutex()
+                                #$StorageAccountShareMutex.Dispose()
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+                            }
+                            else {
+                                Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
+                            }
+                        }
+                        catch [System.Threading.AbandonedMutexException] {
+                            #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
+                            $null = $StorageAccountShareMutex.ReleaseMutex()
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+                        }
+                        #endregion
+                    }
+                    #endregion
+
+                    #region RBAC Assignment Mutex
+                    $StorageAccountMutex = $null
+                    #$MutexName = "ReaderAndDataAccessRBACAssignmentMutex"
+                    $MutexName = "ReaderAndDataAccessRBACAssignment_{0}" -f $($CurrentHostPoolStorageAccount.StorageAccountName)
+                    $StorageAccountMutex = New-Object System.Threading.Mutex($false, $MutexName)
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
 
                     try {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
-                        If ($StorageAccountShareMutex.WaitOne()) { 
+                        If ($StorageAccountMutex.WaitOne()) { 
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
-                            $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
-                            $CurrentHostPoolStorageAccountShare = Get-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext -ErrorAction Ignore
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountShare:`r`n$($CurrentHostPoolStorageAccountShare | Out-String)"
-                            if ($null -eq $CurrentHostPoolStorageAccountShare) {
-                                #Create a share for MSIX
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group)"
-                                $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
-
-                                # Copying the  Demo MSIX Packages from my dedicated GitHub repository
-                                $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+                            #region RBAC Management
+                            #From https://www.stefandingemanse.com/2024/03/18/app-attach-with-entra-id-joined-hosts/
+                            foreach ($DisplayName in 'Azure Virtual Desktop ARM Provider', 'Azure Virtual Desktop', 'Windows Virtual Desktop ARM Provider', 'Windows Virtual Desktop') {
+                                $objId = (Get-MgBetaServicePrincipal -Filter "DisplayName eq '$DisplayName'").Id
+                                if ($null -ne $objId) {
+                                    $ReaderAndDataAccessRole = Get-AzRoleDefinition "Reader and Data Access"
+                                    $Scope = $CurrentHostPoolStorageAccount.Id
+                                    if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope)) {
+                                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($ReaderAndDataAccessRole.Name)' RBAC role to Service Principal '$objId' on the '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account"
+                                        $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
+                                    }
+                                }
+                                else {
+                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unknown '$DisplayName' Service Principal"
+                                }
                             }
-                            else {
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolShareName' StorageAccount Share already exists"
-                            }
+                            #endregion
 
-                            $null = $StorageAccountShareMutex.ReleaseMutex()
-                            #$StorageAccountShareMutex.Dispose()
+                            $null = $StorageAccountMutex.ReleaseMutex()
+                            #$StorageAccountMutex.Dispose()
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
                         }
                         else {
@@ -7527,20 +7578,20 @@ function New-PsAvdPooledHostPoolSetup {
                     }
                     catch [System.Threading.AbandonedMutexException] {
                         #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
-                        $null = $StorageAccountShareMutex.ReleaseMutex()
+                        $null = $StorageAccountMutex.ReleaseMutex()
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
                     }
-                    #endregion
-                }
+                    $CurrentHostPoolStorageAccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ErrorAction Ignore
                     #endregion
 
+                    <#
                     #region RBAC Management
                     #From https://www.stefandingemanse.com/2024/03/18/app-attach-with-entra-id-joined-hosts/
                     foreach ($DisplayName in 'Azure Virtual Desktop ARM Provider', 'Azure Virtual Desktop', 'Windows Virtual Desktop ARM Provider', 'Windows Virtual Desktop') {
                         $objId = (Get-MgBetaServicePrincipal -Filter "DisplayName eq '$DisplayName'").Id
                         if ($null -ne $objId) {
                             $ReaderAndDataAccessRole = Get-AzRoleDefinition "Reader and Data Access"
-                            $Scope =  $CurrentHostPoolStorageAccount.Id
+                            $Scope = $CurrentHostPoolStorageAccount.Id
                             if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope)) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($ReaderAndDataAccessRole.Name)' RBAC role to Service Principal '$objId' on the '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account"
                                 $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
@@ -7548,9 +7599,10 @@ function New-PsAvdPooledHostPoolSetup {
                         }
                         else {
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unknown '$DisplayName' Service Principal"
-                         }
+                        }
                     }
                     #endregion
+                    #>
                 }
             }
             #endregion
@@ -7893,7 +7945,7 @@ function New-PsAvdPooledHostPoolSetup {
                         $ModuleBase = Get-ModuleBase
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-AVDRegistryItemProperty.ps1"
                         #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
-                        $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{WatermarkingBooleanString = $CurrentHostPool.Watermarking -as [string]}
+                        $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{WatermarkingBooleanString = $CurrentHostPool.Watermarking -as [string] }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($CurrentSessionHostName)] $($ScriptPath):`r`n$($Result | Out-String)"
                         #Remove-Item -Path $ScriptPath -Force
                         #endregion
@@ -7908,7 +7960,7 @@ function New-PsAvdPooledHostPoolSetup {
                         $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixRegistryItemProperty.ps1"
                         #Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName) 
                         if ($CurrentHostPool.FSLogixCloudCache) {
-                            $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName(); RecoveryLocationFSLogixStorageAccountName = $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()}
+                            $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName(); RecoveryLocationFSLogixStorageAccountName = $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName() }
                         }
                         else {
                             $Result = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptPath $ScriptPath -Parameter @{FSLogixStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName() }
@@ -8053,6 +8105,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
                     $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountResourceGroupName: $CurrentHostPoolStorageAccountResourceGroupName"
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                     #endregion 
 
@@ -8070,8 +8123,10 @@ function New-PsAvdPooledHostPoolSetup {
                         $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
                         $URI = "https://laurentvanacker.com/downloads/Azure/Azure%20Virtual%20Desktop/MSIX"
 
-                        Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
-                        $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'URI' = $URI; 'FileRegExPattern' = "\.pfx?$"; 'Destination'=$TempFolder}
+                        Do {
+                            Start-Sleep -Seconds 30 
+                        } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
+                        $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'URI' = $URI; 'FileRegExPattern' = "\.pfx?$"; 'Destination' = $TempFolder }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion
 
@@ -8093,15 +8148,19 @@ function New-PsAvdPooledHostPoolSetup {
                             }
                         }
 
-                        Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
-                        $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'Filter' = "*.pfx"; 'Destination'=$TempFolder; 'ClearTextPassword'=$ClearTextPassword}
+                        Do {
+                            Start-Sleep -Seconds 30 
+                        } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
+                        $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'Filter' = "*.pfx"; 'Destination' = $TempFolder; 'ClearTextPassword' = $ClearTextPassword }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion
 
                         #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
-                        $ScriptBlock = { $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start"}
-                        Do { Start-Sleep -Seconds 30 } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
+                        $ScriptBlock = { $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" }
+                        Do {
+                            Start-Sleep -Seconds 30 
+                        } While (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
                         $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
                         #endregion 
@@ -8748,7 +8807,7 @@ function New-PsAvdHostPoolSetup {
                 $Verbose = $(( $PSBoundParameters['Verbose'] -or $VerbosePreference -eq 'Continue' ))
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Verbose: $Verbose"
                 $Job = Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPooledHostPoolSetup -HostPool $using:CurrentPooledHostPool -ADOrganizationalUnit $using:AVDRootOU -NoMFAEntraIDGroupName $using:NoMFAEntraIDGroupName -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPooledHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPooledHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
-                $Job | Add-Member -Name HostPool -Value $CurrentPooledHostPool.Name -MemberType NoteProperty -PassThru | Add-Member -Name Duration -Value { $this.PSEndTime - $this.PSBeginTime} -MemberType ScriptProperty -PassThru
+                $Job | Add-Member -Name HostPool -Value $CurrentPooledHostPool.Name -MemberType NoteProperty -PassThru | Add-Member -Name Duration -Value { $this.PSEndTime - $this.PSBeginTime } -MemberType ScriptProperty -PassThru
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdPooledHostPoolSetup' job to finish"
             }
 
@@ -8757,7 +8816,7 @@ function New-PsAvdHostPoolSetup {
                 $Verbose = $(( $PSBoundParameters['Verbose'] -or $VerbosePreference -eq 'Continue' ))
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Verbose: $Verbose"
                 $Job = Start-ThreadJob -ScriptBlock { param($Verbose) New-PsAvdPersonalHostPoolSetup -HostPool $using:CurrentPersonalHostPool -ADOrganizationalUnit $using:AVDRootOU -LogDir $LogDir -AsJob -Verbose:$Verbose *>&1 | Out-File -FilePath $("{0}\New-PsAvdPersonalHostPoolSetup_{1}_{2}.txt" -f $using:LogDir, $($using:CurrentPersonalHostPool).Name, (Get-Date -Format 'yyyyMMddHHmmss')) } -InitializationScript $ExportedFunctions -ArgumentList $Verbose -StreamingHost $Host
-                $Job | Add-Member -Name HostPool -Value $CurrentPooledHostPool -MemberType NoteProperty -PassThru | Add-Member -Name Duration -Value { $this.PSEndTime - $this.PSBeginTime} -MemberType ScriptProperty -PassThru
+                $Job | Add-Member -Name HostPool -Value $CurrentPooledHostPool -MemberType NoteProperty -PassThru | Add-Member -Name Duration -Value { $this.PSEndTime - $this.PSBeginTime } -MemberType ScriptProperty -PassThru
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the 'New-PsAvdPersonalHostPoolSetup' job to finish"
             }
 
@@ -8767,11 +8826,6 @@ function New-PsAvdHostPoolSetup {
             $Jobs | Format-Table -Property HostPool, PSBeginTime, PSEndTime, Duration
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing the background jobs"
             $Jobs | Remove-Job -Force
-
-            $AzureAppAttachPooledHostPools = $PooledHostPools | Where-Object { $_.AppAttach }
-            if ($null -ne $AzureAppAttachPooledHostPools) {
-                Add-PsAvdAzureAppAttach -HostPool $AzureAppAttachPooledHostPools
-            }
         }
         else {
             if ($null -ne $PooledHostPools) {
@@ -8800,6 +8854,11 @@ function New-PsAvdHostPoolSetup {
             Sync-PsAvdIntuneSessionHostViaCmdlet -HostPool $IntuneHostPools
         }
         
+        $AzureAppAttachPooledHostPools = $PooledHostPools | Where-Object { $_.AppAttach }
+        if ($null -ne $AzureAppAttachPooledHostPools) {
+            Add-PsAvdAzureAppAttach -HostPool $AzureAppAttachPooledHostPools
+        }
+
         #region Pester Tests for Host Pool - Azure Instantiation
         $ModuleBase = Get-ModuleBase
         $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
@@ -8907,12 +8966,12 @@ function Restart-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $SessionHostVMs = foreach ($CurrentHostPool in $HostPool) {
-            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
-            $SessionHosts.ResourceId | Get-AzVM
+        $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
+        $SessionHosts.ResourceId | Get-AzVM
     }
 
     Write-Host -Object "Restarting the Azure VM(s): $($SessionHostVMs.Name -join ', ')"
-    $Jobs = $SessionHostVMs | Restart-AzVM -confirm:$false -AsJob
+    $Jobs = $SessionHostVMs | Restart-AzVM -Confirm:$false -AsJob
 
     if ($Wait) {
         Write-Host -Object "Waiting for all restarts"
@@ -9987,9 +10046,9 @@ function Invoke-PsAvdAzVMRunPowerShellScript {
 
     $Parameters = @{
         ResourceGroupName = $ResourceGroupName 
-        VMName = $VMName 
-        CommandId = 'RunPowerShellScript' 
-        Parameter = $Parameter 
+        VMName            = $VMName 
+        CommandId         = 'RunPowerShellScript' 
+        Parameter         = $Parameter 
     }
     <#
     if ($psCmdlet.ParameterSetName -eq 'ScriptString') {
