@@ -1950,8 +1950,8 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     [array] $settings += switch ($FSLogixProfileContainersCloudCacheConfigurationSettings) {
         { (-not([string]::IsNullOrEmpty($HostPoolRecoveryLocationStorageAccountName))) -and ($_.FullPath -eq '\FSLogix\Profile Containers\Cloud Cache\CCD Locations') } {
             $CCDLocations = @(
-                "type=smb,name=`"{0}`",connectionString=\\{0}" -f $HostPoolStorageAccountProfileShareName
-                "type=smb,name=`"{0}`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolRecoveryLocationStorageAccountName, $StorageEndpointSuffix
+                "type=smb,name=`"{0}`",connectionString={0}" -f $HostPoolStorageAccountProfileShareName
+                "type=smb,name=`"\\{0}.file.{1}\profiles`",connectionString=\\{0}.file.{1}\profiles" -f $HostPoolRecoveryLocationStorageAccountName, $StorageEndpointSuffix
             ) -join ';'
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $FSLogixProfileContainersCloudCacheConfigurationSettings -Setting $_ -SettingValue $CCDLocations -Enable; continue 
         } 
@@ -2068,15 +2068,15 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
                 '%ProgramFiles%\FSLogix\Apps\frxdrv.sys'                    = 0
                 '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys'                  = 0
                 '%ProgramFiles%\FSLogix\Apps\frxccd.sys'                    = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHD"           = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHD.lock"      = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHD.meta"      = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHD.metadata"  = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHDX"          = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHDX.lock"     = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHDX.meta"     = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.VHDX.metadata" = 0
-                "\\$HostPoolStorageAccountProfileShareName\*.CIM"           = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHD"           = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHD.lock"      = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHD.meta"      = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHD.metadata"  = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHDX"          = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHDX.lock"     = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHDX.meta"     = 0
+                "$HostPoolStorageAccountProfileShareName\*.VHDX.metadata" = 0
+                "$HostPoolStorageAccountProfileShareName\*.CIM"           = 0
             }
             New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationSettings -Setting $_ -SettingValue $Exclusions -Enable; continue 
         }  
