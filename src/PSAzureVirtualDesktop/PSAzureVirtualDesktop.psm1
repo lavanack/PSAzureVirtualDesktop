@@ -6452,6 +6452,19 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion 
             #endregion
 
+
+            #region Dedicated Resource Group Management (1 per HostPool)
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
+            $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
+
+            $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
+            if (-not($CurrentHostPoolResourceGroup)) {
+                $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolResourceGroup.ResourceGroupName)' Resource Group"
+            }
+            #endregion
+
+
             #region FSLogix
             #From https://learn.microsoft.com/en-us/fslogix/reference-configuration-settings?tabs=profiles
             if ($CurrentHostPool.FSLogix) {
@@ -6666,17 +6679,6 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
                 }
                 #endregion 
-
-                #region Dedicated Resource Group Management (1 per HostPool)
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
-                $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
-
-                $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
-                if (-not($CurrentHostPoolResourceGroup)) {
-                    $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolResourceGroup.ResourceGroupName)' Resource Group"
-                }
-                #endregion
 
                 #region Dedicated Storage Account Setup
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPoolStorageAccountName -ResourceGroupName $CurrentHostPoolResourceGroupName -ErrorAction Ignore
