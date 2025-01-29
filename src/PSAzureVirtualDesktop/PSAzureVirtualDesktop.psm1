@@ -3583,6 +3583,8 @@ function New-PsAvdHostPoolCredentialKeyVault {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Key Vault
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPool: $($HostPool | Out-String)"
     #region Key Vault Name Setup
     $HostPoolKeyVaultName = $HostPool.GetKeyVaultName()
     $HostPoolResourceGroupName = $HostPool.GetResourceGroupName()
