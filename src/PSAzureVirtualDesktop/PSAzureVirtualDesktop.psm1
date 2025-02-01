@@ -366,12 +366,19 @@ Class HostPool {
     [HostPool]EnableAzureSiteRecovery([string] $vNetId) {
 
         $RecoveryNetwork = Get-AzVirtualNetwork | Where-Object -FilterScript { $_.Id -eq $vNetId }
-        $RecoveryLocation = $this.GetAzurePairedRegion()
-        if ($RecoveryNetwork.Location -eq $RecoveryLocation) {
+        if ([string]::IsNullOrEmpty($this.PairedRegion)) {
+            $this.PairedRegion = $this.GetAzurePairedRegion()
+        }
+        if ($RecoveryNetwork.Location -eq $this.PairedRegion) {
             $this.ASRFailOverVNetId = $vNetId
+            $this.RecoveryLocationResourceGroupName = $this.ResourceGroupName -replace [HostPool]::GetAzLocationShortName($this.Location), [HostPool]::GetAzLocationShortName($this.PairedRegion)
+            $this.RecoveryServiceVaultName = $this.RecoveryLocationResourceGroupName -replace "^rg", "rsv"
         }
         else {
-            Write-Error -Message "The FailOver Virtual Network '$vNetId' is not in the '$RecoveryLocation' region ! Azure Site Recovery won't be enabled"
+            $this.ASRFailOverVNetId = [string]::Empty
+            $this.RecoveryLocationResourceGroupName = [string]::Empty
+            $this.RecoveryServiceVaultName = [string]::Empty
+            Write-Error -Message "The FailOver Virtual Network '$vNetId' is not in the '$($this.PairedRegion)' region ! Azure Site Recovery won't be enabled"
         }
         return $this
     }
@@ -3420,15 +3427,14 @@ function New-PsAvdPrivateEndpointSetup {
             If ($PrivateDnsZoneGroupMutex.WaitOne()) {         
 
                 $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
-                if ([string]::IsNullOrEmpty($PrivateDnsZoneGroup)) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
-                    $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$PrivateDnsZoneGroup: $($PrivateDnsZoneGroup | Out-String)"
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) is created"
+                if ($PrivateDnsZoneGroup) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Remving the already existing Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
+                    Remove-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name $PrivateDnsZoneGroup.Name -Force
                 }
-                else {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) already exists"
-                }
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
+                $PrivateDnsZoneGroup = New-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name 'default' -PrivateDnsZoneConfig $PrivateDnsZoneConfig -Force
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$PrivateDnsZoneGroup: $($PrivateDnsZoneGroup | Out-String)"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Private DNS Zone Group in the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group) is created"
 
                 $null = $PrivateDnsZoneGroupMutex.ReleaseMutex()
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
@@ -5397,7 +5403,7 @@ function Remove-PsAvdHostPoolSetup {
     #endregion
 
     #region Removing ASR Replication Protected Items
-    Remove-PsAvdAzRecoveryServicesAsrReplicationProtectedItem -HostPool $HostPools
+    $null = Remove-PsAvdAzRecoveryServicesAsrReplicationProtectedItem -HostPool $HostPools
     #endregion
 
     #region DNS Cleanup
