@@ -5589,6 +5589,23 @@ function Add-PsAvdAzureAppAttach {
         $FirstHostPoolInthisLocationStorageAccountName = $FirstHostPoolInthisLocation.GetAppAttachStorageAccountName()
         $FirstHostPoolInthisLocationStorageAccountResourceGroupName = $FirstHostPoolInthisLocation.GetAppAttachStorageAccountResourceGroupName()
 
+        #Temporary Allowing storage account key access (disabled due to SFI)
+        $null = Set-AzStorageAccount -ResourceGroupName $FirstHostPoolInthisLocationStorageAccountResourceGroupName -Name $FirstHostPoolInthisLocationStorageAccountName -AllowSharedKeyAccess $true
+
+        $StorageAccountCredentials = cmdkey /list | Select-String -Pattern "Target: Domain:target=$FirstHostPoolInthisLocationStorageAccountName\.file\.core\.windows\.net" -AllMatches
+        if ($null -eq $StorageAccountCredentials.Matches) {
+            #region Getting the Storage Account Key from the Storage Account
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Getting the Storage Account Key from the '$FirstHostPoolInthisLocationStorageAccountName' StorageAccount"
+            $CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName $FirstHostPoolInthisLocationStorageAccountResourceGroupName -AccountName $FirstHostPoolInthisLocationStorageAccountName) | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+            #$CurrentHostPoolStorageAccountKey = $CurrentHostPoolStorageAccount | Get-AzStorageAccountKey | Where-Object -FilterScript { $_.KeyName -eq "key1" }).Value
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountKey: $CurrentHostPoolStorageAccountKey"
+            #endregion
+
+            Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "cmdkey /add:`"$FirstHostPoolInthisLocationStorageAccountName.file.$StorageEndpointSuffix`" /user:`"localhost\$FirstHostPoolInthisLocationStorageAccountName`" /pass:`"$CurrentHostPoolStorageAccountKey`"" -Wait -NoNewWindow
+            #endregion
+        }
+
+
         $MSIXDemoPackages = Get-ChildItem -Path "\\$FirstHostPoolInthisLocationStorageAccountName.file.$StorageEndpointSuffix\msix" -File -Filter "*.vhd?"
         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
         foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages.FullName) {
@@ -5601,7 +5618,7 @@ function Add-PsAvdAzureAppAttach {
                 #region Importing the App Attach Package
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Importing the MSIX Image '$CurrentMSIXDemoPackage'"
                 #Temporary Allowing storage account key access (disabled due to SFI)
-                $null = Set-AzStorageAccount -ResourceGroupName $FirstHostPoolInthisLocationStorageAccountResourceGroupName -Name $FirstHostPoolInthisLocationStorageAccountName -AllowSharedKeyAccess $true
+                #$null = Set-AzStorageAccount -ResourceGroupName $FirstHostPoolInthisLocationStorageAccountResourceGroupName -Name $FirstHostPoolInthisLocationStorageAccountName -AllowSharedKeyAccess $true
                 $MyError = $null
                 foreach ($CurrentHostPoolInthisLocation in $AllHostPoolsInthisLocation) {
                     try {
@@ -7066,6 +7083,8 @@ function New-PsAvdPooledHostPoolSetup {
                             }
                             else {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
+                                #Creating a Private EndPoint for the MSIX / Azure App attach Storage Account on the HostPool Subnet and the Subnet used by this DC
+                                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
                             }
                             $null = $StorageAccountMutex.ReleaseMutex()
                             #$StorageAccountMutex.Dispose()
@@ -7120,6 +7139,8 @@ function New-PsAvdPooledHostPoolSetup {
                             If ($StorageAccountShareMutex.WaitOne()) { 
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
+                                #Temporary Allowing storage account key access (disabled due to SFI)
+                                $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                                 $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
                                 $CurrentHostPoolStorageAccountShare = Get-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext -ErrorAction Ignore
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountShare:`r`n$($CurrentHostPoolStorageAccountShare | Out-String)"
@@ -7465,6 +7486,8 @@ function New-PsAvdPooledHostPoolSetup {
                             }
                             else {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
+                                #Creating a Private EndPoint for the MSIX / Azure App attach Storage Account on the HostPool Subnet and the Subnet used by this DC
+                                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
                             }
                             $null = $StorageAccountMutex.ReleaseMutex()
                             #$StorageAccountMutex.Dispose()
@@ -7519,6 +7542,8 @@ function New-PsAvdPooledHostPoolSetup {
                             If ($StorageAccountShareMutex.WaitOne()) { 
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
+                                #Temporary Allowing storage account key access (disabled due to SFI)
+                                $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                                 $storageContext = (Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName).Context
                                 $CurrentHostPoolStorageAccountShare = Get-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext -ErrorAction Ignore
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountShare:`r`n$($CurrentHostPoolStorageAccountShare | Out-String)"
