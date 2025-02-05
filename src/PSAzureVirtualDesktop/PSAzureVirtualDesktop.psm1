@@ -5652,8 +5652,9 @@ function Add-PsAvdAzureAppAttach {
                         $AzWvdHostPool.Id
                     }
 
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolReference: $($HostPoolReference -join ', ')"
                     $parameters = @{
-                        Name                            = $AppAttachPackageName
+                        Name                            = $AppAttachPackage.Name
                         ResourceGroupName               = $FirstHostPoolInthisLocationStorageAccountResourceGroupName
                         Location                        = $FirstHostPoolInthisLocation.Location
                         FailHealthCheckOnStagingFailure = 'NeedsAssistance'
@@ -5664,50 +5665,63 @@ function Add-PsAvdAzureAppAttach {
                         AppAttachPackage                = $AppAttachPackage
                         PassThru                        = $true
                     }
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$($AppAttachPackage.Name) AppAttach Package"
                     $AppAttachPackage = New-AzWvdAppAttachPackage @parameters
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
                     #endregion
-
-                    #region Groups and users
-                    foreach ($CurrentHostPool in $HostPool) {
-                        $CurrentHostPoolDAGUsersADGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
-                        $CurrentHostPoolRAGUsersADGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
-                        $CurrentHostPoolAGUsersADGroupName = $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName
-                        foreach ($CurrentHostPoolAGUsersADGroupName in $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName) {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the Application to Group '$CurrentHostPoolAGUsersADGroupName' to the '$($AppAttachPackageName)' AppAttach Application"
-                            $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolAGUsersADGroupName'"
-                            foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
-                                $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
-                                $Scope = $AppAttachPackage.Id
-                                if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($AppAttachPackageName)' AppAttach Application"
-                                    $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
-                                }
-                            }
-                        }
-                        #endregion
-
-                        #region Publishing AppAttach application to a RemoteApp application group
-                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
-                        if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
-                            $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
-                            $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
-                            $ApplicationGroupName = "{0}-RAG" -f $CurrentHostPool.Name
-                            $CurrentAzRemoteApplicationGroup = Get-AzWvdApplicationGroup -Name $ApplicationGroupName -ResourceGroupName $CurrentHostPoolResourceGroupName
-                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $AppAttachPackage.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $AppAttachPackage.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $AppAttachPackage.ImagePackageApplication.AppId
-
-                        }
-                    }
-                    #endregion 
                 }
                 else {
                     Write-Error -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentMSIXDemoPackage' could not be imported"
                 }
             }
-        }
-    }
+            else {
+                $HostPoolReference = foreach ($CurrentHostPoolInthisLocation in $AllHostPoolsInthisLocation) {
+                    $AzWvdHostPool = Get-AzWvdHostPool -Name $CurrentHostPoolInthisLocation.Name -ResourceGroupName $CurrentHostPoolInthisLocation.GetResourceGroupName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AzWvdHostPool.Id: $($AzWvdHostPool.Id)"
+                    $AzWvdHostPool.Id
+                }
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolReference: $($HostPoolReference -join ', ')"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Updating the '$($AppAttachPackage.Name) AppAttach Package"
+                $AppAttachPackage | Update-AzWvdAppAttachPackage -HostPoolReference $($AppAttachPackage.HostPoolReference + $HostPoolReference)
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
+            }
+
+            #region HostPool configuration
+            foreach ($CurrentHostPool in $HostPool) {
+                #region Groups and users
+                $CurrentHostPoolDAGUsersADGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
+                $CurrentHostPoolRAGUsersADGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
+                $CurrentHostPoolAGUsersADGroupName = $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName
+                foreach ($CurrentHostPoolAGUsersADGroupName in $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the Application to Group '$CurrentHostPoolAGUsersADGroupName' to the '$($AppAttachPackage.Name)' AppAttach Application"
+                    $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolAGUsersADGroupName'"
+                    foreach ($objId in $CurrentHostPoolDAGUsersAzADGroup.Id) {
+                        $DesktopVirtualizationUserRole = Get-AzRoleDefinition "Desktop Virtualization User"
+                        $Scope = $AppAttachPackage.Id
+                        if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($AppAttachPackage.Name)' AppAttach Application"
+                            $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
+                        }
+                    }
+                }
+                #endregion
+
+                #region Publishing AppAttach application to a RemoteApp application group
+                #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-setup?tabs=powershell&pivots=app-attach#publish-an-msix-or-appx-application-with-a-remoteapp-application-group
+                if ($CurrentHostPool.PreferredAppGroupType -eq "RailApplications") {
+                    $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolResourceGroupName: $CurrentHostPoolResourceGroupName"
+                    $CurrentHostPoolResourceGroupName = $CurrentHostPool.GetResourceGroupName()
+                    $ApplicationGroupName = "{0}-RAG" -f $CurrentHostPool.Name
+                    $CurrentAzRemoteApplicationGroup = Get-AzWvdApplicationGroup -Name $ApplicationGroupName -ResourceGroupName $CurrentHostPoolResourceGroupName
+                    $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $AppAttachPackage.ImagePackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $AppAttachPackage.ImagePackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $AppAttachPackage.ImagePackageApplication.AppId
+
+                }
+                #endregion 
+            }
+            #endregion 
+        }    }
 }
 
 function New-PsAvdPersonalHostPoolSetup {
