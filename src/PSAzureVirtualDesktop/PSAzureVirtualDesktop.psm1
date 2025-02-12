@@ -3513,10 +3513,19 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
         $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
     }
 
-    #Create an Azure Key Vault
-    $KeyVault = New-AzKeyVault -VaultName $KeyVaultName -ResourceGroup $ResourceGroupName -Location $location -EnabledForDeployment -EnabledForTemplateDeployment -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization #-EnablePurgeProtection
+    #region Create an Azure Key Vault
+    #$KeyVault = New-AzKeyVault -VaultName $KeyVaultName -ResourceGroup $ResourceGroupName -Location $location -EnabledForDeployment -EnabledForTemplateDeployment -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization #-EnablePurgeProtection
     #As the owner of the key vault, you automatically have access to create secrets. If you need to let another user create secrets, use:
     #$AccessPolicy = Set-AzKeyVaultAccessPolicy -VaultName $KeyVaultName -UserPrincipalName $UserPrincipalName -PermissionsToSecrets Get,Delete,List,Set -PassThru
+    $KeyVault = New-AzKeyVault -VaultName $KeyVaultName -ResourceGroup $ResourceGroupName -Location $location -EnabledForDeployment -EnabledForTemplateDeployment -SoftDeleteRetentionInDays 7 #-EnablePurgeProtection
+    #region 'Key Vault Administrator' RBAC Assignment
+    $KeyVaultAdministratorRole = Get-AzRoleDefinition "Key Vault Administrator"
+    if (-not(Get-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $KeyVault.ResourceId)) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($KeyVaultAdministratorRole.Name)' RBAC role to the '$((Get-AzContext).Account.Id)' user on the '$($HostPoolKeyVault.ResourceId)' KeyVault"
+        $null = New-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $KeyVault.ResourceId
+    }
+    #endregion 
+    #endregion 
 
     #region Defining local admin credential(s)
     if ($LocalAdminCredential) {
@@ -3604,7 +3613,22 @@ function New-PsAvdHostPoolCredentialKeyVault {
             Write-Error "The key vault name '$HostPoolKeyVaultName' is not available !" -ErrorAction Stop
         }
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolKeyVaultName' Key Vault (in the '$HostPoolResourceGroupName' Resource Group)"
-        $HostPoolKeyVault = New-AzKeyVault -ResourceGroupName $HostPoolResourceGroupName -VaultName $HostPoolKeyVaultName -Location $HostPoolVirtualNetwork.Location -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
+
+
+        #region Create an Azure Key Vault
+        #$HostPoolKeyVault = New-AzKeyVault -ResourceGroupName $HostPoolResourceGroupName -VaultName $HostPoolKeyVaultName -Location $HostPoolVirtualNetwork.Location -SoftDeleteRetentionInDays 7 -DisableRbacAuthorization
+        $HostPoolKeyVault = New-AzKeyVault -ResourceGroupName $HostPoolResourceGroupName -VaultName $HostPoolKeyVaultName -Location $HostPoolVirtualNetwork.Location -SoftDeleteRetentionInDays 7
+        #region 'Key Vault Administrator' RBAC Assignment
+        $KeyVaultAdministratorRole = Get-AzRoleDefinition "Key Vault Administrator"
+        if (-not(Get-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $HostPoolKeyVault.ResourceId)) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($KeyVaultAdministratorRole.Name)' RBAC role to the '$((Get-AzContext).Account.Id)' user on the '$($HostPoolKeyVault.ResourceId)' KeyVault"
+            $null = New-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $HostPoolKeyVault.ResourceId
+        }
+        #endregion 
+        #endregion 
+
+
+
     }
     #endregion
 
@@ -4445,15 +4469,14 @@ function New-PsAvdSessionHost {
     if ($Spot) {
         #Create a virtual machine configuration file (As a Spot Intance for saving costs . DON'T DO THAT IN A PRODUCTION ENVIRONMENT !!!)
         #We have to create a SystemAssignedIdentity for Microsoft Entra ID joined Azure VM but let's do it for all VM
-        $VMConfig = New-AzVMConfig -VMName $VMName -VMSize $VMSize -SecurityType Standard -IdentityType SystemAssigned -Priority "Spot" -MaxPrice -1
+        $VMConfig = New-AzVMConfig -VMName $VMName -VMSize $VMSize -SecurityType TrustedLaunch -IdentityType SystemAssigned -Priority "Spot" -MaxPrice -1
     }
     elseif ($HibernationEnabled) {
-        $VMConfig = New-AzVMConfig -VMName $VMName -VMSize $VMSize -SecurityType Standard -IdentityType SystemAssigned -HibernationEnabled
+        $VMConfig = New-AzVMConfig -VMName $VMName -VMSize $VMSize -SecurityType TrustedLaunch -IdentityType SystemAssigned -HibernationEnabled
     }
     else {
-        #Create a virtual machine configuration file
         #We have to create a SystemAssignedIdentity for Microsoft Entra ID joined Azure VM but let's do it for all VM
-        $VMConfig = New-AzVMConfig -VMName $VMName -VMSize $VMSize -SecurityType Standard -IdentityType SystemAssigned
+        $VMConfig = New-AzVMConfig -VMName $VMName -VMSize $VMSize -SecurityType TrustedLaunch -IdentityType SystemAssigned
     }
     $null = Add-AzVMNetworkInterface -VM $VMConfig -Id $NIC.Id
 
@@ -8841,7 +8864,7 @@ function New-PsAvdHostPoolSetup {
         New-PsAvdScalingPlan -HostPool $HostPool 
 
         #Setting up the Azure site Recovery for the Hostpools 
-        New-PsAvdAzureSiteRecoveryPolicyAssignement -HostPool $HostPool
+        New-PsAvdAzureSiteRecoveryPolicyAssignment -HostPool $HostPool
 
         if ($WorkBook) {
             #Importing some useful AVD Worbooks
@@ -9628,7 +9651,7 @@ function New-PsAvdScalingPlan {
 }
 
 #From https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-how-to-enable-policy
-function New-PsAvdAzureSiteRecoveryPolicyAssignement {
+function New-PsAvdAzureSiteRecoveryPolicyAssignment {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $true)]
