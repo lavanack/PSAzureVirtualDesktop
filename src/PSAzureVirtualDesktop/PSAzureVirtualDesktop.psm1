@@ -33,7 +33,6 @@ Class HostPool {
     [boolean] $Spot
     [boolean] $ScalingPlan
     [boolean] $Watermarking
-    [boolean] $RDPShortPath
 
     hidden [string] $PairedRegion
     hidden [string] $ResourceGroupName
@@ -128,7 +127,6 @@ Class HostPool {
         $this.DisableIntune()            
         $this.DisableScalingPlan()
         $this.DisableWatermarking()
-        $this.DisableRDPShortPath()
         $this.KeyVault = $KeyVault
         $this.IdentityProvider = [IdentityProvider]::ActiveDirectory
         $this.ASRFailOverVNetId = $null
@@ -221,16 +219,6 @@ Class HostPool {
 
     [HostPool]EnableScalingPlan() {
         $this.ScalingPlan = $true
-        return $this
-    }
-
-    [HostPool]DisableRDPShortPath() {
-        $this.RDPShortPath = $false
-        return $this
-    }
-
-    [HostPool] EnableRDPShortPath() {
-        $this.RDPShortPath = $true
         return $this
     }
 
@@ -3521,7 +3509,7 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     #region 'Key Vault Administrator' RBAC Assignment
     $KeyVaultAdministratorRole = Get-AzRoleDefinition "Key Vault Administrator"
     While (-not(Get-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $KeyVault.ResourceId)) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($KeyVaultAdministratorRole.Name)' RBAC role to the '$((Get-AzContext).Account.Id)' user on the '$($HostPoolKeyVault.ResourceId)' KeyVault"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($KeyVaultAdministratorRole.Name)' RBAC role to the '$((Get-AzContext).Account.Id)' user on the '$($KeyVault.ResourceId)' KeyVault"
         $null = New-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $KeyVault.ResourceId
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
         Start-Sleep -Seconds 30
@@ -4451,7 +4439,7 @@ function New-PsAvdSessionHost {
     $OSDiskSize = [HostPool]::VMProfileOsdiskSizeGb
     $OSDiskType = "Premium_LRS"
 
-    Import-Module -Name Az.Compute -DisableNameChecking
+    Import-Module -Name Az.Compute #-DisableNameChecking
 
     if ($null -eq (Get-AzVMSize -Location $Location | Where-Object -FilterScript { $_.Name -eq $VMSize })) {
         Write-Error "The '$VMSize' VM Size is not available in the '$($Location)' location" -ErrorAction Stop
@@ -5668,7 +5656,7 @@ function Add-PsAvdAzureAppAttach {
                 if ($null -ne $AppAttachPackage) {
                     #region Adding the App Attach Package
                     $AppAttachPackageName = "{0}_{1}" -f $AppAttachPackage.ImagePackageAlias, [HostPool]::GetAzLocationShortName($FirstHostPoolInthisLocation.Location)
-                    $AppAttachPackageName = $AppAttachPackage.ImagePackageAlias
+                    #$AppAttachPackageName = $AppAttachPackage.ImagePackageAlias
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackageName: $AppAttachPackageName"
 
                     $DisplayName = "{0} (v{1})" -f $AppAttachPackage.ImagePackageApplication.FriendlyName, $AppAttachPackage.ImageVersion
@@ -5683,7 +5671,7 @@ function Add-PsAvdAzureAppAttach {
 
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolReference: $($HostPoolReference -join ', ')"
                     $parameters = @{
-                        Name                            = $AppAttachPackage.Name
+                        Name                            = $AppAttachPackageName
                         ResourceGroupName               = $FirstHostPoolInthisLocationStorageAccountResourceGroupName
                         Location                        = $FirstHostPoolInthisLocation.Location
                         FailHealthCheckOnStagingFailure = 'NeedsAssistance'
@@ -5936,35 +5924,6 @@ function New-PsAvdPersonalHostPoolSetup {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Registration Token (Expiration: '$RegistrationInfoExpirationTime') for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
             $RegistrationInfoToken = New-AzWvdRegistrationInfo -ResourceGroupName $CurrentHostPoolResourceGroupName -HostPoolName $CurrentHostPool.Name -ExpirationTime $RegistrationInfoExpirationTime -ErrorAction SilentlyContinue
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Registration Token (Expiration: '$RegistrationInfoExpirationTime') for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
-
-            #region RDP ShortPath (STUN)
-            if ($CurrentHostPool.RDPShortPath) {
-                $parameters = @{
-                    Name              = $CurrentHostPool.Name
-                    ResourceGroupName = $CurrentHostPoolResourceGroupName
-                    ManagedPrivateUdp = "Disabled"
-                    DirectUdp         = "Disabled"
-                    PublicUdp         = "Enabled"
-                    RelayUdp          = "Enabled"
-                }
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Enabling RDP Shortpath (STUN) for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                Update-AzWvdHostPool @parameters
-            }
-            <#
-            else {
-                $parameters = @{
-                       Name = $CurrentHostPool.Name
-                       ResourceGroupName = $CurrentHostPoolResourceGroupName
-                       ManagedPrivateUdp = "Default"
-                       DirectUdp = "Default"
-                       PublicUdp = "Default"
-                       RelayUdp = "Default"
-                }
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling RDP Shortpath (STUN) for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                Update-AzWvdHostPool @parameters
-            }
-            #>
-            #endregion
 
             #region Scale session hosts using Azure Automation
             #TODO : https://learn.microsoft.com/en-us/training/modules/automate-azure-virtual-desktop-management-tasks/1-introduction
