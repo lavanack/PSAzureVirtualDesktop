@@ -648,7 +648,7 @@ class PooledHostPool : HostPool {
 
         if ($this.MSIX) {
             $this.AppAttachStorageAccountResourceGroupName = "rg-avd-{0}" -f $this.Name
-            $this.AppAttachStorageAccountName = "msix{0}" -f $($this.Name -replace "\W")
+            $this.AppAttachStorageAccountName = "apat{0}" -f $($this.Name -replace "\W")
             $this.AppAttachStorageAccountName = $this.AppAttachStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.AppAttachStorageAccountName.Length))
         }
         elseif ($this.AppAttach) {
@@ -2813,7 +2813,8 @@ function Set-PsAvdMgBetaUsersGroupLicense {
         [string] $SkuPartNumber = 'Microsoft_365_E5_(no_Teams)',
         [Parameter(Mandatory)]
         [ValidateScript({ $_ -in $((Get-MgBetaGroup).DisplayName) })]
-        [string] $GroupDisplayName 
+        [string] $GroupDisplayName, 
+        [switch] $Remove
     )
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -2825,7 +2826,29 @@ function Set-PsAvdMgBetaUsersGroupLicense {
         #https://developer.microsoft.com/en-us/graph/known-issues/?search=20454
         #$SkuId = (Get-MgBetaSubscribedSku -All -Search "SkuPartNumber:'$SkuPartNumber'").SkuId 
         $SkuId = (Get-MgBetaSubscribedSku -All | Where-Object -FilterScript { $_.SkuPartNumber -eq $SkuPartNumber }).SkuId
-        Set-MgBetaGroupLicense -GroupId $Group.Id -AddLicenses @{SkuId = $SkuId } -RemoveLicenses @()
+        if ($Remove) {
+            #Bug April 2025 : https://github.com/microsoftgraph/msgraph-sdk-powershell/issues/3201
+            #Set-MgBetaGroupLicense -GroupId $Group.Id -AddLicenses @{ } -RemoveLicenses @($SkuId)
+            # Create JSON payload for license removal
+            $body = @{
+                "addLicenses" = @()
+                "removeLicenses" = @($SkuId)
+            }
+        }
+        else {
+            #Bug April 2025 : https://github.com/microsoftgraph/msgraph-sdk-powershell/issues/3201
+            #Set-MgBetaGroupLicense -GroupId $Group.Id -AddLicenses @{SkuId = $SkuId } -RemoveLicenses @()
+            # Create JSON payload for adding license 
+            $Body = @{
+                 "addLicenses" = @(
+                     @{
+                         "skuId" = $SkuId
+                     }
+                 )
+                 "removeLicenses" = @()
+            } 
+        }
+        Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/groups/$($Group.Id)/assignLicense" -Body $Body -ContentType "application/json"
     }
     else {
         Write-Warning -Message "No more licenses available for '$SkuPartNumber' ($($SubscribedSku.ConsumedUnits) consumed out of $($SubscribedSku.PrepaidUnits.Enabled))"
@@ -5623,7 +5646,7 @@ function Add-PsAvdAzureAppAttach {
         }
 
 
-        $MSIXDemoPackages = Get-ChildItem -Path "\\$FirstHostPoolInthisLocationStorageAccountName.file.$StorageEndpointSuffix\msix" -File -Filter "*.vhd?"
+        $MSIXDemoPackages = Get-ChildItem -Path "\\$FirstHostPoolInthisLocationStorageAccountName.file.$StorageEndpointSuffix\appattach" -File -Filter "*.vhd?"
         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
         foreach ($CurrentMSIXDemoPackage in $MSIXDemoPackages.FullName) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentMSIXDemoPackage': $CurrentMSIXDemoPackage"
@@ -6350,11 +6373,11 @@ function New-PsAvdPooledHostPoolSetup {
         $MSIXHosts = "MSIX Hosts"
         $MSIXShareAdmins = "MSIX Share Admins"
         $MSIXUsers = "MSIX Users"
-        $MSIXShareName = "msix"  
+        $MSIXShareName = "appattach"  
 
         $SKUName = "Standard_LRS"
 
-        #From https://www.youtube.com/watch?v=lvBiLj7oAG4&t=2s
+        #From https://www.youtube.com/watch?v=lvBiLj7oAG4&t=700s
         $RedirectionsXMLFileContent = @'
 <?xml version="1.0"  encoding="UTF-8"?>
 <FrxProfileFolderRedirection ExcludeCommonFolders="49">
@@ -6364,6 +6387,9 @@ function New-PsAvdPooledHostPoolSetup {
 <Exclude Copy="0">AppData\Local\Microsoft\Outlook</Exclude>
 <Exclude Copy="0">AppData\Local\Microsoft\OneDrive</Exclude>
 <Exclude Copy="0">AppData\Local\Microsoft\Edge</Exclude>
+<Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs</Exclude>
+<Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\PerfLogs</Exclude>
+<Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\WebStorage</Exclude>
 </Excludes>
 <Includes>
 <Include>AppData\Local\Microsoft\Edge\User Data</Include>
@@ -6715,6 +6741,7 @@ function New-PsAvdPooledHostPoolSetup {
                     }
 
                     $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -AllowSharedKeyAccess $true
+                    $CurrentHostPoolStorageAccount | Disable-AzStorageContainerDeleteRetentionPolicy
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolStorageAccountName' Storage Account (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-string)"
                 }
@@ -7088,6 +7115,7 @@ function New-PsAvdPooledHostPoolSetup {
                             if ($null -eq $CurrentHostPoolStorageAccount) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$CurrentHostPoolStorageAccountName' StorageAccount"
                                 $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -ErrorAction Ignore -AllowSharedKeyAccess $true
+                                $CurrentHostPoolStorageAccount | Disable-AzStorageContainerDeleteRetentionPolicy
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolStorageAccountName' StorageAccount is created"
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-string)"
                             }
@@ -7318,7 +7346,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
 
                     #region Microsoft Defender Endpoint A/V Exclusions for this HostPool 
-                    $CurrentHostPoolStorageAccountProfileSharePath = "\\{0}.file.{1}\msix" -f $CurrentHostPoolStorageAccountName, $StorageEndpointSuffix
+                    $CurrentHostPoolStorageAccountProfileSharePath = "\\{0}.file.{1}\appattach" -f $CurrentHostPoolStorageAccountName, $StorageEndpointSuffix
 
                     #From https://learn.microsoft.com/en-us/fslogix/overview-prerequisites#configure-antivirus-file-and-folder-exclusions
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Microsoft Defender Endpoint A/V Exclusions for this HostPool' related registry values for '$($CurrentHostPoolMSIXGPO.DisplayName)' GPO (linked to '$($CurrentHostPoolOU.DistinguishedName)' OU)"
@@ -7505,6 +7533,7 @@ function New-PsAvdPooledHostPoolSetup {
                             if ($null -eq $CurrentHostPoolStorageAccount) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$CurrentHostPoolStorageAccountName' StorageAccount"
                                 $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -ErrorAction Ignore -AllowSharedKeyAccess $true
+                                $CurrentHostPoolStorageAccount | Disable-AzStorageContainerDeleteRetentionPolicy
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolStorageAccountName' StorageAccount is created"
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-string)"
                             }
@@ -9486,7 +9515,7 @@ function Get-PsAvdMSIXProfileShare {
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetAppAttachStorageAccountName() -ResourceGroupName $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
                 # Get the list of file shares in the storage account
                 $CurrentHostPoolStorageShare = Get-AzStorageShare -Context $CurrentHostPoolStorageAccount.Context
-                $CurrentHostPoolMSIXStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "msix" }
+                $CurrentHostPoolMSIXStorageShare = $CurrentHostPoolStorageShare | Where-Object  -FilterScript { $_.Name -eq "appattach" }
                 if ($null -ne $CurrentHostPoolMSIXStorageShare) {
                     Start-Process $("\\{0}.file.{1}\{2}" -f $CurrentHostPoolMSIXStorageShare.context.StorageAccountName, ($CurrentHostPoolMSIXStorageShare.context.EndPointSuffix -replace "/"), $CurrentHostPoolMSIXStorageShare.Name)
                 }
