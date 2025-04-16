@@ -3311,7 +3311,7 @@ function New-PsAvdPrivateEndpointSetup {
         }
         $ResourceGroupName = $AzResource.ResourceGroupName
     	
-        #region Private endpoint for '$($AzResource.ResourceType)' or Storage Account Setup
+        #region Private endpoint for KeyVault or Storage Account Setup
         #From https://learn.microsoft.com/en-us/azure/private-link/create-private-endpoint-powershell?tabs=dynamic-ip#create-a-private-endpoint
         #From https://www.jorgebernhardt.com/private-endpoint-azure-key-vault-powershell/
         #From https://ystatit.medium.com/azure-key-vault-with-azure-service-endpoints-and-private-link-part-1-bcc84b4c5fbc
@@ -9496,7 +9496,7 @@ function Get-PsAvdFSLogixProfileShare {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
-function Get-PsAvdMSIXProfileShare {
+function Get-PsAvdAppAttachProfileShare {
     [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $true)]
