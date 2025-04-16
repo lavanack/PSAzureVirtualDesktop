@@ -13,6 +13,13 @@
 
 ## Release Notes
 
+- 1.0.10
+  - Modifications for Storage Account names and file share names for MSIX [MSIX AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach) and [Azure AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=app-attach)
+- 1.0.9
+  - Removing dedicated RDP ShortPath functions (enabled by default)  
+- 1.0.8
+  - RBAC for managing Key Vaults
+  - VM Security Type set to TrustedLaunch
 - 1.0.7
   - Minor update
 - 1.0.6
@@ -45,7 +52,7 @@ A list of potential changes or evolutions can be found in the [What's next log](
 This GitHub repository is the home of the PowerShell module [PSAzureVirtualDesktop](https://www.powershellgallery.com/packages/PSAzureVirtualDesktop). This module is a collection of PowerShell classes and functions that can be used to quickly deploy Azure Virtual Desktop (AVD) Proof-Of-Concepts. FSLogix, MSIX, AppAttach (With AD only for the moment in this project), Intune, ADDS or Entra joined VMs, Scaling Plan, Hibernation, OS Ephemeral Disks are some of the supported options available.
 
 > [!IMPORTANT]
-The module is designed to be used in a lab environment and is not intended for production use. The module is provided as-is and is not supported by Microsoft. <b>For a Microsoft-supported version deployment, I suggest using the Azure Virtual Desktop (AVD) Landing Zone Accelerator (LZA), which is available [here](https://github.com/Azure/avdaccelerator). Please note that this only covers the Azure component where the module [PSAzureVirtualDesktop](https://www.powershellgallery.com/packages/PSAzureVirtualDesktop) encompasses both OnPrem and Azure configurations.</b>
+The module is designed to be used in a lab environment and is not intended for production use. The module is provided as-is and is not supported by Microsoft. **For a Microsoft-supported version deployment, I suggest using the Azure Virtual Desktop (AVD) Landing Zone Accelerator (LZA), which is available [here](https://github.com/Azure/avdaccelerator). Please note that this only covers the Azure component where the module [PSAzureVirtualDesktop](https://www.powershellgallery.com/packages/PSAzureVirtualDesktop) encompasses both OnPrem and Azure configurations.**
 
 ## Requirements
 
