@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Change log for PSAzureVirtualDesktop](#change-log-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.11\] - 2025-04-16](#1011---2025-04-16)
   - [\[1.0.10\] - 2025-04-14](#1010---2025-04-14)
   - [\[1.0.9\] - 2025-04-04](#109---2025-04-04)
   - [\[1.0.8\] - 2025-02-12](#108---2025-02-12)
@@ -28,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated CHANGELOG.md
 - 2024-09-05 - Created CHANGELOG.md
 
+## [1.0.11] - 2025-04-16
+
+- Renaming the Get-PsAvdMSIXProfileShare function to [Get-PsAvdAppAttachProfileShare](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-PsAvdAppAttachProfileShare)
+  
 ## [1.0.10] - 2025-04-14
 
 - Changing the naming convention for [MSIX AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach) and [Azure AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=app-attach) Storage Accounts from `msix*` to `apat*`
