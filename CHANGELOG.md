@@ -6,48 +6,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Change log for PSAzureVirtualDesktop](#change-log-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.10\] - 2025-04-14](#1010---2025-04-14)
+  - [\[1.0.9\] - 2025-04-04](#109---2025-04-04)
+  - [\[1.0.8\] - 2025-02-12](#108---2025-02-12)
   - [\[1.0.7\] - 2024-12-26](#107---2024-12-26)
-    - [Changed](#changed-1)
+  - [\[1.0.6\] - 2024-12-26](#106---2024-12-26)
   - [\[1.0.5\] - 2024-12-26](#105---2024-12-26)
-    - [Changed](#changed-2)
   - [\[1.0.4\] - 2024-12-26](#104---2024-12-26)
-    - [Changed](#changed-3)
   - [\[1.0.3\] - 2024-10-24](#103---2024-10-24)
-    - [Changed](#changed-4)
   - [\[1.0.2\] - 2024-09-27](#102---2024-09-27)
-    - [Changed](#changed-5)
   - [\[1.0.1\] - 2024-09-06](#101---2024-09-06)
-    - [Changed](#changed-6)
   - [\[1.0.0\] - 2024-09-05](#100---2024-09-05)
-    - [Changed](#changed-7)
 
 ## [Unreleased]
 
 ### Changed
 
+- 2025-04-16 - Updated CHANGELOG.md
 - 2024-12-26 - Updated CHANGELOG.md
 - 2024-11-11 - Updated CHANGELOG.md
 - 2024-09-27 - Updated CHANGELOG.md
 - 2024-09-05 - Created CHANGELOG.md
 
+## [1.0.10] - 2025-04-14
+
+- Changing the naming convention for [MSIX AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach) and [Azure AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=app-attach) Storage Accounts from `msix*` to `apat*`
+- Changing the name of the file share for [MSIX AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach) and [Azure AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=app-attach) from `msix` to `appattach`
+- Updating the content of the redirections.xml files for the FSLogix Profile Containers and Office Containers
+- Disabling the retention policy for the Storage Accounts used for [MSIX AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach) and [Azure AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=app-attach)
+- Updating code for managing licenses as a workaround for the [https://github.com/microsoftgraph/msgraph-sdk-powershell/issues/3201](https://github.com/microsoftgraph/msgraph-sdk-powershell/issues/3201)
+
+## [1.0.9] - 2025-04-04
+
+- Removing dedicated RDP ShortPath functions (enabled by default)  
+
+## [1.0.8] - 2025-02-12
+
+- Changing VM Security Type from Standard to TrustedLaunch for the AVD Session Hosts
+- Moving from Access Policy to RBAC for managing Key Vaults and assigning the "Key Vault Administrator" role to the logged in user.
+
 ## [1.0.7] - 2024-12-26
 
 - Moving back pester test files to the Pester folder
 
-### Changed
+## [1.0.6] - 2024-12-26
 
 - Fixing bug for the Security eventlog (for collecting failures)
 - Moving pester test files to the tools\Pester folder
 
 ## [1.0.5] - 2024-12-26
 
-### Changed
-
 - Published by mistake
 
 ## [1.0.4] - 2024-12-26
-
-### Changed
 
 - Removing the UseKeyVaultForStorageAccountKey() static method and UseKeyVaultForStorageAccountKey_ static property on the [HostPool](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/HostPool-PowerShell-Classes#hostpool-powershell-class-base-class) PowerShell class
 - Updating Pester Tests
@@ -69,14 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.3] - 2024-10-24
 
-### Changed
-
 - Changing credential management by adding [Get-LocalAdminCredential](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-LocalAdminCredential) and [Get-AdjoinCredential](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-AdjoinCredential) functions
 - Minor fixes
   
 ## [1.0.2] - 2024-09-27
-
-### Changed
 
 - Adding the UseKeyVaultForStorageAccountKey() static method and UseKeyVaultForStorageAccountKey_ static property on the [HostPool](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/HostPool-PowerShell-Classes#hostpool-powershell-class-base-class) PowerShell class to store the Storage Account (for MSIX and FSLogix) Key in an Azure Key Vault to be compliant with the Secure Future Initiative (SFI) (Only required for MSFTees)
 - Code Cleanup (Part 1): Removing useless and non-used functions and code
@@ -86,12 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.1] - 2024-09-06
 
-### Changed
-
 - Minor update
   
 ## [1.0.0] - 2024-09-05
-
-### Changed
 
 - Initial release
