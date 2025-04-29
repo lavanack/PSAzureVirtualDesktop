@@ -33,7 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.0.12] - 2025-04-29
 
-- Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts 
+- Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts
   
 ## [1.0.11] - 2025-04-16
 
