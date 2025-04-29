@@ -13,9 +13,9 @@
 
 ## Release Notes
 
-- [1.0.12] - 2025-04-29
+- [1.0.12]
   - Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts
-- [1.0.11] - 2025-04-16
+- [1.0.11]
   - Renaming the Get-PsAvdMSIXProfileShare function to [Get-PsAvdAppAttachProfileShare](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-PsAvdAppAttachProfileShare)
 - 1.0.10
   - Modifications for Storage Account names and file share names for MSIX [MSIX AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach) and [Azure AppAttach](https://learn.microsoft.com/azure/virtual-desktop/app-attach-overview?pivots=app-attach)
