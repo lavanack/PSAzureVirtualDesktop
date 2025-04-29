@@ -411,7 +411,7 @@ class PooledHostPool : HostPool {
         $this.MaxSessionLimit = 5
         $this.ImagePublisherName = "microsoftwindowsdesktop"
         $this.ImageOffer = "office-365"
-        $this.ImageSku = "win11-23h2-avd-m365"
+        $this.ImageSku = "win11-24h2-avd-m365"
         $this.FSlogix = $true
         $this.MSIX = $true
         $this.AppAttach = $false
@@ -705,7 +705,7 @@ class PersonalHostPool : HostPool {
         $this.Type = [HostPoolType]::Personal
         $this.ImagePublisherName = "microsoftwindowsdesktop"
         $this.ImageOffer = "windows-11"
-        $this.ImageSku = "win11-23h2-ent"
+        $this.ImageSku = "win11-24h2-ent"
         $this.HibernationEnabled = $false
         $this.LoadBalancerType = "Persistent"
         $this.RefreshNames()
@@ -4040,10 +4040,10 @@ function New-AzureComputeGallery {
 
     # Image template and definition names
     #AVD MultiSession Session Image Market Place Image + customizations: VSCode
-    $imageDefName01 = "win11-23h2-ent-avd-custom-vscode"
+    $imageDefName01 = "win11-24h2-ent-avd-custom-vscode"
     $imageTemplateName01 = $imageDefName01 + "-template-" + $timeInt
     #AVD MultiSession + Microsoft 365 Market Place Image + customizations: VSCode
-    $imageDefName02 = "win11-23h2-ent-avd-m365-vscode"
+    $imageDefName02 = "win11-24h2-ent-avd-m365-vscode"
     $imageTemplateName02 = $imageDefName02 + "-template-" + $timeInt
     Write-Verbose -Message "`$imageDefName01: $imageDefName01"
     Write-Verbose -Message "`$imageTemplateName01: $imageTemplateName01"
@@ -4180,7 +4180,7 @@ function New-AzureComputeGallery {
         PlatformImageSource = $true
         Publisher           = 'MicrosoftWindowsDesktop'
         Offer               = 'Office-365'    
-        Sku                 = 'win11-23h2-avd-m365'  
+        Sku                 = 'win11-24h2-avd-m365'  
         Version             = 'latest'
     }
     Write-Verbose -Message "Creating Azure Image Builder Template Source Object  ..."
@@ -4441,7 +4441,7 @@ function New-PsAvdSessionHost {
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
         [string]$ImageOffer = "office-365",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
-        [string]$ImageSku = "win11-23h2-avd-m365",
+        [string]$ImageSku = "win11-24h2-avd-m365",
         [Parameter(Mandatory = $true, ParameterSetName = 'ACG')]
         [ValidateNotNullOrEmpty()]
         [string]$VMSourceImageId,
@@ -4765,7 +4765,7 @@ function Add-PsAvdSessionHost {
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
         [string]$ImageOffer = "office-365",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
-        [string]$ImageSku = "win11-23h2-avd-m365",
+        [string]$ImageSku = "win11-24h2-avd-m365",
         [Parameter(Mandatory = $true, ParameterSetName = 'ACG')]
         [ValidateNotNullOrEmpty()]
         [string]$VMSourceImageId,
