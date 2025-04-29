@@ -13,6 +13,8 @@
 
 ## Release Notes
 
+- [1.0.12] - 2025-04-29
+  - Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts
 - [1.0.11] - 2025-04-16
   - Renaming the Get-PsAvdMSIXProfileShare function to [Get-PsAvdAppAttachProfileShare](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-PsAvdAppAttachProfileShare)
 - 1.0.10
