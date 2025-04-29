@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Changelog for PSAzureVirtualDesktop](#changelog-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.12\] - 2025-04-29](#1012---2025-04-29)
   - [\[1.0.11\] - 2025-04-16](#1011---2025-04-16)
   - [\[1.0.10\] - 2025-04-14](#1010---2025-04-14)
   - [\[1.0.9\] - 2025-04-04](#109---2025-04-04)
@@ -23,12 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2025-04-29 - Updated `CHANGELOG.md`
 - 2025-04-16 - Updated `CHANGELOG.md`
 - 2024-12-26 - Updated `CHANGELOG.md`
 - 2024-11-11 - Updated `CHANGELOG.md`
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
 
+## [1.0.12] - 2025-04-29
+
+- Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts 
+  
 ## [1.0.11] - 2025-04-16
 
 - Renamed the `Get-PsAvdMSIXProfileShare` function to [`Get-PsAvdAppAttachProfileShare`](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/Get-PsAvdAppAttachProfileShare)
