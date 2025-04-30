@@ -2485,7 +2485,11 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
         [string]$ScriptPath,
 
         [Parameter(Mandatory = $true, ParameterSetName = 'ScriptBlock')]
-        [System.Management.Automation.ScriptBlock]$ScriptBlock
+        [System.Management.Automation.ScriptBlock]$ScriptBlock,
+
+        [Parameter(Mandatory = $false)]
+        [ValidateSet('system', 'user')]
+        [string]$RunAsAccount = 'system'
     )
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -2525,7 +2529,7 @@ Function New-PsAvdIntunePowerShellScriptViaCmdlet {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Deleting the previously imported PowerShell Script file '$DisplayName' if any"
     Get-MgBetaDeviceManagementScript -Filter "displayName eq '$DisplayName'" -All | Remove-MgBetaDeviceManagementScript
 
-    $AddedScript = New-MgBetaDeviceManagementScript -DisplayName $DisplayName -FileName $FileName -RoleScopeTagIds @("0") -RunAsAccount 'system'-ScriptContentInputFile $ScriptContentInputFile
+    $AddedScript = New-MgBetaDeviceManagementScript -DisplayName $DisplayName -FileName $FileName -RoleScopeTagIds @("0") -RunAsAccount $RunAsAccount -ScriptContentInputFile $ScriptContentInputFile
     if ($ScriptURI -or $ScriptBlock) {
         Remove-Item -Path $ScriptContentInputFile -Force
     }
@@ -5097,6 +5101,8 @@ function Copy-PsAvdMSIXDemoPFXFile {
         Copy-Item -Path $DownloadedPFXFiles.FullName -Destination C:\ -ToSession $_ -Force
     }
 
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($DownloadedPFXFiles.FullName -join ', ' )' to C:\"
+
     $ImportPfxCertificates = Invoke-Command -Session $Session -ScriptBlock {
         $using:DownloadedPFXFiles | ForEach-Object -Process { 
             $LocalFile = $(Join-Path -Path C: -ChildPath $_.Name)
@@ -5114,6 +5120,50 @@ function Copy-PsAvdMSIXDemoPFXFile {
     $Session | Remove-PSSession
     #Removing the Temp folder (useless now)
     Remove-Item -Path $TempFolder -Recurse -Force -ErrorAction Ignore
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
+function Copy-PsAvdLogonScript {
+    [CmdletBinding(PositionalBinding = $false)]
+    param
+    (
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()] 
+        [string[]] $ComputerName,
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()] 
+        [string] $Destination = "C:\Scripts",
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNullOrEmpty()] 
+        [System.Management.Automation.PSCredential]$Credential,
+        [Parameter(Mandatory = $false)]
+        [ValidateNotNull()] 
+        [System.Security.SecureString]$SecurePassword = $(ConvertTo-SecureString -String "P@ssw0rd" -AsPlainText -Force)
+    )   
+
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
+    if ($Credential) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Credential was specified"
+        $Session = Wait-PSSession -ComputerName $ComputerName -Credential $Credential -PassThru
+    }
+    else {
+        $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
+    }
+
+    $ModuleBase = Get-ModuleBase
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+    $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
+
+    #Copying the PFX to all session hosts
+    $Session | ForEach-Object -Process { 
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($HelperScripts.FullName -join ', ' )' to $Destination"
+        Copy-Item -Path $ScriptPath -Destination $Destination -ToSession $Session -Force -PassThru
+    }
+
+    $Session | Remove-PSSession
+
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
@@ -6593,7 +6643,10 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "IsDynamic" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
 
                     #For running FSLogix System Tray at Logon
-                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ValueName "frxtray" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value "C:\Program Files\FSLogix\Apps\frxtray.exe"
+                    #https://learn.microsoft.com/en-us/fslogix/reference-service-drivers-components#fslogix-profile-status-retired-frxtrayexe
+                    #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ValueName "frxtray" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value "C:\Program Files\FSLogix\Apps\frxtray.exe"
+
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' -ValueName "LogonScript" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 'powershell.exe -ExecutionPolicy ByPass -File "C:\Scripts\Send-FSlogixProfileToastNotification.ps1"'
 
                     $CurrentHostPoolStorageAccountProfileSharePath = "\\{0}.file.{1}\profiles" -f $CurrentHostPoolStorageAccountName, $StorageEndpointSuffix
                     if ($CurrentHostPool.FSLogixCloudCache) {
@@ -7992,7 +8045,15 @@ function New-PsAvdPooledHostPoolSetup {
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
-            #endregion 
+            #endregion
+             
+            if (($CurrentHostPool.IsActiveDirectoryJoined()) -and ($CurrentHostPool.FSLogix)) {
+                #region Copying The Logon Script on Session Host(s)
+                #$result = Wait-PSSession -ComputerName $SessionHostNames
+                #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
+                Copy-PsAvdLogonScript -ComputerName $SessionHostNames
+                #endregion 
+            }
 
             if (($CurrentHostPool.IsMicrosoftEntraIdJoined()) -and ($CurrentHostPool.FSLogix)) {
                 #region Configuring the session hosts
@@ -8003,6 +8064,13 @@ function New-PsAvdPooledHostPoolSetup {
                 #$LocalAdminUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name LocalAdminUserName -AsPlainText
                 $LocalAdminCredential = Get-LocalAdminCredential -KeyVault $CurrentHostPool.KeyVault
                 $LocalAdminUserName = $LocalAdminCredential.UserName
+
+                #region Copying The Logon Script on Session Host(s)
+                #$result = Wait-PSSession -ComputerName $SessionHostNames
+                #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
+                Copy-PsAvdLogonScript -ComputerName $SessionHostNames -Credential $LocalAdminCredential
+                #endregion 
+
                 foreach ($CurrentSessionHostName in $SessionHostNames) {
                     Write-Verbose -Message $("Processing {0}" -f $CurrentSessionHostName)
                     $ScriptString = 'Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\Kerberos\Parameters" -Name "CloudKerberosTicketRetrievalEnabled" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1'
@@ -8103,6 +8171,12 @@ function New-PsAvdPooledHostPoolSetup {
                     $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Enable-NewPerformanceCounter.ps1"
                     New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptPath $ScriptPath -HostPoolName $CurrentHostPool.Name
                     #>
+
+					<#
+                    $ModuleBase = Get-ModuleBase
+                    $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
+                    New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptPath $ScriptPath -HostPoolName $CurrentHostPool.Name -RunAsAccount "user"
+					#>
                 }
             }
 
@@ -8138,7 +8212,7 @@ function New-PsAvdPooledHostPoolSetup {
                     Copy-PsAvdMSIXDemoPFXFile -Source WebSite -ComputerName $SessionHostNames
                     #Copy-PsAvdMSIXDemoPFXFile -Source WebSite -HostPool $CurrentHostPool
                     #endregion 
-
+                    
                     #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
                     $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" -CimSession $SessionHostNames
@@ -8159,7 +8233,9 @@ function New-PsAvdPooledHostPoolSetup {
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
                         foreach ($CurrentMSIXDemoPackage in $HighestVersionMSIXDemoPackages) {
                             $obj = $null
-                            While ($null -eq $obj) {
+                            $ExpandMSIXImageStartTime = Get-Date
+                            While (($null -eq $obj) -and ((New-TimeSpan -Start $ExpandMSIXImageStartTime -End (Get-Date)).TotalMinutes -lt 15)){
+                                $Index++
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
                                 #Temporary Allowing storage account key access (disabled due to SFI)
                                 Do {
@@ -8178,23 +8254,28 @@ function New-PsAvdPooledHostPoolSetup {
                                     Start-Sleep -Seconds 30
                                 }
                             }
-
+                            if ($null -eq $obj) {
+                                Write-Error -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The MSIX Image '$CurrentMSIXDemoPackage' CAN'T be expanded"
+                                continue
+                            }
                             $DisplayName = "{0} (v{1})" -f $obj.PackageApplication.FriendlyName, $obj.Version
                             #$DisplayName = $obj.PackageApplication.FriendlyName
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName'..."
                             New-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -PackageAlias $obj.PackageAlias -DisplayName $DisplayName -ImagePath $CurrentMSIXDemoPackage -IsActive:$true
                             #Get-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName | Where-Object {$_.PackageFamilyName -eq $obj.PackageFamilyName}
-                        }
+                        } 
                         #endregion 
 
                         #region Publishing MSIX apps to application groups
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell#publish-msix-apps-to-an-application-group
                         #Publishing MSIX application to a desktop application group
-                        $SubscriptionId = $AzContext.Subscription.Id
-                        $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzDesktopApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0
+                        if ($null -ne $obj) { 
+                            $SubscriptionId = $AzContext.Subscription.Id
+                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzDesktopApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0
             
-                        #Publishing MSIX application to a RemoteApp application group
-                        $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $obj.PackageApplication.AppId
+                            #Publishing MSIX application to a RemoteApp application group
+                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $obj.PackageApplication.AppId
+                        }
                         #endregion 
                     }
                     #endregion
@@ -8771,6 +8852,7 @@ function New-PsAvdHostPoolSetup {
                 Function Get-WebSiteFile { ${Function:Get-WebSiteFile} }
                 Function Copy-PsAvdMSIXDemoAppAttachPackage { ${Function:Copy-PsAvdMSIXDemoAppAttachPackage} }
                 Function Copy-PsAvdMSIXDemoPFXFile { ${Function:Copy-PsAvdMSIXDemoPFXFile} }
+                Function Copy-PsAvdLogonScript { ${Function:Copy-PsAvdLogonScript} }
                 Function Get-PsAvdKeyVaultNameAvailability { ${Function:Get-PsAvdKeyVaultNameAvailability} }
                 Function Add-PsAvdSessionHost { ${Function:Add-PsAvdSessionHost} }                       
                 Function Get-PsAvdNextSessionHostName { ${Function:Get-PsAvdNextSessionHostName} }                       
@@ -8895,7 +8977,7 @@ function New-PsAvdHostPoolSetup {
         New-PsAvdAzureSiteRecoveryPolicyAssignment -HostPool $HostPool
 
         if ($WorkBook) {
-            #Importing some useful AVD Worbooks
+            #Importing some useful AVD WorkBooks
             Import-PsAvdWorkbook -Location $Location
         }
         
@@ -9533,7 +9615,7 @@ function Get-PsAvdAppAttachProfileShare {
     $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
     #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $MSIXAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MSIX.Azure.Tests.ps1'
+    $MSIXAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'AppAttach.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MSIXAzurePesterTests: $MSIXAzurePesterTests"
     $Container = New-PesterContainer -Path $MSIXAzurePesterTests -Data @{ HostPool = $HostPool }
     Invoke-Pester -Container $Container -Output Detailed
@@ -9898,13 +9980,14 @@ function Import-PsAvdWorkbook {
         "Deep Insights Workbook - AVD Accelerator"      = "https://raw.githubusercontent.com/Azure/avdaccelerator/main/workload/workbooks/deepInsightsWorkbook/deepInsights.workbook"
         #From https://github.com/scautomation/Azure-Inventory-Workbook/tree/master/galleryTemplate
         "Windows Virtual Desktop Workbook - Billy York" = "https://raw.githubusercontent.com/scautomation/WVD-Workbook/master/galleryTemplate/template.json"
-        #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
-        #Commented the line below because sometimes ==> Invoke-RestMethod : The remote name could not be resolved: 'blog.itprocloud.de'
-        #"AVD - Deep-Insights - ITProCloud"              = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json"
-        #Hsoting a copy on my own github
-        "AVD - Deep-Insights - ITProCloud"              = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
         #From https://github.com/microsoft/Application-Insights-Workbooks/tree/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights
         "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
+    }
+
+    $WorkBookTemplates = @{
+        #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
+        #Sometimes ==> Invoke-RestMethod : The remote name could not be resolved: 'blog.itprocloud.de' raised an error so I'm hosting a copy on my own github as fallback
+        "750ec0fd-74d1-4e80-be97-3001485303e8"          = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
     }
 
     [HostPool]::BuildAzureLocationSortNameHashtable()
@@ -9914,20 +9997,53 @@ function Import-PsAvdWorkbook {
         $null = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
     }
 
+    #region WorkBook
     #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
     foreach ($DisplayName in $WorkBooks.Keys) {
         $ExistingWorkBook = (Get-AzApplicationInsightsWorkbook -Category 'workbook' | Where-Object -FilterScript { $_.DisplayName -eq $DisplayName })
         if ($null -eq $ExistingWorkBook) {
-            $URI = $WorkBooks[$DisplayName]
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Workbook in the '$Location' Location from '$$URI'"
-            $Name = (New-Guid).ToString()
-            $WorkbookContent = Invoke-RestMethod -Uri $URI | ConvertTo-Json -Depth 100
-            $AzApplicationInsightsWorkbook = New-AzApplicationInsightsWorkbook -ResourceGroupName $ResourceGroupName -Name $Name -Location $Location -DisplayName $DisplayName -SourceId "microsoft_azure_wvd" -Category 'workbook' -SerializedData $workbookContent
+            foreach ($CurrentURI in $WorkBooks[$DisplayName]) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Workbook in the '$Location' Location from '$CurrentURI'"
+                $Name = (New-Guid).ToString()
+                try {
+                    #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
+                    $WorkbookContent = Invoke-RestMethod -Uri $CurrentURI -ErrorAction Stop | ConvertTo-Json -Depth 100
+                    $AzApplicationInsightsWorkbook = New-AzApplicationInsightsWorkbook -ResourceGroupName $ResourceGroupName -Name $Name -Location $Location -DisplayName $DisplayName -SourceId "microsoft_azure_wvd" -Category 'workbook' -SerializedData $workbookContent
+                    break
+                }
+                catch [System.Net.WebException] {
+                    Write-Warning  -Message $($_.Exception.Message)
+                }
+            }
         }
         else {
-            Write-Warning -Message "The '$DisplayName' Worbook already exists:`r`n:$($ExistingWorkBook | Out-String)"
+            Write-Warning -Message "The '$DisplayName' WorkBook already exists:`r`n:$($ExistingWorkBook | Out-String)"
         }
     }
+    #endregion
+
+    #region WorkBook Template
+    foreach ($DisplayName in $WorkBookTemplates.Keys) {
+        $ExistingWorkBookTemplate = Get-AzApplicationInsightsWorkBookTemplate -Name $DisplayName -ResourceGroupName $ResourceGroupName
+        if ($null -eq $ExistingWorkBookTemplate) {
+            foreach ($CurrentURI in $WorkBookTemplates[$DisplayName]) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
+                try {
+                    #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
+                	$ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI
+                    break
+                }
+                catch [System.Net.WebException] {
+                    Write-Warning  -Message $($_.Exception.Message)
+                }
+            }
+        }
+        else {
+            Write-Warning -Message "The '$DisplayName' WorkBook Template already exists:`r`n:$($ExistingWorkBookTemplate | Out-String)"
+        }
+    }
+    #endregion
+
     #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
     $ModuleBase = Get-ModuleBase
     $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
@@ -9938,6 +10054,18 @@ function Import-PsAvdWorkbook {
     $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBook = $WorkBooks }
     Invoke-Pester -Container $Container -Output Detailed
     #endregion
+
+    #region Pester Tests for Azure Host Pool - Workbook Template - Azure Instantiation
+    $ModuleBase = Get-ModuleBase
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+    $WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
+    $Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplate = $WorkBookTemplates; ResourceGroupName = $ResourceGroupName }
+    Invoke-Pester -Container $Container -Output Detailed
+    #endregion
+
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
