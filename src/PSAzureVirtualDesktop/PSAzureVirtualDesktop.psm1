@@ -1067,7 +1067,7 @@ function New-PsAvdNoMFAUserEntraIDGroup {
     #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $MFAAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MFA.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MFAAzurePesterTests: $MFAAzurePesterTests"
-    $Container = New-PesterContainer -Path $MFAAzurePesterTests -Data @{ HostPool = $HostPool }
+    $Container = New-PesterContainer -Path $MFAAzurePesterTests
     Invoke-Pester -Container $Container -Output Detailed
     #endregion
 
@@ -1081,7 +1081,7 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
         [string[]] $ExcludeGroupName = 'No-MFA Users',
         [string] $DisplayName = "[AVD] Require multifactor authentication for all users",
         [string[]] $IncludeUsers = @("All")
-    )
+)
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
@@ -5158,8 +5158,8 @@ function Copy-PsAvdLogonScript {
 
     #Copying the PFX to all session hosts
     $Session | ForEach-Object -Process { 
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($HelperScripts.FullName -join ', ' )' to $Destination"
-        Copy-Item -Path $ScriptPath -Destination $Destination -ToSession $Session -Force -PassThru
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$ScriptPath' to $Destination"
+        Copy-Item -Path $ScriptPath -Destination $Destination -ToSession $_ -Force -PassThru
     }
 
     $Session | Remove-PSSession
@@ -10024,7 +10024,7 @@ function Import-PsAvdWorkbook {
 
     #region WorkBook Template
     foreach ($DisplayName in $WorkBookTemplates.Keys) {
-        $ExistingWorkBookTemplate = Get-AzApplicationInsightsWorkBookTemplate -Name $DisplayName -ResourceGroupName $ResourceGroupName
+        $ExistingWorkBookTemplate = Get-AzApplicationInsightsWorkBookTemplate -Name $DisplayName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
         if ($null -eq $ExistingWorkBookTemplate) {
             foreach ($CurrentURI in $WorkBookTemplates[$DisplayName]) {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"

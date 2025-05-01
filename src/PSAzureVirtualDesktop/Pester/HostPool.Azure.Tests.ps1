@@ -1,5 +1,5 @@
 param (
-    #[Parameter(Mandatory)]
+    [Parameter(Mandatory)]
     [HostPool[]] $HostPool
 )
 
