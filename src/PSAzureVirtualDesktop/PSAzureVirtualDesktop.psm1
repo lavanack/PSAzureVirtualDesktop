@@ -8978,7 +8978,7 @@ function New-PsAvdHostPoolSetup {
 
         if ($WorkBook) {
             #Importing some useful AVD WorkBook Templates
-            Import-PsAvdWorkbookTemplate -HostPool $HostPool -Location $Location
+            $AzApplicationInsightsWorkbook = Import-PsAvdWorkbookTemplate -HostPool $HostPool -Location $Location
             #Importing some useful AVD WorkBooks
             Import-PsAvdWorkbook -Location $Location
         }
@@ -10019,7 +10019,7 @@ function Import-PsAvdWorkbookTemplate {
     #region Building a WorkBook for every HostPool
     $Data = Invoke-RestMethod -Uri https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json
     $SerializedData = $Data.resources[1].properties.templateData
-    foreach ($CurrentHostPool in $HostPool) {
+    $AzApplicationInsightsWorkbook = foreach ($CurrentHostPool in $HostPool) {
         $ResourceGroupName = $CurrentHostPool.GetResourceGroupName()
         $LogAnalyticsWorkSpaceName = $CurrentHostPool.GetLogAnalyticsWorkSpaceName()
 
@@ -10038,11 +10038,23 @@ function Import-PsAvdWorkbookTemplate {
     #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
-    $Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplate = $WorkBookTemplates; ResourceGroupName = $ResourceGroupName }
+    $Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplateName = $WorkBookTemplates.Keys; ResourceGroupName = $ResourceGroupName }
+    Invoke-Pester -Container $Container -Output Detailed
+    #endregion
+
+    #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
+    $ModuleBase = Get-ModuleBase
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+    $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
+    $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $AzApplicationInsightsWorkbook.DisplayName }
     Invoke-Pester -Container $Container -Output Detailed
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+	return $AzApplicationInsightsWorkbook
 }
 
 function Import-PsAvdWorkbook {
@@ -10102,7 +10114,7 @@ function Import-PsAvdWorkbook {
     #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
     $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
-    $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBook = $WorkBooks }
+    $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $WorkBooks.Keys }
     Invoke-Pester -Container $Container -Output Detailed
     #endregion
 
