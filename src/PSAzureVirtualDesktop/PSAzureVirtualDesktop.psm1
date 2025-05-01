@@ -58,11 +58,11 @@ Class HostPool {
     static [uint16] $VMProfileOsdiskSizeGb = 127
     
     static [string] GetAzLocationShortName([string] $Location) {
-        #[HostPool]::BuildAzureLocationSortNameHashtable()    
+        #[HostPool]::BuildAzureLocationShortNameHashtable()    
         return [HostPool]::AzLocationShortNameHT[$Location].shortName
     }
 
-    hidden static BuildAzureLocationSortNameHashtable() {
+    hidden static BuildAzureLocationShortNameHashtable() {
         if ($null -eq [HostPool]::AzLocationShortNameHT) {
             $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
             $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
@@ -113,7 +113,7 @@ Class HostPool {
     }
 
     hidden Init([Object] $KeyVault, [string] $SubnetId) {
-        [HostPool]::BuildAzureLocationSortNameHashtable()
+        [HostPool]::BuildAzureLocationShortNameHashtable()
         if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
         }
@@ -3246,7 +3246,7 @@ function New-PsAvdPrivateDnsZoneSetup {
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-    [HostPool]::BuildAzureLocationSortNameHashtable()
+    [HostPool]::BuildAzureLocationShortNameHashtable()
 
     $PrivateDnsZoneSetup = @{}
 
@@ -3507,7 +3507,7 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     Write-Host -Object "Azure Key Vault Setup"
     $StartTime = Get-Date
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
-    [HostPool]::BuildAzureLocationSortNameHashtable()
+    [HostPool]::BuildAzureLocationShortNameHashtable()
     #endregion
     
     $Index = 0
@@ -4005,7 +4005,7 @@ function New-AzureComputeGallery {
 
     <#
     if ($null -eq [HostPool]::AzLocationShortNameHT) {
-        [HostPool]::BuildAzureLocationSortNameHashtable()
+        [HostPool]::BuildAzureLocationShortNameHashtable()
         $shortNameHT = [HostPool]::AzLocationShortNameHT
     }
     #>
@@ -8977,6 +8977,8 @@ function New-PsAvdHostPoolSetup {
         New-PsAvdAzureSiteRecoveryPolicyAssignment -HostPool $HostPool
 
         if ($WorkBook) {
+            #Importing some useful AVD WorkBook Templates
+            Import-PsAvdWorkbookTemplate -HostPool $HostPool -Location $Location
             #Importing some useful AVD WorkBooks
             Import-PsAvdWorkbook -Location $Location
         }
@@ -9776,7 +9778,7 @@ function New-PsAvdAzureSiteRecoveryPolicyAssignment {
     [HostPool]::BuildAzurePairedRegionHashtable()
 
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
-    [HostPool]::BuildAzureLocationSortNameHashtable()
+    [HostPool]::BuildAzureLocationShortNameHashtable()
     #endregion
 
     $HostPoolWithAzureSiteRecovery = $HostPool | Where-Object -FilterScript { -not([string]::IsNullOrEmpty($_.ASRFailOverVNetId)) }
@@ -9881,7 +9883,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     $StartTime = Get-Date
 
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
-    [HostPool]::BuildAzureLocationSortNameHashtable()
+    [HostPool]::BuildAzureLocationShortNameHashtable()
     #endregion
 
     $Index = 1
@@ -9966,6 +9968,83 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     }
 }
 
+function Import-PsAvdWorkbookTemplate {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [HostPool[]] $HostPool,
+
+        [Parameter(Mandatory = $false)]
+        [string] $Location = "EastUs"
+    )
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
+    $WorkBookTemplates = @{
+        #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
+        #Sometimes ==> Invoke-RestMethod : The remote name could not be resolved: 'blog.itprocloud.de' raised an error so I'm hosting a copy on my own github as fallback
+        "750ec0fd-74d1-4e80-be97-3001485303e8"          = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
+    }
+
+    [HostPool]::BuildAzureLocationShortNameHashtable()
+    $ResourceGroupName = "rg-avd-workbook-poc-{0}-001" -f [HostPool]::GetAzLocationShortName($Location)
+    if ($null -eq (Get-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Ignore)) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group in the '$Location' Location"
+        $null = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
+    }
+
+    #region WorkBook Template
+    foreach ($DisplayName in $WorkBookTemplates.Keys) {
+        $ExistingWorkBookTemplate = Get-AzApplicationInsightsWorkBookTemplate -Name $DisplayName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
+        if ($null -eq $ExistingWorkBookTemplate) {
+            foreach ($CurrentURI in $WorkBookTemplates[$DisplayName]) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
+                try {
+                    #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
+                	$ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI
+                    break
+                }
+                catch [System.Net.WebException] {
+                    Write-Warning  -Message $($_.Exception.Message)
+                }
+            }
+        }
+        else {
+            Write-Warning -Message "The '$DisplayName' WorkBook Template already exists:`r`n:$($ExistingWorkBookTemplate | Out-String)"
+        }
+    }
+    #endregion
+
+    #region Building a WorkBook for every HostPool
+    $Data = Invoke-RestMethod -Uri https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json
+    $SerializedData = $Data.resources[1].properties.templateData
+    foreach ($CurrentHostPool in $HostPool) {
+        $ResourceGroupName = $CurrentHostPool.GetResourceGroupName()
+        $LogAnalyticsWorkSpaceName = $CurrentHostPool.GetLogAnalyticsWorkSpaceName()
+
+        $Name = (New-Guid).Guid
+        $DisplayName = "Azure Virtual Desktop - Deep-Insights - {0}" -f $LogAnalyticsWorkSpaceName
+        $LogAnalyticsWorkSpace = Get-AzOperationalInsightsWorkspace -ResourceGroupName $ResourceGroupName -Name $LogAnalyticsWorkSpaceName
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Azure Workbook in the '$ResourceGroupName' ResourceGroup"
+        New-AzApplicationInsightsWorkbook -ResourceGroupName $ResourceGroupName -Name $Name -Location $Location -DisplayName $DisplayName -LinkedSourceId $LogAnalyticsWorkSpace.ResourceId -Category 'workbook' -SerializedData $SerializedData -Version "Notebook/1.0" -IdentityType 'None'
+    }
+    #endregion
+
+    #region Pester Tests for Azure Host Pool - Workbook Template - Azure Instantiation
+    $ModuleBase = Get-ModuleBase
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+    $WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
+    $Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplate = $WorkBookTemplates; ResourceGroupName = $ResourceGroupName }
+    Invoke-Pester -Container $Container -Output Detailed
+    #endregion
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
 function Import-PsAvdWorkbook {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
@@ -9984,13 +10063,7 @@ function Import-PsAvdWorkbook {
         "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
     }
 
-    $WorkBookTemplates = @{
-        #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
-        #Sometimes ==> Invoke-RestMethod : The remote name could not be resolved: 'blog.itprocloud.de' raised an error so I'm hosting a copy on my own github as fallback
-        "750ec0fd-74d1-4e80-be97-3001485303e8"          = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
-    }
-
-    [HostPool]::BuildAzureLocationSortNameHashtable()
+    [HostPool]::BuildAzureLocationShortNameHashtable()
     $ResourceGroupName = "rg-avd-workbook-poc-{0}-001" -f [HostPool]::GetAzLocationShortName($Location)
     if ($null -eq (Get-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Ignore)) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group in the '$Location' Location"
@@ -10022,28 +10095,6 @@ function Import-PsAvdWorkbook {
     }
     #endregion
 
-    #region WorkBook Template
-    foreach ($DisplayName in $WorkBookTemplates.Keys) {
-        $ExistingWorkBookTemplate = Get-AzApplicationInsightsWorkBookTemplate -Name $DisplayName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
-        if ($null -eq $ExistingWorkBookTemplate) {
-            foreach ($CurrentURI in $WorkBookTemplates[$DisplayName]) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
-                try {
-                    #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
-                	$ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI
-                    break
-                }
-                catch [System.Net.WebException] {
-                    Write-Warning  -Message $($_.Exception.Message)
-                }
-            }
-        }
-        else {
-            Write-Warning -Message "The '$DisplayName' WorkBook Template already exists:`r`n:$($ExistingWorkBookTemplate | Out-String)"
-        }
-    }
-    #endregion
-
     #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
     $ModuleBase = Get-ModuleBase
     $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
@@ -10052,17 +10103,6 @@ function Import-PsAvdWorkbook {
     $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
     $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBook = $WorkBooks }
-    Invoke-Pester -Container $Container -Output Detailed
-    #endregion
-
-    #region Pester Tests for Azure Host Pool - Workbook Template - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
-    $Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplate = $WorkBookTemplates; ResourceGroupName = $ResourceGroupName }
     Invoke-Pester -Container $Container -Output Detailed
     #endregion
 
