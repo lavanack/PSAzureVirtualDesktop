@@ -9617,9 +9617,9 @@ function Get-PsAvdAppAttachProfileShare {
     $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
     #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $MSIXAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'AppAttach.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MSIXAzurePesterTests: $MSIXAzurePesterTests"
-    $Container = New-PesterContainer -Path $MSIXAzurePesterTests -Data @{ HostPool = $HostPool }
+    $AppAttachAzurePesterTest = Join-Path -Path $PesterDirectory -ChildPath 'AppAttach.Azure.Tests.ps1'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachAzurePesterTest: $AppAttachAzurePesterTest"
+    $Container = New-PesterContainer -Path $AppAttachAzurePesterTest -Data @{ HostPool = $HostPool }
     Invoke-Pester -Container $Container -Output Detailed
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -10020,7 +10020,6 @@ function Import-PsAvdWorkbookTemplate {
     $Data = Invoke-RestMethod -Uri https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json
     $SerializedData = $Data.resources[1].properties.templateData
     $AzApplicationInsightsWorkbook = foreach ($CurrentHostPool in $HostPool) {
-        $ResourceGroupName = $CurrentHostPool.GetResourceGroupName()
         $LogAnalyticsWorkSpaceName = $CurrentHostPool.GetLogAnalyticsWorkSpaceName()
 
         $Name = (New-Guid).Guid
