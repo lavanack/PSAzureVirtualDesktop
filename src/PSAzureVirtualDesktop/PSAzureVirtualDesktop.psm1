@@ -5097,11 +5097,11 @@ function Copy-PsAvdMSIXDemoPFXFile {
 
     #Copying the PFX to all session hosts
     $Session | ForEach-Object -Process { 
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($DownloadedPFXFiles.FullName -join ', ' )' to C:\"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($DownloadedPFXFiles.FullName -join ', ' )' to $Destination"
         Copy-Item -Path $DownloadedPFXFiles.FullName -Destination C:\ -ToSession $_ -Force
     }
 
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($DownloadedPFXFiles.FullName -join ', ' )' to C:\"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$($DownloadedPFXFiles.FullName -join ', ' )' to $Destination"
 
     $ImportPfxCertificates = Invoke-Command -Session $Session -ScriptBlock {
         $using:DownloadedPFXFiles | ForEach-Object -Process { 
@@ -5123,26 +5123,28 @@ function Copy-PsAvdMSIXDemoPFXFile {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
-function Copy-PsAvdLogonScript {
+function Copy-PsAvdHelperScript {
     [CmdletBinding(PositionalBinding = $false)]
     param
     (
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()] 
         [string[]] $ComputerName,
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()] 
+        [string]$Source,
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()] 
-        [string] $Destination = "C:\Scripts",
+        [string] $Destination = "C:\Scripts\",
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()] 
-        [System.Management.Automation.PSCredential]$Credential,
-        [Parameter(Mandatory = $false)]
-        [ValidateNotNull()] 
-        [System.Security.SecureString]$SecurePassword = $(ConvertTo-SecureString -String "P@ssw0rd" -AsPlainText -Force)
+        [System.Management.Automation.PSCredential]$Credential
     )   
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    #Adding a final \ to be sure $Destination be processed as a directory
+    $Destination = Join-Path -Path $Destination -ChildPath \
 
     if ($Credential) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Credential was specified"
@@ -5152,14 +5154,11 @@ function Copy-PsAvdLogonScript {
         $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
     }
 
-    $ModuleBase = Get-ModuleBase
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
-
     #Copying the PFX to all session hosts
     $Session | ForEach-Object -Process { 
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$ScriptPath' to $Destination"
-        Copy-Item -Path $ScriptPath -Destination $Destination -ToSession $_ -Force -PassThru
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$Source' to $Destination"
+        $null = New-Item -Path $Destination -ItemType Directory -Force
+        Copy-Item -Path $Source -Destination $Destination -ToSession $_ -Force -PassThru
     }
 
     $Session | Remove-PSSession
@@ -6646,7 +6645,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #https://learn.microsoft.com/en-us/fslogix/reference-service-drivers-components#fslogix-profile-status-retired-frxtrayexe
                     #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ValueName "frxtray" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value "C:\Program Files\FSLogix\Apps\frxtray.exe"
 
-                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' -ValueName "LogonScript" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 'powershell.exe -ExecutionPolicy ByPass -File "C:\Scripts\Send-FSlogixProfileToastNotification.ps1"'
+                    #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' -ValueName "LogonScript" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 'powershell.exe -ExecutionPolicy ByPass -File "C:\Scripts\Send-FSlogixProfileToastNotification.ps1"'
 
                     $CurrentHostPoolStorageAccountProfileSharePath = "\\{0}.file.{1}\profiles" -f $CurrentHostPoolStorageAccountName, $StorageEndpointSuffix
                     if ($CurrentHostPool.FSLogixCloudCache) {
@@ -8051,7 +8050,14 @@ function New-PsAvdPooledHostPoolSetup {
                 #region Copying The Logon Script on Session Host(s)
                 #$result = Wait-PSSession -ComputerName $SessionHostNames
                 #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
-                Copy-PsAvdLogonScript -ComputerName $SessionHostNames
+                $ModuleBase = Get-ModuleBase
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
+                Copy-PsAvdHelperScript -Source $Source -Destination C:\Scripts\ -ComputerName $SessionHostNames
+
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
+                Copy-PsAvdHelperScript -Source $Source -Destination "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -ComputerName $SessionHostNames
                 #endregion 
             }
 
@@ -8068,7 +8074,16 @@ function New-PsAvdPooledHostPoolSetup {
                 #region Copying The Logon Script on Session Host(s)
                 #$result = Wait-PSSession -ComputerName $SessionHostNames
                 #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
-                Copy-PsAvdLogonScript -ComputerName $SessionHostNames -Credential $LocalAdminCredential
+                $ModuleBase = Get-ModuleBase
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
+                Copy-PsAvdHelperScript -Source $Source -Destination C:\Scripts\ -ComputerName $SessionHostNames -Credential $LocalAdminCredential
+
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
+                Copy-PsAvdHelperScript -Source $Source -Destination "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -ComputerName $SessionHostNames -Credential $LocalAdminCredential
+                #endregion 
+
                 #endregion 
 
                 foreach ($CurrentSessionHostName in $SessionHostNames) {
@@ -8852,7 +8867,7 @@ function New-PsAvdHostPoolSetup {
                 Function Get-WebSiteFile { ${Function:Get-WebSiteFile} }
                 Function Copy-PsAvdMSIXDemoAppAttachPackage { ${Function:Copy-PsAvdMSIXDemoAppAttachPackage} }
                 Function Copy-PsAvdMSIXDemoPFXFile { ${Function:Copy-PsAvdMSIXDemoPFXFile} }
-                Function Copy-PsAvdLogonScript { ${Function:Copy-PsAvdLogonScript} }
+                Function Copy-PsAvdHelperScript { ${Function:Copy-PsAvdHelperScript} }
                 Function Get-PsAvdKeyVaultNameAvailability { ${Function:Get-PsAvdKeyVaultNameAvailability} }
                 Function Add-PsAvdSessionHost { ${Function:Add-PsAvdSessionHost} }                       
                 Function Get-PsAvdNextSessionHostName { ${Function:Get-PsAvdNextSessionHostName} }                       
@@ -10021,10 +10036,11 @@ function Import-PsAvdWorkbookTemplate {
     $SerializedData = $Data.resources[1].properties.templateData
     $AzApplicationInsightsWorkbook = foreach ($CurrentHostPool in $HostPool) {
         $LogAnalyticsWorkSpaceName = $CurrentHostPool.GetLogAnalyticsWorkSpaceName()
+        $LogAnalyticsWorkSpaceResourceGroupName = $CurrentHostPool.GetResourceGroupName()
 
         $Name = (New-Guid).Guid
         $DisplayName = "Azure Virtual Desktop - Deep-Insights - {0}" -f $LogAnalyticsWorkSpaceName
-        $LogAnalyticsWorkSpace = Get-AzOperationalInsightsWorkspace -ResourceGroupName $ResourceGroupName -Name $LogAnalyticsWorkSpaceName
+        $LogAnalyticsWorkSpace = Get-AzOperationalInsightsWorkspace -ResourceGroupName $LogAnalyticsWorkSpaceResourceGroupName -Name $LogAnalyticsWorkSpaceName
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Azure Workbook in the '$ResourceGroupName' ResourceGroup"
         New-AzApplicationInsightsWorkbook -ResourceGroupName $ResourceGroupName -Name $Name -Location $Location -DisplayName $DisplayName -LinkedSourceId $LogAnalyticsWorkSpace.ResourceId -Category 'workbook' -SerializedData $SerializedData -Version "Notebook/1.0" -IdentityType 'None'
     }
