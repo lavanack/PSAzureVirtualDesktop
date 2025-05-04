@@ -15,7 +15,7 @@ Our suppliers from and against any claims or lawsuits, including
 attorneys' fees, that arise or result from the use or distribution
 of the Sample Code.
 #>
-#requires -Version 5
+#requires -Version 5 -Modules Storage
 
 [CmdletBinding(PositionalBinding = $false)]
 Param (
@@ -26,7 +26,7 @@ function Send-FSlogixProfileToastNotification {
     [CmdletBinding(PositionalBinding = $false)]
     Param (
         [string] $FileSystemLabel = "*Profile-$ENV:USERNAME*",
-        [int] $TimeoutInMs = 5000
+        [int] $TimeoutInMs = 10000
     )
     # Get the relevant informations from the FSLogix profile
     $FSLogixProfileVolume = Get-Volume -FileSystemLabel $FileSystemLabel | Where-Object -FilterScript { $_.DriveType -eq 'Fixed' }
@@ -75,9 +75,11 @@ $CurrentScript = $MyInvocation.MyCommand.Path
 $CurrentDir = Split-Path -Path $CurrentScript -Parent
 Set-Location -Path $CurrentDir
 
+<#
 # Wait 10 sec. till showing the message
 Start-Sleep -Seconds 10
+#>
 
-#Send-FSlogixProfileToastNotification -FileSystemLabel $env:USERNAME -TimeoutInMs 10000 -Verbose
-Send-FSlogixProfileToastNotification -Verbose
+#Send-FSlogixProfileToastNotification -FileSystemLabel Windows -TimeoutInMs 5000 -Verbose
+Send-FSlogixProfileToastNotification
 #endregion

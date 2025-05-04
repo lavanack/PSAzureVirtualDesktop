@@ -5154,16 +5154,22 @@ function Copy-PsAvdHelperScript {
         $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
     }
 
-    #Copying the PFX to all session hosts
-    $Session | ForEach-Object -Process { 
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$Source' to $Destination"
-        $null = New-Item -Path $Destination -ItemType Directory -Force
-        Copy-Item -Path $Source -Destination $Destination -ToSession $_ -Force -PassThru
+    Invoke-Command -Session $Session -ScriptBlock {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Creating '$($using:Destination)' Folder"
+        $null = New-Item -Path $using:Destination -ItemType Directory -Force
+    }
+
+    #Copying the files to all session hosts
+    $Items =  $Session | ForEach-Object -Process { 
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$Source' to '$Destination'"
+        #https://github.com/dotnet/runtime/issues/39831
+        Copy-Item -Path $Source -Destination $Destination -ToSession $_ -Force -PassThru -ErrorAction Ignore
     }
 
     $Session | Remove-PSSession
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+    return $Items
 }
 
 function Wait-PSSession {
@@ -8045,6 +8051,47 @@ function New-PsAvdPooledHostPoolSetup {
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             #endregion
+
+            if ($CurrentHostPool.FSLogix) {
+                $Destination = "C:\Scripts\"
+
+                #Adding a link for running a script for every logged in user
+                $StartupScriptString = @"
+`$Shell = New-Object -ComObject WScript.Shell
+`$Shortcut = `$Shell.CreateShortcut("`$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\FSlogixProfileToastNotification.lnk")
+`$Shortcut.TargetPath = "$(Join-Path -Path $Destination -ChildPath 'Send-FSlogixProfileToastNotification.cmd')"
+`$Shortcut.Save()
+"@
+
+                #Or Adding a scheduled task for running a script for every logged in user
+                $ScheduledTaskScriptString = @"
+`$ActionParameters = @{
+    Execute  = 'powershell.exe'
+    Argument = '-NoProfile -File "$(Join-Path -Path $Destination -ChildPath 'Send-FSlogixProfileToastNotification.ps1')"'
+}
+`$Action = New-ScheduledTaskAction @ActionParameters
+
+`$class = cimclass MSFT_TaskEventTrigger root/Microsoft/Windows/TaskScheduler
+<#
+`$Trigger = `$class | New-CimInstance -ClientOnly
+`$Trigger.Enabled = `$True
+`$Trigger.Subscription = '<QueryList><Query Id="0" Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational"><Select Path="Microsoft-Windows-TerminalServices-LocalSessionManager/Operational">*[System[Provider[@Name="Microsoft-Windows-TerminalServices-LocalSessionManager"] and EventID=21]]</Select></Query></QueryList>'
+#>
+`$Trigger = New-ScheduledTaskTrigger -AtLogOn
+`$Trigger.Enabled = $True
+
+`$Principal = New-ScheduledTaskPrincipal -RunLevel Highest -GroupId "Users"
+`$Settings = New-ScheduledTaskSettingsSet -Priority 7 -ExecutionTimeLimit `$(New-TimeSpan -Hours 1) -AllowStartIfOnBatteries -Compatibility Win8 -StartWhenAvailable
+`$Task = New-ScheduledTask -Action `$Action -Trigger `$Trigger -Principal `$Principal -Settings `$Settings
+Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputObject `$Task -Force
+"@
+
+
+                foreach ($CurrentSessionHostName in $SessionHostNames) {
+                    $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $CurrentHostPoolResourceGroupName -VMName $CurrentSessionHostName -ScriptString $StartupScriptString
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [$($VMName)] $($ScriptBlock):`r`n$($RunPowerShellScript | Out-String)"
+                }
+            }
              
             if (($CurrentHostPool.IsActiveDirectoryJoined()) -and ($CurrentHostPool.FSLogix)) {
                 #region Copying The Logon Script on Session Host(s)
@@ -8053,11 +8100,12 @@ function New-PsAvdPooledHostPoolSetup {
                 $ModuleBase = Get-ModuleBase
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
 
-                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
-                Copy-PsAvdHelperScript -Source $Source -Destination C:\Scripts\ -ComputerName $SessionHostNames
-
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.*"
+                $Items = Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostNames
+                <#
                 $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
                 Copy-PsAvdHelperScript -Source $Source -Destination "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -ComputerName $SessionHostNames
+                #>
                 #endregion 
             }
 
@@ -8077,11 +8125,13 @@ function New-PsAvdPooledHostPoolSetup {
                 $ModuleBase = Get-ModuleBase
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
 
-                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
-                Copy-PsAvdHelperScript -Source $Source -Destination C:\Scripts\ -ComputerName $SessionHostNames -Credential $LocalAdminCredential
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.*"
+                $Items = Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostNames -Credential $LocalAdminCredential
 
+                <#
                 $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
                 Copy-PsAvdHelperScript -Source $Source -Destination "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -ComputerName $SessionHostNames -Credential $LocalAdminCredential
+                #>
                 #endregion 
 
                 #endregion 
