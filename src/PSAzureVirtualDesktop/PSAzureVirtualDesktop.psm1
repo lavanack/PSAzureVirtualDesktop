@@ -8058,7 +8058,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #Adding a link for running a script for every logged in user
                 $StartupScriptString = @"
 `$Shell = New-Object -ComObject WScript.Shell
-`$Shortcut = `$Shell.CreateShortcut("`$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\FSlogixProfileToastNotification.lnk")
+`$Shortcut = `$Shell.CreateShortcut("`$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Send-FSlogixProfileToastNotification.lnk")
 `$Shortcut.TargetPath = "$(Join-Path -Path $Destination -ChildPath 'Send-FSlogixProfileToastNotification.cmd')"
 `$Shortcut.Save()
 "@
@@ -9061,7 +9061,7 @@ function New-PsAvdHostPoolSetup {
         
         if ($RDCMan) {
             #region Running RDCMan to connect to all Session Hosts (for administration purpose if needed)
-            New-PsAvdRdcMan -HostPool $HostPool -Install -Open
+            New-PsAvdRdcMan -HostPool $HostPool -Update -Install -Open
             #endregion
         }
 
@@ -9119,7 +9119,7 @@ function Restart-PsAvdSessionHost {
     if ($Wait) {
         Write-Host -Object "Waiting for all restarts"
         $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
-        Write-Host -Object "All restarts complete"
+        Write-Host -Object "All restarts completed"
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -9945,8 +9945,6 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
-    $StartTime = Get-Date
-
     #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
     [HostPool]::BuildAzureLocationShortNameHashtable()
     #endregion
@@ -9972,13 +9970,11 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     #endregion
 
     #region AMBA Template Deployment
-    $hostPoolInfo = @()
-    $storageAccountResourceIds = @()
     foreach ($CurrentHostPool in $HostPools) {
+        $storageAccountResourceIds = @()
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)' HostPool ..."
-        $colHostPoolName = (Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id
-        $colVMresGroup = (Get-AzResourceGroup -Name $CurrentHostPool.GetResourceGroupName() -Location $CurrentHostPool.Location).ResourceId
-        $hostPoolInfo += @{colHostPoolName = $colHostPoolName; colVMresGroup = $colVMresGroup }
+        $HostPoolId = (Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id -as [array]
+        $AVDResourceGroupId = (Get-AzResourceGroup -Name $CurrentHostPool.GetResourceGroupName()).ResourceId
 
         if ($CurrentHostPool.MSIX) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' MSIX: $($CurrentHostPool.MSIX)"
@@ -9996,36 +9992,43 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
             $storageAccountResourceIds += $StorageAccount.Id
         }
 
-    }
-    $TemplateParameterObject = @{
-        "optoutTelemetry"                 = $false
-        "AlertNamePrefix"                 = "AVD"
-        "AllResourcesSameRG"              = $false
-        "AutoResolveAlert"                = $true
-        "DistributionGroup"               = (Get-AzContext).Account.Id
-        "Environment"                     = "t"
-        "hostPoolInfo"                    = $hostPoolInfo
-        "location"                        = $Location
-        "logAnalyticsWorkspaceResourceId" = $LogAnalyticsWorkSpace.ResourceId
-        "resourceGroupName"               = $ResourceGroup.ResourceGroupName
-        "resourceGroupStatus"             = "Existing"
-        "storageAccountResourceIds"       = $storageAccountResourceIds
-    }
-    $TemplateParameterObject | ConvertTo-Json -Depth 100 | Set-Clipboard
-    Write-Host -Object "Starting Subscription Deployment from '$TemplateFile' ..."
-    $Attempts = 0
-    Do {
-        $Attempts++
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Attempts: $Attempts"
-        #Don't know why but the first deployment always fails
-        $SubscriptionDeployment = New-AzDeployment -Location $Location -TemplateFile $TemplateFile -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore #-Verbose
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Subscription Deployment Provisioning State: $($SubscriptionDeployment.ProvisioningState)"
-    }  while (($SubscriptionDeployment.ProvisioningState -ne "Succeeded") -and ($Attempts -lt 3))
-    #endregion
+        $TemplateParameterObject = @{
+            "optoutTelemetry"                 = $true
+            "AlertNamePrefix"                 = "AVD"
+            "AllResourcesSameRG"              = $true
+            "AutoResolveAlert"                = $true
+            "DistributionGroup"               = (Get-AzContext).Account.Id
+            "Environment"                     = "t"
+            "hostPoolInfo"                    = $hostPoolInfo
+            "HostPools"                        = $HostPoolId
+            "location"                        = $Location
+            "logAnalyticsWorkspaceResourceId" = $LogAnalyticsWorkSpace.ResourceId
+            "resourceGroupName"               = $ResourceGroup.ResourceGroupName
+            "AVDResourceGroupId"              = $AVDResourceGroupId
+            "resourceGroupStatus"             = "Existing"
+            "storageAccountResourceIds"       = $storageAccountResourceIds
+        }
 
-    $EndTime = Get-Date
-    $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
-    Write-Host -Object "Azure Subscription Deployment Processing Time: $($TimeSpan.ToString())"
+        $StartTime = Get-Date
+
+        Write-Host -Object "Starting Subscription Deployment from '$TemplateFile' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
+        $Index = 0
+        Do {
+            $Index++
+            #Don't know why but sometimes the first deployment fails
+            $Result = New-AzDeployment -Location $Location -TemplateFile $TemplateFile -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
+            Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
+        } Until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge 2))
+
+        if ($Result.ProvisioningState -ne "Succeeded") {
+            Write-Warning -Message "The Subscription Deployment from '$TemplateFile' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
+        }
+        
+        $EndTime = Get-Date
+        $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
+        Write-Host -Object "Azure Subscription Deployment Processing Time: $($TimeSpan.ToString())"
+    }
+    #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     if ($PassThru) {
