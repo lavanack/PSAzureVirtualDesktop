@@ -9050,7 +9050,7 @@ function New-PsAvdHostPoolSetup {
         
         if ($AMBA) {
             #Setting up Azure Monitor Baseline Alerts for Azure Virtual Desktop
-            $AMBAResourceGroup = New-PsAvdAzureMonitorBaselineAlertsDeployment -Location $Location -HostPool $HostPool -PassThru
+            $AMBAResourceGroup = New-PsAvdAzureMonitorBaselineAlertsDeployment -Location $Location -HostPool $HostPool -Enabled -PassThru
         }
 
         if ($Restart) {
@@ -9939,6 +9939,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         [Parameter(Mandatory = $false)]
         [string] $Location = "EastUs",
         
+        [switch] $Enabled,
         [switch] $PassThru
     )
 
@@ -9964,13 +9965,13 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     #region AMBA Template Download
     $AMBAAVDURI = "https://raw.githubusercontent.com/Azure/azure-monitor-baseline-alerts/main/patterns/avd/avdArm.json"
     $TemplateFileName = Split-Path -Path $AMBAAVDURI -Leaf
-    $TemplateFile = Join-Path -Path $env:Temp -ChildPath $TemplateFileName
-    Invoke-RestMethod -Uri $AMBAAVDURI -OutFile $TemplateFile
+    $TemplateFilePath = Join-Path -Path $env:Temp -ChildPath $TemplateFileName
+    Invoke-RestMethod -Uri $AMBAAVDURI -OutFile $TemplateFilePath
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TemplateFilePath: $TemplateFilePath ..."
     #endregion
 
     #region AMBA Template Deployment
-    foreach ($CurrentHostPool in $HostPools) {
+    foreach ($CurrentHostPool in $HostPool) {
         $storageAccountResourceIds = @()
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)' HostPool ..."
         $HostPoolId = (Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id -as [array]
@@ -10016,7 +10017,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         Do {
             $Index++
             #Don't know why but sometimes the first deployment fails
-            $Result = New-AzDeployment -Location $Location -TemplateFile $TemplateFile -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
+            $Result = New-AzDeployment -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
         } Until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge 2))
 
@@ -10030,6 +10031,11 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     }
     #endregion
 
+    if ($Enabled) {
+        Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPool.Name -join "|") } | ForEach-Object -Process { $_.Enabled = $true; $_ | Add-AzMetricAlertRuleV2}
+        Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match $($HostPool.Name -join "|") } | Update-AzScheduledQueryRule -Enabled
+        Get-AzActivityLogAlert -ResourceGroupName $ResourceGroupName | Update-AzActivityLogAlert -Enabled $true
+    }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     if ($PassThru) {
         return $ResourceGroup
