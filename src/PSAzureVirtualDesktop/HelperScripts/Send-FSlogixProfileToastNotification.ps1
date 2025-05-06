@@ -42,15 +42,17 @@ function Send-FSlogixProfileToastNotification {
         $global:BalMsg = New-Object System.Windows.Forms.NotifyIcon
 
         $bodyText = "($PercentFree% free - $SizeRemainingInGB GB remaining)."
-        # If free space is less then 10 % show message
+        # If free space is less than 10 % show message with Error logo
         if ($PercentFree -le 10) {
             $HeadlineText = 'Your profile contingent is almost exhausted. Please inform the IT service!'
             $BalMsg.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Error
         }
+        # If free space is less than 20 % show message with Warning logo
         elseif ($PercentFree -le 20) {
             $HeadlineText = "Your profile contingent is very busy. Please inform the IT service!"
             $BalMsg.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Warning
         }
+        # If free space is greater than 20 % show message with Info logo
         else {
             $HeadlineText = "Your profile contingent has enough space storage."
             $BalMsg.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Info
