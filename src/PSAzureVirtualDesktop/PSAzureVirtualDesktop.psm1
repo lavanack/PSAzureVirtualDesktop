@@ -10012,19 +10012,19 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
 
         $StartTime = Get-Date
 
-        Write-Host -Object "Starting Subscription Deployment from '$TemplateFile' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
         $Index = 0
+		$Limit = 5
         Do {
             $Index++
+            Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
             #Don't know why but sometimes the first deployment fails
             $Result = New-AzDeployment -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
-        } Until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge 2))
+			if ($Result.ProvisioningState -ne "Succeeded") {
+				Write-Warning -Message "[$Index/$Limit] The Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
+			}
+        } Until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge $Limit))
 
-        if ($Result.ProvisioningState -ne "Succeeded") {
-            Write-Warning -Message "The Subscription Deployment from '$TemplateFile' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
-        }
-        
         $EndTime = Get-Date
         $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
         Write-Host -Object "Azure Subscription Deployment Processing Time: $($TimeSpan.ToString())"
@@ -10032,9 +10032,12 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     #endregion
 
     if ($Enabled) {
-        Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPool.Name -join "|") } | ForEach-Object -Process { $_.Enabled = $true; $_ | Add-AzMetricAlertRuleV2}
-        Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match $($HostPool.Name -join "|") } | Update-AzScheduledQueryRule -Enabled
-        Get-AzActivityLogAlert -ResourceGroupName $ResourceGroupName | Update-AzActivityLogAlert -Enabled $true
+        if ($Result.ProvisioningState -eq "Succeeded") {
+            Write-Verbose -Message "Enabling the Alert rules" 
+		    Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPool.Name -join "|") } | ForEach-Object -Process { $_.Enabled = $true; $_ | Add-AzMetricAlertRuleV2}
+            Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match $($HostPool.Name -join "|") } | Update-AzScheduledQueryRule -Enabled
+            Get-AzActivityLogAlert -ResourceGroupName $ResourceGroupName | Update-AzActivityLogAlert -Enabled $true
+        }
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     if ($PassThru) {
