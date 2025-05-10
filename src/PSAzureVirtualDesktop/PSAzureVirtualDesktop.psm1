@@ -33,6 +33,7 @@ Class HostPool {
     [boolean] $Spot
     [boolean] $ScalingPlan
     [boolean] $Watermarking
+    [boolean] $SSO
 
     hidden [string] $PairedRegion
     hidden [string] $ResourceGroupName
@@ -117,18 +118,21 @@ Class HostPool {
         if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
         }
-        $this.VMSize = "Standard_D2s_v4"
+        $this.VMSize = "Standard_D2s_v6"
         $this.SubnetId = $SubnetId        
         #Getting the VNet from the Subnet
         $VirtualNetwork = $this.GetVirtualNetwork()
         $this.SetLocation($VirtualNetwork.Location)
         $this.VMNumberOfInstances = 3
         $this.DisableSpotInstance()
-        $this.DisableIntune()            
         $this.DisableScalingPlan()
         $this.DisableWatermarking()
         $this.KeyVault = $KeyVault
-        $this.IdentityProvider = [IdentityProvider]::ActiveDirectory
+        $this.SetIdentityProvider([IdentityProvider]::ActiveDirectory)
+        <#
+        $this.DisableSSO()            
+        $this.DisableIntune()            
+        #>
         $this.ASRFailOverVNetId = $null
         $this.DiffDiskPlacement = [DiffDiskPlacement]::None
     }
@@ -192,6 +196,18 @@ Class HostPool {
 
     [HostPool] SetVMNumberOfInstances([uint16] $VMNumberOfInstances) {
         $this.VMNumberOfInstances = $VMNumberOfInstances
+        return $this
+    }
+
+    [HostPool]DisableSSO() {
+        $this.SSO = $false
+        return $this
+    }
+
+
+    [HostPool]EnableSSO() {
+        $this.SSO = $true
+        $this.SetIdentityProvider([IdentityProvider]::MicrosoftEntraID)
         return $this
     }
 
@@ -288,6 +304,7 @@ Class HostPool {
         $this.IdentityProvider = $IdentityProvider
         if ([IdentityProvider]::ActiveDirectory -eq $IdentityProvider) {
             $this.DisableIntune()
+            $this.DisableSSO()
         }
         $this.RefreshNames()
         return $this
@@ -879,7 +896,7 @@ function Connect-PsAvdAzure {
     }
     catch {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Connecting to Microsoft Graph with all required Scopes"
-        Connect-MgGraph -NoWelcome -Scopes Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Group.Read.All, Group.ReadWrite.All, GroupMember.Read.All, Policy.ReadWrite.MobilityManagement
+        Connect-MgGraph -NoWelcome -Scopes Application.Read.All, Application-RemoteDesktopConfig.ReadWrite.All, Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Group.Read.All, Group.ReadWrite.All, GroupMember.Read.All, Policy.ReadWrite.MobilityManagement
     }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -1100,11 +1117,26 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
         If ($ConditionalAccessPolicyMutex.WaitOne()) { 
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
             $MFAForAllUsersConditionalAccessPolicy = Get-MgBetaIdentityConditionalAccessPolicy -Filter "displayName eq '$DisplayName'"
+            $IncludeApplications = @(
+                            #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-mfa?tabs=avd#create-a-conditional-access-policy (For SSO)
+                            (Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Microsoft Remote Desktop'").AppId
+                            (Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Windows Cloud Login'").AppId
+            )
+            $WVDSP = Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Windows Virtual Desktop'"
+            $AVDSP = Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Virtual Desktop'"
+            if ($null -ne $WVD) {
+                $IncludeApplications += $WVDSP.AppId
+            }
+            if ($null -ne $AVDSP) {
+                $IncludeApplications += $AVDSP.AppId
+            }
+
             $policyProperties = @{
+                DisplayName     = $DisplayName
                 State           = "Enabled"
                 Conditions      = @{
                     Applications = @{
-                        IncludeApplications = @((Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Virtual Desktop'").AppId)
+                        IncludeApplications = $IncludeApplications
                         ExcludeApplications = @((Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Windows VM Sign-In'").AppId)
                     }
                     Users        = @{
@@ -1134,7 +1166,7 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$DisplayName' Conditional Access Policy NOT found. We're creating it "
                 #Adding the DisplayName to the policy properties
                 #$policyProperties["DisplayName"] = $DisplayName
-                $policyProperties.Add("DisplayName", $DisplayName)
+                #$policyProperties.Add("DisplayName", $DisplayName)
                 # Create the policy
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Conditional Access Policy"
                 $MFAForAllUsersConditionalAccessPolicy = New-MgBetaIdentityConditionalAccessPolicy -BodyParameter $policyProperties
@@ -3988,7 +4020,7 @@ function Grant-PsAvdADJoinPermission {
 
 #From https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
 function New-AzureComputeGallery {
-    [CmdletBinding()]
+    [CmdletBinding(PositionalBinding = $false)]
     Param(
         [Parameter(Mandatory = $false)]
         [string]$Location = "EastUS",
@@ -4439,7 +4471,7 @@ function New-PsAvdSessionHost {
         [ValidateNotNullOrEmpty()]
         [string]$SubnetId,
         [Parameter(Mandatory = $false)]
-        [string]$VMSize = "Standard_D2s_v4",
+        [string]$VMSize = "Standard_D2s_v6",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
         [string]$ImagePublisherName = "microsoftwindowsdesktop",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
@@ -4735,6 +4767,48 @@ function Get-PsAvdNextSessionHostName {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+Function Enable-SSO {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true)]
+        [String] $HostPoolName
+    )
+
+    #region Enable Microsoft Entra authentication for RDP (Global Settings)
+    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-single-sign-on
+    #$MSRDspId = (Get-MgServicePrincipal -Filter "AppId eq 'a4a365df-50f1-4397-bc59-1a1564b8bb9c'").Id
+    $MSRDspId = (Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Microsoft Remote Desktop'").Id
+    #$WCLspId = (Get-MgServicePrincipal -Filter "AppId eq '270efc09-cd0d-444b-a71f-39af4910ec45'").Id
+    $WCLspId = (Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Windows Cloud Login'").Id
+
+
+    While (-not((Get-MgBetaServicePrincipalRemoteDesktopSecurityConfiguration -ServicePrincipalId $MSRDspId).IsRemoteDesktopProtocolEnabled)) {
+        Update-MgBetaServicePrincipalRemoteDesktopSecurityConfiguration -ServicePrincipalId $MSRDspId -IsRemoteDesktopProtocolEnabled
+    }
+
+    While (-not((Get-MgBetaServicePrincipalRemoteDesktopSecurityConfiguration -ServicePrincipalId $WCLspId).IsRemoteDesktopProtocolEnabled)) {
+        Update-MgBetaServicePrincipalRemoteDesktopSecurityConfiguration -ServicePrincipalId $WCLspId -IsRemoteDesktopProtocolEnabled
+    }
+    #endregion
+
+    #region Create a Kerberos server object (Global Settings)
+    #From https://learn.microsoft.com/en-us/entra/identity/authentication/howto-authentication-passwordless-security-key-on-premises#select-azure-cloud-default-is-azure-commercial
+    Set-AzureADKerberosServerEndpoint -TargetEndpoint 0
+    #endregion
+
+    #region Hide the consent prompt dialog (HostPool Settings)
+    $AzADDeviceDynamicGroupDisplayName = "{0} - Devices" -f $HostPoolName
+    $AzADDeviceDynamicGroup = Get-MgBetaGroup -Filter "DisplayName eq '$AzADDeviceDynamicGroupDisplayName'"
+    $TargetDeviceGroup = New-Object -TypeName Microsoft.Graph.Beta.PowerShell.Models.MicrosoftGraphTargetDeviceGroup
+    $TargetDeviceGroup.Id = $AzADDeviceDynamicGroup.Id
+    $TargetDeviceGroup.DisplayName = $AzADDeviceDynamicGroupDisplayName
+
+    $null = New-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $MSRDspId -BodyParameter $TargetDeviceGroup
+    $null = New-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $WCLspId -BodyParameter $TargetDeviceGroup
+    #endregion
+
+}
+
 function Add-PsAvdSessionHost {
     [CmdletBinding(DefaultParameterSetName = 'Image')]
     Param(
@@ -4763,7 +4837,7 @@ function Add-PsAvdSessionHost {
         [ValidateNotNullOrEmpty()]
         [string]$SubnetId,
         [Parameter(Mandatory = $false)]
-        [string]$VMSize = "Standard_D2s_v4",
+        [string]$VMSize = "Standard_D2s_v6",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
         [string]$ImagePublisherName = "microsoftwindowsdesktop",
         [Parameter(Mandatory = $false, ParameterSetName = 'Image')]
@@ -5066,9 +5140,6 @@ function Copy-PsAvdMSIXDemoPFXFile {
         [ValidateNotNullOrEmpty()] 
         [string[]] $ComputerName,
         [Parameter(Mandatory = $false)]
-        [ValidateNotNullOrEmpty()] 
-        [System.Management.Automation.PSCredential]$Credential,
-        [Parameter(Mandatory = $false)]
         [ValidateNotNull()] 
         [System.Security.SecureString]$SecurePassword = $(ConvertTo-SecureString -String "P@ssw0rd" -AsPlainText -Force)
     )   
@@ -5087,13 +5158,7 @@ function Copy-PsAvdMSIXDemoPFXFile {
         $DownloadedPFXFiles = Get-WebSiteFile -URI $URI -FileRegExPattern "\.pfx?$" -Destination $TempFolder
     }
 
-    if ($Credential) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Credential was specified"
-        $Session = Wait-PSSession -ComputerName $ComputerName -Credential $Credential -PassThru
-    }
-    else {
-        $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
-    }
+    $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
 
     #Copying the PFX to all session hosts
     $Session | ForEach-Object -Process { 
@@ -5138,7 +5203,8 @@ function Copy-PsAvdHelperScript {
         [string] $Destination = "C:\Scripts\",
         [Parameter(Mandatory = $false)]
         [ValidateNotNullOrEmpty()] 
-        [System.Management.Automation.PSCredential]$Credential
+        [System.Management.Automation.PSCredential]$Credential,
+        [switch]$PassThru
     )   
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -5148,28 +5214,41 @@ function Copy-PsAvdHelperScript {
 
     if ($Credential) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Credential was specified"
-        $Session = Wait-PSSession -ComputerName $ComputerName -Credential $Credential -PassThru
+        $Items =  foreach ($CurrentComputerName in $ComputerName) {
+            $Path = Join-Path -Path $("\\{0}" -f $CurrentComputerName) -ChildPath $($Destination -replace ":", "$")
+            $Root = $Path -replace "\$.*", "$"
+            #From https://devblogs.microsoft.com/scripting/generate-random-letters-with-powershell/
+            #$RandomDriveName = -join ((65..90) + (97..122) | Get-Random -Count 5 | ForEach-Object -Process {[char]$_})
+            $RandomDriveName = -join (97..122 | Get-Random -Count 5 | ForEach-Object -Process {[char]$_})
+            New-PSDrive -Name $RandomDriveName -Root $Root -PSProvider "FileSystem" -Credential $Credential
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Creating '$Path' Folder"
+            $null = New-Item -Path $Path -ItemType Directory -Force
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$Source' to '$Path' via SMB"
+            Copy-Item -Path $Source -Destination $Path -Force -PassThru -ErrorAction Ignore
+            Remove-PSDrive -Name $RandomDriveName 
+        }
     }
     else {
         $Session = Wait-PSSession -ComputerName $ComputerName -PassThru
-    }
+        Invoke-Command -Session $Session -ScriptBlock {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Creating '$($using:Destination)' Folder"
+            $null = New-Item -Path $using:Destination -ItemType Directory -Force
+        }
 
-    Invoke-Command -Session $Session -ScriptBlock {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Creating '$($using:Destination)' Folder"
-        $null = New-Item -Path $using:Destination -ItemType Directory -Force
-    }
+        #Copying the files to all session hosts
+        $Items = $Session | ForEach-Object -Process { 
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$Source' to '$Destination' via PowerShell Remoting"
+            #https://github.com/dotnet/runtime/issues/39831
+            Copy-Item -Path $Source -Destination $Destination -ToSession $_ -Force -PassThru -ErrorAction Ignore
+        }
 
-    #Copying the files to all session hosts
-    $Items =  $Session | ForEach-Object -Process { 
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Copying '$Source' to '$Destination'"
-        #https://github.com/dotnet/runtime/issues/39831
-        Copy-Item -Path $Source -Destination $Destination -ToSession $_ -Force -PassThru -ErrorAction Ignore
+        $Session | Remove-PSSession    
     }
-
-    $Session | Remove-PSSession
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-    return $Items
+    if ($PassThru) {
+        return $Items
+    }
 }
 
 function Wait-PSSession {
@@ -5209,6 +5288,7 @@ function Wait-PSSession {
         else {
             $Session = New-PSSession -ComputerName $ComputerName -ErrorAction Ignore
         }
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Session:`r`nn$($Session | Out-String)"
         if ($Session.Count -lt $ComputerName.Count) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping $Seconds Seconds"
             Start-Sleep -Seconds $Seconds
@@ -5503,7 +5583,8 @@ function Remove-PsAvdHostPoolSetup {
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
         $OUDistinguishedNames | ForEach-Object -Process {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing OU: '$_'"
-        (Get-ADComputer -Filter 'DNSHostName -like "*"' -SearchBase $_).Name } | ForEach-Object -Process { 
+            (Get-ADComputer -Filter 'DNSHostName -like "*"' -SearchBase $_).Name 
+        } | ForEach-Object -Process { 
             try {
                 if (-not([string]::IsNullOrEmpty($_))) {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing DNS Record: '$_'"
@@ -5584,7 +5665,7 @@ function Remove-PsAvdHostPoolSetup {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Resource Group(s) (As a Job): $($ResourceGroupName -join, ', ')"
     $Jobs = $ResourceGroup | Remove-AzResourceGroup -Force -AsJob
-    $Jobs | Receive-Job -Wait -AutoRemoveJob
+    $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
 
     <#
     #region Removing HostPool Session Credentials Key Vault
@@ -5603,14 +5684,14 @@ function Remove-PsAvdHostPoolSetup {
     else {
         $Jobs = Get-AzKeyVault -InRemovedState | Where-Object -FilterScript { ($_.VaultName -in $HostPool.GetKeyVaultName()) } | Remove-AzKeyVault -InRemovedState -AsJob -Force 
     }
-    $Jobs | Receive-Job -Wait -AutoRemoveJob
+    $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
     #endregion
     #endregion
 
     #region Azure Monitor Baseline Alerts for Azure Virtual Desktop Cleanup
     $Job = Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPools.Name -join "|") } | Remove-AzMetricAlertRuleV2 -AsJob
     Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match $($HostPools.Name -join "|") } | Remove-AzScheduledQueryRule
-    $Job | Receive-Job -Wait -AutoRemoveJob
+    $null = $Job | Receive-Job -Wait -AutoRemoveJob
     #endregion 
     #endregion
 
@@ -5856,7 +5937,7 @@ function New-PsAvdPersonalHostPoolSetup {
             Write-Host -Object "Starting '$($CurrentHostPool.Name)' Setup"
             $CurrentHostPoolStartTime = Get-Date
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; Intune = $Status[$CurrentHostPool.Intune]; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; Hibernation = $Status[$CurrentHostPool.HibernationEnabled]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; Hibernation = $Status[$CurrentHostPool.HibernationEnabled]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
 
             if ($CurrentHostPool.$PreferredAppGroupType) {
                 $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
@@ -6081,6 +6162,9 @@ function New-PsAvdPersonalHostPoolSetup {
             if ($CurrentHostPool.Intune) {
                 $Options += 'Intune'
             }
+            if ($CurrentHostPool.SSO) {
+                $Options += 'SSO'
+            }
             if ($CurrentHostPool.Spot) {
                 $Options += 'Spot'
             }
@@ -6129,6 +6213,14 @@ function New-PsAvdPersonalHostPoolSetup {
                 #$AzADDeviceDynamicGroup = New-AzADGroup -DisplayName $DisplayName -Description $Description -MembershipRule $MembershipRule -MembershipRuleProcessingState "On" -GroupType "DynamicMembership" -MailNickname $MailNickname -SecurityEnabled
                 $AzADDeviceDynamicGroup = New-MgBetaGroup -DisplayName $DisplayName -Description $Description -MembershipRule $MembershipRule -MembershipRuleProcessingState "On" -GroupTypes "DynamicMembership" -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
                 #endregion
+                if ($CurrentHostPool.Intune) {
+                    Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy -GroupId $AzADDeviceDynamicGroup.Id
+                }
+
+                if ($CurrentHostPool.SSO) {
+                    #TODO: Code
+                    Enable-SSO -HostPoolName $CurrentHostPool.Name
+                }
             }
 
             #region Adding Session Hosts to the Host Pool
@@ -6242,7 +6334,7 @@ function New-PsAvdPersonalHostPoolSetup {
                     Set-AzVMExtension  @Params
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting all jobs completes"
-                $Jobs | Receive-Job -Wait -AutoRemoveJob
+                $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
             }
             #endregion
 
@@ -6497,7 +6589,7 @@ function New-PsAvdPooledHostPoolSetup {
             #New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
              
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; Intune = $Status[$CurrentHostPool.Intune]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
             if ($CurrentHostPool.$PreferredAppGroupType) {
                 $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
             }
@@ -6671,13 +6763,16 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#disable-automatic-updates
                     #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.WindowsUpdate::AutoUpdateCfg
-                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -ValueName "NoAutoUpdate" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
+                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2791
+					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -ValueName "NoAutoUpdate" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#set-up-time-zone-redirection
                     #From https://admx.help/?Category=VMware_Horizon&Policy=VMware.Policies.Cascadia::CASCADIA_TIME_ZONE
-                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fEnableTimeZoneRedirection" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
+                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#10701
+					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fEnableTimeZoneRedirection" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#disable-storage-sense
                     #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy' -ValueName "01" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
                     #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.StorageSense::SS_AllowStorageSenseGlobal
+					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#14518
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\StorageSense' -ValueName "AllowStorageSenseGlobal" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
 
                     #region GPO Debug log file
@@ -6709,6 +6804,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -ValueName "$CurrentHostPoolStorageAccountProfileSharePath\*.CIM" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
 
                     #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.WindowsDefender::Exclusions_Processesget-job
+					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#10720
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions' -ValueName "Exclusions_Processes" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Processes' -ValueName "%ProgramFiles%\FSLogix\Apps\frxccd.exe" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Processes' -ValueName "%ProgramFiles%\FSLogix\Apps\frxccds.exe" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
@@ -6861,7 +6957,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $NoMFAEntraIDGroup = Get-MgBetaGroup -Filter "DisplayName eq '$NoMFAEntraIDGroupName'"
 
                     if (-not($NoMFAEntraIDGroup)) {
-                        Write-Warning -Message "'$NoMFAEntraIDGroupName' Entra ID group not found for disabling the MFA for the '$($ServicePrincipal.DisplayName)' Service Principal."
+                        Write-Warning -Message "'$NoMFAEntraIDGroupName' Entra ID group not found for disabling the MFA for the '$($ServicePrincipal.DisplayName)' Service Principal. We will create one"
                         #Creating the No MFA Entra ID Group
                         $NoMFAEntraIDGroup = New-PsAvdNoMFAUserEntraIDGroup -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
@@ -7114,6 +7210,15 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "WatermarkingQrScale" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 4
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "WatermarkingWidthFactor" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 320
 
+					#region Disconnect remote session on lock for Microsoft identity platform authentication
+					#From https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy
+
+					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16973&lang=en-US
+					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockMicrosoftIdentity" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
+
+					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US
+					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockLegacy" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
+					#endregion
                     #region GPO Debug log file
                     #From https://blog.piservices.fr/post/2017/12/21/active-directory-debug-avance-de-l-application-des-gpos
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Diagnostics' -ValueName "GPSvcDebugLevel" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0x30002
@@ -7253,6 +7358,8 @@ function New-PsAvdPooledHostPoolSetup {
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
 
+                                    #In case of Spot Instance VMs that have been evicted
+                                    $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                                 }
@@ -7670,6 +7777,8 @@ function New-PsAvdPooledHostPoolSetup {
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
 
+                                    #In case of Spot Instance VMs that have been evicted
+                                    $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                                 }
@@ -7967,6 +8076,9 @@ function New-PsAvdPooledHostPoolSetup {
             if ($CurrentHostPool.Intune) {
                 $Options += 'Intune'
             }
+            if ($CurrentHostPool.SSO) {
+                $Options += 'SSO'
+            }
             if ($CurrentHostPool.Spot) {
                 $Options += 'Spot'
             }
@@ -8020,6 +8132,10 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion
                 if ($CurrentHostPool.Intune) {
                     Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy -GroupId $AzADDeviceDynamicGroup.Id
+                }
+                if ($CurrentHostPool.SSO) {
+                    #TODO: Code
+                    Enable-SSO -HostPoolName $CurrentHostPool.Name
                 }
             }
 
@@ -8101,7 +8217,10 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
 
                 $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.*"
-                $Items = Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostNames
+                
+                #In case of Spot Instance VMs that have been evicted
+                $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
+                Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostNames
                 <#
                 $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
                 Copy-PsAvdHelperScript -Source $Source -Destination "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -ComputerName $SessionHostNames
@@ -8126,7 +8245,10 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
 
                 $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.*"
-                $Items = Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostNames -Credential $LocalAdminCredential
+                #In case of Spot Instance VMs that have been evicted
+                $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
+                $SessionHostPrivateIpAddresses = ($SessionHostVMs.NetworkProfile.NetworkInterfaces.Id | Get-AzNetworkInterface).IpConfigurations.PrivateIpAddress
+                Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostPrivateIpAddresses -Credential $LocalAdminCredential
 
                 <#
                 $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
@@ -8541,7 +8663,7 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                     Set-AzVMExtension  @Params
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting all jobs completes"
-                $Jobs | Receive-Job -Wait -AutoRemoveJob
+                $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
             }
             #endregion
 
@@ -8793,27 +8915,36 @@ function New-PsAvdHostPoolSetup {
         #From https://learn.microsoft.com/en-us/training/modules/configure-user-experience-settings/4-configure-user-settings-through-group-policies
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Network Settings' related registry values for '$($AVDGPO.DisplayName)' GPO (linked to '$($AVDRootOU.DistinguishedName)' OU)"
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.BITS::BITS_DisableBranchCache
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#55
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\BITS' -ValueName "DisableBranchCache" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.PoliciesContentWindowsBranchCache::EnableWindowsBranchCache
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2119
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\PeerDist\Service' -ValueName "Enable" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.HotspotAuthentication::HotspotAuth_Enable
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#7517
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\HotspotAuthentication' -ValueName "Enabled" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.PlugandPlay::P2P_Disabled
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2098
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\policies\Microsoft\Peernet' -ValueName "Disabled" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.OfflineFiles::Pol_Enabled
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2061
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\NetCache' -ValueName "Enabled" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #endregion
 
         #region Session Time Settings
         #From https://learn.microsoft.com/en-us/training/modules/configure-user-experience-settings/6-configure-session-timeout-properties
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Idle_Limit_1
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8097
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Session Time Settings' related registry values for '$($AVDGPO.DisplayName)' GPO (linked to '$($AVDRootOU.DistinguishedName)' OU)"
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxIdleTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Disconnected_Timeout_1
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8095
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxDisconnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Limits_2
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8099
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxConnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_Session_End_On_Limit_2
+		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8093
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fResetBroken" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
         #endregion
 
@@ -8899,6 +9030,7 @@ function New-PsAvdHostPoolSetup {
                 Set-Variable -Name MaximumFunctionCount -Value 32768 -Scope Global -Force
                 New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global -Force
                 New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global -Force
+                Function Enable-SSO { ${Function:Enable-SSO} }
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
                 Function Get-AzVMVirtualNetwork { ${Function:Get-AzVMVirtualNetwork} }
@@ -10035,7 +10167,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         if ($Result.ProvisioningState -eq "Succeeded") {
             Write-Verbose -Message "Enabling the Alert rules" 
 		    Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPool.Name -join "|") } | ForEach-Object -Process { $_.Enabled = $true; $_ | Add-AzMetricAlertRuleV2}
-            Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match $($HostPool.Name -join "|") } | Update-AzScheduledQueryRule -Enabled
+            Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match "% Free Space|$($HostPool.Name -join '|')"} | Update-AzScheduledQueryRule -Enabled
             Get-AzActivityLogAlert -ResourceGroupName $ResourceGroupName | Update-AzActivityLogAlert -Enabled $true
         }
     }
