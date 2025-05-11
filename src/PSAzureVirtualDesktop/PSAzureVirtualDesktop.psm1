@@ -1098,7 +1098,7 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
         [string[]] $ExcludeGroupName = 'No-MFA Users',
         [string] $DisplayName = "[AVD] Require multifactor authentication for all users",
         [string[]] $IncludeUsers = @("All")
-)
+    )
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
@@ -1118,7 +1118,7 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
             $MFAForAllUsersConditionalAccessPolicy = Get-MgBetaIdentityConditionalAccessPolicy -Filter "displayName eq '$DisplayName'"
             $IncludeApplications = @(
-                            #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-mfa?tabs=avd#create-a-conditional-access-policy (For SSO)
+                #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-mfa?tabs=avd#create-a-conditional-access-policy (For SSO)
                             (Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Microsoft Remote Desktop'").AppId
                             (Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Windows Cloud Login'").AppId
             )
@@ -2086,15 +2086,15 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     [array] $settings += switch ($AdministrativeTemplatesWindowsComponentsMicrosoftDefenderAVExclusionsConfigurationSettings) {
         { $_.FullPath -eq '\Administrative Templates\Windows Components\Microsoft Defender Antivirus\Exclusions\Path Exclusions' } { 
             $Exclusions = @{
-                '%TEMP%\*\*.VHD'                                            = 0
-                '%TEMP%\*\*.VHDX'                                           = 0
-                '%Windir%\TEMP\*\*.VHD'                                     = 0
-                '%Windir%\TEMP\*\*.VHDX'                                    = 0
-                '%ProgramData%\FSLogix\Cache\*'                             = 0
-                '%ProgramData%\FSLogix\Proxy\*'                             = 0
-                '%ProgramFiles%\FSLogix\Apps\frxdrv.sys'                    = 0
-                '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys'                  = 0
-                '%ProgramFiles%\FSLogix\Apps\frxccd.sys'                    = 0
+                '%TEMP%\*\*.VHD'                                          = 0
+                '%TEMP%\*\*.VHDX'                                         = 0
+                '%Windir%\TEMP\*\*.VHD'                                   = 0
+                '%Windir%\TEMP\*\*.VHDX'                                  = 0
+                '%ProgramData%\FSLogix\Cache\*'                           = 0
+                '%ProgramData%\FSLogix\Proxy\*'                           = 0
+                '%ProgramFiles%\FSLogix\Apps\frxdrv.sys'                  = 0
+                '%ProgramFiles%\FSLogix\Apps\frxdrvvt.sys'                = 0
+                '%ProgramFiles%\FSLogix\Apps\frxccd.sys'                  = 0
                 "$HostPoolStorageAccountProfileShareName\*.VHD"           = 0
                 "$HostPoolStorageAccountProfileShareName\*.VHD.lock"      = 0
                 "$HostPoolStorageAccountProfileShareName\*.VHD.meta"      = 0
@@ -2867,7 +2867,7 @@ function Set-PsAvdMgBetaUsersGroupLicense {
             #Set-MgBetaGroupLicense -GroupId $Group.Id -AddLicenses @{ } -RemoveLicenses @($SkuId)
             # Create JSON payload for license removal
             $body = @{
-                "addLicenses" = @()
+                "addLicenses"    = @()
                 "removeLicenses" = @($SkuId)
             }
         }
@@ -2876,12 +2876,12 @@ function Set-PsAvdMgBetaUsersGroupLicense {
             #Set-MgBetaGroupLicense -GroupId $Group.Id -AddLicenses @{SkuId = $SkuId } -RemoveLicenses @()
             # Create JSON payload for adding license 
             $Body = @{
-                 "addLicenses" = @(
-                     @{
-                         "skuId" = $SkuId
-                     }
-                 )
-                 "removeLicenses" = @()
+                "addLicenses"    = @(
+                    @{
+                        "skuId" = $SkuId
+                    }
+                )
+                "removeLicenses" = @()
             } 
         }
         Invoke-MgGraphRequest -Method POST -Uri "https://graph.microsoft.com/beta/groups/$($Group.Id)/assignLicense" -Body $Body -ContentType "application/json"
@@ -5214,12 +5214,12 @@ function Copy-PsAvdHelperScript {
 
     if ($Credential) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Credential was specified"
-        $Items =  foreach ($CurrentComputerName in $ComputerName) {
+        $Items = foreach ($CurrentComputerName in $ComputerName) {
             $Path = Join-Path -Path $("\\{0}" -f $CurrentComputerName) -ChildPath $($Destination -replace ":", "$")
             $Root = $Path -replace "\$.*", "$"
             #From https://devblogs.microsoft.com/scripting/generate-random-letters-with-powershell/
             #$RandomDriveName = -join ((65..90) + (97..122) | Get-Random -Count 5 | ForEach-Object -Process {[char]$_})
-            $RandomDriveName = -join (97..122 | Get-Random -Count 5 | ForEach-Object -Process {[char]$_})
+            $RandomDriveName = -join (97..122 | Get-Random -Count 5 | ForEach-Object -Process { [char]$_ })
             New-PSDrive -Name $RandomDriveName -Root $Root -PSProvider "FileSystem" -Credential $Credential
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)][$($_.ComputerName)] Creating '$Path' Folder"
             $null = New-Item -Path $Path -ItemType Directory -Force
@@ -5897,7 +5897,8 @@ function Add-PsAvdAzureAppAttach {
                 #endregion 
             }
             #endregion 
-        }    }
+        }
+    }
 }
 
 function New-PsAvdPersonalHostPoolSetup {
@@ -6218,7 +6219,6 @@ function New-PsAvdPersonalHostPoolSetup {
                 }
 
                 if ($CurrentHostPool.SSO) {
-                    #TODO: Code
                     Enable-SSO -HostPoolName $CurrentHostPool.Name
                 }
             }
@@ -6764,15 +6764,15 @@ function New-PsAvdPooledHostPoolSetup {
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#disable-automatic-updates
                     #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.WindowsUpdate::AutoUpdateCfg
                     #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2791
-					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -ValueName "NoAutoUpdate" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU' -ValueName "NoAutoUpdate" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#set-up-time-zone-redirection
                     #From https://admx.help/?Category=VMware_Horizon&Policy=VMware.Policies.Cascadia::CASCADIA_TIME_ZONE
                     #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#10701
-					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fEnableTimeZoneRedirection" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fEnableTimeZoneRedirection" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/set-up-customize-master-image#disable-storage-sense
                     #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\StorageSense\Parameters\StoragePolicy' -ValueName "01" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
                     #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.StorageSense::SS_AllowStorageSenseGlobal
-					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#14518
+                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#14518
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\StorageSense' -ValueName "AllowStorageSenseGlobal" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
 
                     #region GPO Debug log file
@@ -6804,7 +6804,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -ValueName "$CurrentHostPoolStorageAccountProfileSharePath\*.CIM" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
 
                     #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.WindowsDefender::Exclusions_Processesget-job
-					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#10720
+                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#10720
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions' -ValueName "Exclusions_Processes" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Processes' -ValueName "%ProgramFiles%\FSLogix\Apps\frxccd.exe" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Processes' -ValueName "%ProgramFiles%\FSLogix\Apps\frxccds.exe" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
@@ -7210,15 +7210,15 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "WatermarkingQrScale" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 4
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "WatermarkingWidthFactor" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 320
 
-					#region Disconnect remote session on lock for Microsoft identity platform authentication
-					#From https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy
+                    #region Disconnect remote session on lock for Microsoft identity platform authentication
+                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy
 
-					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16973&lang=en-US
-					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockMicrosoftIdentity" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
+                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16973&lang=en-US
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockMicrosoftIdentity" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
 
-					#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US
-					$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockLegacy" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
-					#endregion
+                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockLegacy" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
+                    #endregion
                     #region GPO Debug log file
                     #From https://blog.piservices.fr/post/2017/12/21/active-directory-debug-avance-de-l-application-des-gpos
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Diagnostics' -ValueName "GPSvcDebugLevel" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0x30002
@@ -8134,7 +8134,6 @@ function New-PsAvdPooledHostPoolSetup {
                     Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy -GroupId $AzADDeviceDynamicGroup.Id
                 }
                 if ($CurrentHostPool.SSO) {
-                    #TODO: Code
                     Enable-SSO -HostPoolName $CurrentHostPool.Name
                 }
             }
@@ -8359,7 +8358,7 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                     New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptPath $ScriptPath -HostPoolName $CurrentHostPool.Name
                     #>
 
-					<#
+                    <#
                     $ModuleBase = Get-ModuleBase
                     $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
                     New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptPath $ScriptPath -HostPoolName $CurrentHostPool.Name -RunAsAccount "user"
@@ -8421,7 +8420,7 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                         foreach ($CurrentMSIXDemoPackage in $HighestVersionMSIXDemoPackages) {
                             $obj = $null
                             $ExpandMSIXImageStartTime = Get-Date
-                            While (($null -eq $obj) -and ((New-TimeSpan -Start $ExpandMSIXImageStartTime -End (Get-Date)).TotalMinutes -lt 15)){
+                            While (($null -eq $obj) -and ((New-TimeSpan -Start $ExpandMSIXImageStartTime -End (Get-Date)).TotalMinutes -lt 15)) {
                                 $Index++
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
                                 #Temporary Allowing storage account key access (disabled due to SFI)
@@ -8915,36 +8914,36 @@ function New-PsAvdHostPoolSetup {
         #From https://learn.microsoft.com/en-us/training/modules/configure-user-experience-settings/4-configure-user-settings-through-group-policies
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Network Settings' related registry values for '$($AVDGPO.DisplayName)' GPO (linked to '$($AVDRootOU.DistinguishedName)' OU)"
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.BITS::BITS_DisableBranchCache
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#55
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#55
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\BITS' -ValueName "DisableBranchCache" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.PoliciesContentWindowsBranchCache::EnableWindowsBranchCache
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2119
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2119
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\PeerDist\Service' -ValueName "Enable" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.HotspotAuthentication::HotspotAuth_Enable
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#7517
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#7517
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\HotspotAuthentication' -ValueName "Enabled" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.PlugandPlay::P2P_Disabled
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2098
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2098
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\policies\Microsoft\Peernet' -ValueName "Disabled" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.OfflineFiles::Pol_Enabled
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2061
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#2061
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\NetCache' -ValueName "Enabled" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #endregion
 
         #region Session Time Settings
         #From https://learn.microsoft.com/en-us/training/modules/configure-user-experience-settings/6-configure-session-timeout-properties
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Idle_Limit_1
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8097
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8097
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Session Time Settings' related registry values for '$($AVDGPO.DisplayName)' GPO (linked to '$($AVDRootOU.DistinguishedName)' OU)"
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxIdleTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Disconnected_Timeout_1
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8095
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8095
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxDisconnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Limits_2
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8099
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8099
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxConnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_Session_End_On_Limit_2
-		#From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8093
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8093
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fResetBroken" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
         #endregion
 
@@ -10133,7 +10132,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
             "DistributionGroup"               = (Get-AzContext).Account.Id
             "Environment"                     = "t"
             "hostPoolInfo"                    = $hostPoolInfo
-            "HostPools"                        = $HostPoolId
+            "HostPools"                       = $HostPoolId
             "location"                        = $Location
             "logAnalyticsWorkspaceResourceId" = $LogAnalyticsWorkSpace.ResourceId
             "resourceGroupName"               = $ResourceGroup.ResourceGroupName
@@ -10145,16 +10144,16 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         $StartTime = Get-Date
 
         $Index = 0
-		$Limit = 5
+        $Limit = 5
         Do {
             $Index++
             Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
             #Don't know why but sometimes the first deployment fails
             $Result = New-AzDeployment -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
-			if ($Result.ProvisioningState -ne "Succeeded") {
-				Write-Warning -Message "[$Index/$Limit] The Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
-			}
+            if ($Result.ProvisioningState -ne "Succeeded") {
+                Write-Warning -Message "[$Index/$Limit] The Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
+            }
         } Until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge $Limit))
 
         $EndTime = Get-Date
@@ -10166,8 +10165,8 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     if ($Enabled) {
         if ($Result.ProvisioningState -eq "Succeeded") {
             Write-Verbose -Message "Enabling the Alert rules" 
-		    Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPool.Name -join "|") } | ForEach-Object -Process { $_.Enabled = $true; $_ | Add-AzMetricAlertRuleV2}
-            Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match "% Free Space|$($HostPool.Name -join '|')"} | Update-AzScheduledQueryRule -Enabled
+            Get-AzMetricAlertRuleV2 | Where-Object -FilterScript { $_.Scopes -match $($HostPool.Name -join "|") } | ForEach-Object -Process { $_.Enabled = $true; $_ | Add-AzMetricAlertRuleV2 }
+            Get-AzScheduledQueryRule | Where-Object -FilterScript { $_.CriterionAllOf.Query -match "% Free Space|$($HostPool.Name -join '|')" } | Update-AzScheduledQueryRule -Enabled
             Get-AzActivityLogAlert -ResourceGroupName $ResourceGroupName | Update-AzActivityLogAlert -Enabled $true
         }
     }
@@ -10193,7 +10192,7 @@ function Import-PsAvdWorkbookTemplate {
     $WorkBookTemplates = @{
         #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
         #Sometimes ==> Invoke-RestMethod : The remote name could not be resolved: 'blog.itprocloud.de' raised an error so I'm hosting a copy on my own github as fallback
-        "750ec0fd-74d1-4e80-be97-3001485303e8"          = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
+        "750ec0fd-74d1-4e80-be97-3001485303e8" = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
     }
 
     [HostPool]::BuildAzureLocationShortNameHashtable()
@@ -10211,7 +10210,7 @@ function Import-PsAvdWorkbookTemplate {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
                 try {
                     #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
-                	$ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI
+                    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI
                     break
                 }
                 catch [System.Net.WebException] {
@@ -10263,7 +10262,7 @@ function Import-PsAvdWorkbookTemplate {
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-	return $AzApplicationInsightsWorkbook
+    return $AzApplicationInsightsWorkbook
 }
 
 function Import-PsAvdWorkbook {

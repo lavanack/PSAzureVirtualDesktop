@@ -13,6 +13,16 @@
 
 ## Release Notes
 
+- [1.0.13]
+  - Enabling SSO
+  - Switching from Standard_D2s_v4 to Standard_D2s_v6 for the AVD Session Hosts
+  - Adding the more scopes for Graph
+  - Updating the '[AVD] Require multifactor authentication for all users' Conditional Access Policy
+  - Adding a Toast notification when a user logs in to have information about the FSLogix Profile space used.
+  - Adding some code to start VMs in case of eviction due to Spot Instance VM settings.
+  - Adding a workbook instance from the [https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/](https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/) Azure Workbook Template for every Hostpool.
+  - The[AMBA] (http://aka.ms/amba) alerts are now enabled by default
+  - Updating Pester Tests
 - [1.0.12]
   - Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts
 - [1.0.11]

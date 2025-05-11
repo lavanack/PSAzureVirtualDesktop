@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Changelog for PSAzureVirtualDesktop](#changelog-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.13\] - 2025-05-11](#1013---2025-05-11)
   - [\[1.0.12\] - 2025-04-29](#1012---2025-04-29)
   - [\[1.0.11\] - 2025-04-16](#1011---2025-04-16)
   - [\[1.0.10\] - 2025-04-14](#1010---2025-04-14)
@@ -24,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2025-05-11 - Updated `CHANGELOG.md`
 - 2025-04-29 - Updated `CHANGELOG.md`
 - 2025-04-16 - Updated `CHANGELOG.md`
 - 2024-12-26 - Updated `CHANGELOG.md`
@@ -31,6 +33,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
 
+## [1.0.13] - 2025-05-11
+
+- Enabling SSO
+- Switching from Standard_D2s_v4 to Standard_D2s_v6 for the AVD Session Hosts
+- Adding the following scopes for Graph: Application.Read.All, Application-RemoteDesktopConfig.ReadWrite.All
+- Updating the '[AVD] Require multifactor authentication for all users' Conditional Access Policy to include the 'Microsoft Remote Desktop' and 'Windows Cloud Login' Application Ids in the included applications (for SSO).
+- Adding a toast notification when a user logs in to have information about the FSLogix Profile space used.
+- Adding some code to start VMs in case of eviction due to Spot Instance VM settings.
+- Adding a workbook instance from the [https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/](https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/) Azure Workbook Template for every Hostpool.
+- The alerts from [https://azure.github.io/azure-monitor-baseline-alerts/patterns/specialized/avd/](https://azure.github.io/azure-monitor-baseline-alerts/patterns/specialized/avd/) are now enabled by default
+- Updating Pester Tests
+- Fixing some bugs and typos
+- Formatting the code
+  
 ## [1.0.12] - 2025-04-29
 
 - Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts
