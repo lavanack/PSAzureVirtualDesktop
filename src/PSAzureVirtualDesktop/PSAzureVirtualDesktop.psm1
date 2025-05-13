@@ -2371,6 +2371,27 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     }
 
     #endregion
+
+    #region 'Administrative Templates > Windows Components > Remote Desktop Services > Remote Desktop Session Host > Security
+    $AdministrativeTemplatesWindowsComponentsRDSRDSHSecurityConfigurationChildCategory = $AdministrativeTemplatesConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Security" }
+    $AdministrativeTemplatesWindowsComponentsRDSRDSHSecurityConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($AdministrativeTemplatesWindowsComponentsRDSRDSHSecurityConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
+
+    #Adding a FullPath Property
+    $AdministrativeTemplatesWindowsComponentsRDSRDSHSecurityConfigurationSettings = $AdministrativeTemplatesWindowsComponentsRDSRDSHSecurityConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $AdministrativeTemplatesWindowsComponentsRDSRDSHSecurityConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
+    
+    [array] $settings += switch ($AdministrativeTemplatesWindowsComponentsRDSRDSHSecurityConfigurationSettings) {
+        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Security\Disconnect remote session on lock for legacy authentication' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue 
+        }  
+        { $_.FullPath -eq '\Administrative Templates\Windows Components\Remote Desktop Services\Remote Desktop Session Host\Security\Disconnect remote session on lock for Microsoft identity platform authentication' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Disable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
+    }
+
+    #endregion
     #endregion
 
     #region configurationPolicies

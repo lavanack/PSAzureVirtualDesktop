@@ -6,6 +6,8 @@ Function Test-NewerAvailableModule {
     Write-Verbose -Message "Entering function '$($MyInvocation.MyCommand)'"
 
     $ModuleName = "PSAzureVirtualDesktop"
+    #$ModuleName = $MyInvocation.MyCommand.ModuleName
+    Write-Verbose -Message "Module Name: $ModuleName"
     #We have to parse the version to get the correct sorting. Without this "1.11.0" -gt "1.2.0" returns $false
     $GreatestInstalledModuleVersion = (Get-Module $ModuleName -ListAvailable | Select-Object -Property *, @{Name = "ParsedVersion"; Expression = { [version]::Parse($_.Version) } } | Sort-Object -Property ParsedVersion | Select-Object -Last 1).ParsedVersion
     $FoundModule = Find-Module -Name $ModuleName -ErrorAction Ignore
