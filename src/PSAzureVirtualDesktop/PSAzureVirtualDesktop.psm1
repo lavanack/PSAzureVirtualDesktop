@@ -7409,8 +7409,6 @@ function New-PsAvdPooledHostPoolSetup {
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
 
-                                    #In case of Spot Instance VMs that have been evicted
-                                    $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                                 }
@@ -7828,8 +7826,6 @@ function New-PsAvdPooledHostPoolSetup {
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
 
-                                    #In case of Spot Instance VMs that have been evicted
-                                    $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                                 }
