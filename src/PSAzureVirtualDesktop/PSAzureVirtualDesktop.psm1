@@ -402,7 +402,8 @@ Class HostPool {
 class PooledHostPool : HostPool {
     static [hashtable] $IndexHT = $null
     [ValidateRange(0, 10)] [uint16] $MaxSessionLimit
-    [ValidateNotNullOrEmpty()] [boolean] $FSlogix
+    [ValidateNotNullOrEmpty()] [boolean] $FSLogix
+    [ValidateNotNullOrEmpty()] [boolean] $OneDriveForKnownFolders
     [ValidateNotNullOrEmpty()] [boolean] $MSIX
     [ValidateNotNullOrEmpty()] [boolean] $AppAttach
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
@@ -429,9 +430,10 @@ class PooledHostPool : HostPool {
         $this.ImagePublisherName = "microsoftwindowsdesktop"
         $this.ImageOffer = "office-365"
         $this.ImageSku = "win11-24h2-avd-m365"
-        $this.FSlogix = $true
-        $this.MSIX = $true
-        $this.AppAttach = $false
+        $this.EnableFSLogix()
+        #$this.DisableOneDriveForKnownFolders()
+        $this.EnableMSIX()
+        #$this.DisableAppAttach()
         $this.LoadBalancerType = "BreadthFirst"
         $this.PreferredAppGroupType = "Desktop"
         $this.FSLogixCloudCachePairedPooledHostPool = $null
@@ -452,7 +454,7 @@ class PooledHostPool : HostPool {
     }
 
     [string] GetFSLogixStorageAccountName() {
-        if ($this.FSlogix) {
+        if ($this.FSLogix) {
             return $this.FSLogixStorageAccountName
         }
         else {
@@ -462,7 +464,7 @@ class PooledHostPool : HostPool {
 
 
     [string] GetRecoveryLocationFSLogixStorageAccountName() {
-        if ($this.FSlogixCloudCache) {
+        if ($this.FSLogixCloudCache) {
             return $this.FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
         }
         else {
@@ -471,7 +473,7 @@ class PooledHostPool : HostPool {
 
         <#
         #Non working solution in case of a ThreadJob: https://www.reddit.com/r/PowerShell/comments/vs23z8/question_about_classes_and_threading/
-        if ($this.FSlogixCloudCache) {
+        if ($this.FSLogixCloudCache) {
             $AzurePairedRegion = $this.GetAzurePairedRegion()
             if ([string]::IsNullOrEmpty($AzurePairedRegion)) {
                 return [string]::Empty
@@ -537,7 +539,19 @@ class PooledHostPool : HostPool {
 
     [PooledHostPool]EnableFSLogix() {
         $this.FSLogix = $true
+        $this.OneDriveForKnownFolders = $false
         $this.RefreshNames()        
+        return $this
+    }
+
+    [PooledHostPool]DisableOneDriveForKnownFolders() {
+        $this.OneDriveForKnownFolders = $false
+        return $this
+    }
+
+    [PooledHostPool]EnableOneDriveForKnownFolders() {
+        $this.OneDriveForKnownFolders = $true
+        $this.FSLogix = $false
         return $this
     }
 
@@ -641,7 +655,7 @@ class PooledHostPool : HostPool {
         $this.WorkSpaceName = "ws-{0}" -f $this.Name
         $this.ScalingPlanName = "sp-{0}" -f $this.Name
 
-        if ($this.FSlogix) {
+        if ($this.FSLogix) {
             $this.FSLogixStorageAccountName = "fsl{0}" -f $($this.Name -replace "\W")
             $this.FSLogixStorageAccountName = $this.FSLogixStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.FSLogixStorageAccountName.Length)).ToLower()
         }
@@ -973,15 +987,15 @@ function Install-PsAvdFSLogixGpoSettings {
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
     #region Installing FSLogix GPO Setting
-    if (-not(Test-Path -Path $env:SystemRoot\policyDefinitions\en-US\fslogix.adml -PathType Leaf) -or -not(Test-Path -Path $env:SystemRoot\policyDefinitions\fslogix.admx -PathType Leaf) -or $Force) {
-        #From  https://aka.ms/fslogix-latest
+    if (-not(Test-Path -Path $env:SystemRoot\policyDefinitions\en-US\FSLogix.adml -PathType Leaf) -or -not(Test-Path -Path $env:SystemRoot\policyDefinitions\FSLogix.admx -PathType Leaf) -or $Force) {
+        #From  https://aka.ms/FSLogix-latest
         #Always get the latest version of FSLogix
-        #$FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest" -ErrorAction Stop).Links | Where-Object -FilterScript { $_.innerText -eq "Download" }).href
+        #$FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest" -ErrorAction Stop).Links | Where-Object -FilterScript { $_.innerText -eq "Download" }).href
         try {
-            $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest" -UseBasicParsing -ErrorAction Stop).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
+            $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest" -UseBasicParsing -ErrorAction Stop).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
         }
         catch {
-            Write-Warning -Message "'https://aka.ms/fslogix-latest' raised an error. We're using an hard-coded version URI (June 2024)"
+            Write-Warning -Message "'https://aka.ms/FSLogix-latest' raised an error. We're using an hard-coded version URI (June 2024)"
             #Version: October 2024
             $FSLogixLatestURI = "https://download.microsoft.com/download/e/c/4/ec4b55b3-d2f3-4610-aebd-56478eb0d582/FSLogix_Apps_2.9.8884.27471.zip"
         }
@@ -991,8 +1005,8 @@ function Install-PsAvdFSLogixGpoSettings {
         $DestinationPath = Join-Path -Path $env:Temp -ChildPath "FSLogixLatest"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unzipping '$OutFile' into '$DestinationPath'..."
         Expand-Archive -Path $OutFile -DestinationPath $DestinationPath -Force
-        $ADMLFilePath = Join-Path -Path $DestinationPath -ChildPath "fslogix.adml"
-        $ADMXFilePath = Join-Path -Path $DestinationPath -ChildPath "fslogix.admx"
+        $ADMLFilePath = Join-Path -Path $DestinationPath -ChildPath "FSLogix.adml"
+        $ADMXFilePath = Join-Path -Path $DestinationPath -ChildPath "FSLogix.admx"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Copying '$ADMLFilePath' into '$env:SystemRoot\policyDefinitions\en-US'"
         Copy-Item -Path $ADMLFilePath $env:SystemRoot\policyDefinitions\en-US
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Copying '$ADMXFilePath' into '$env:SystemRoot\policyDefinitions'"
@@ -1031,6 +1045,59 @@ function Install-PsAvdAvdGpoSettings {
         Copy-Item -Path $ADMXFilePath $env:SystemRoot\policyDefinitions
         Remove-Item -Path $AVDGPOLatestDir -Recurse -Force
 
+    }
+    #endregion 
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
+#From https://www.mdmandgpanswers.com/blogs/view-blog/redirect-to-onedrive-for-business-with-intune-and-group-policy
+#From https://www.it-connect.fr/comment-configurer-le-sso-onedrive-par-gpo/#A_Autoriser_uniquement_la_synchronisation_sur_certains_tenants
+#From https://gpsearch.azurewebsites.net/#13753
+function Install-PsAvdOneDriveGpoSettings {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [switch] $Force
+    )
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    #region Installing OneDrive GPO Setting
+    if (-not(Test-Path -Path $env:SystemRoot\policyDefinitions\en-US\OneDrive.adml -PathType Leaf) -or -not(Test-Path -Path $env:SystemRoot\policyDefinitions\OneDrive.admx -PathType Leaf) -or $Force) {
+        #From  https://aka.ms/OneDrive-latest
+        #Always get the latest version of OneDrive
+        $Destination = Join-Path -Path $env:TEMP -ChildPath "OneDriveSetup.exe"
+        $OneDriveSetupURI = "http://aka.ms/OneDriveSetup"
+
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$OneDriveSetupURI' to '$Destination'"
+        Start-BitsTransfer $OneDriveSetupURI -Destination $Destination
+
+        $UninstallString = Get-Package "*onedrive*" -ErrorAction Ignore | ForEach-Object -Process { $($_.Meta.Attributes["UninstallString"]) }
+        #region Installing One Drive
+        if ([string]::IsNullOrEmpty($UninstallString)) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Installing OneDrive"
+            Start-Process -FilePath "$env:comspec" -ArgumentList "/c", "$Destination /silent /allusers" -Wait
+        }
+        #endregion
+
+        $TempUninstallString = Get-Package "*onedrive*" -ErrorAction Ignore | ForEach-Object -Process { $($_.Meta.Attributes["UninstallString"]) }
+        $OneDriveFolder = Split-Path -Path $($TempUninstallString -replace "(^.*\.exe)(.*)$",'$1') -Parent
+        $ADMXFilePath = Get-ChildItem -Path $OneDriveFolder -File -Filter *.admx -Recurse -Depth 1
+        $ADMLFilePath = Get-ChildItem -Path $OneDriveFolder -File -Filter *.adml -Recurse -Depth 1
+
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Copying '$ADMLFilePath' into '$env:SystemRoot\policyDefinitions\en-US'"
+        Copy-Item -Path $ADMLFilePath.FullName $env:SystemRoot\policyDefinitions\en-US
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Copying '$ADMXFilePath' into '$env:SystemRoot\policyDefinitions'"
+        Copy-Item -Path $ADMXFilePath.FullName $env:SystemRoot\policyDefinitions
+
+        #region Uninstalling One Drive if it was installed by this function/script
+        if ([string]::IsNullOrEmpty($UninstallString)) {
+            $UninstallString = Get-Package "*onedrive*" -ErrorAction Ignore | ForEach-Object -Process { $($_.Meta.Attributes["UninstallString"]) }
+            $UninstallString = $UninstallString -replace "(^.*\.exe)(.*)$",'"$1"$2'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Uninstalling OneDrive"
+            Start-Process -FilePath "$env:comspec" -ArgumentList "/c", $UninstallString -Wait
+        }
+        #endregion 
+
+        Remove-Item -Path $Destination -Recurse -Force
     }
     #endregion 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -1517,7 +1584,7 @@ function Import-PsAvdFSLogixADMXViaGraphAPI {
 
     #region Graph API
     #Checking if the ADMX is already present -
-    $GroupPolicyUploadedDefinitionFile = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyUploadedDefinitionFiles?`$filter=fileName+eq+'fslogix.admx'"
+    $GroupPolicyUploadedDefinitionFile = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/groupPolicyUploadedDefinitionFiles?`$filter=fileName+eq+'FSLogix.admx'"
     #If present
     if ($GroupPolicyUploadedDefinitionFile) {
         if ($GroupPolicyUploadedDefinitionFile.status -eq 'available') {
@@ -1537,16 +1604,16 @@ function Import-PsAvdFSLogixADMXViaGraphAPI {
     }
 
     #Always get the latest version of FSLogix
-    #$FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest").Links | Where-Object -FilterScript { $_.innerText -eq "Download" }).href
-    $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest" -UseBasicParsing).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
+    #$FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest").Links | Where-Object -FilterScript { $_.innerText -eq "Download" }).href
+    $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest" -UseBasicParsing).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
     $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$FSLogixLatestURI' to '$OutFile'"
     Start-BitsTransfer $FSLogixLatestURI -Destination $OutFile
     $DestinationPath = Join-Path -Path $env:Temp -ChildPath "FSLogixLatest"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unzipping '$OutFile' into '$DestinationPath'"
     Expand-Archive -Path $OutFile -DestinationPath $DestinationPath -Force
-    $ADMLFilePath = Join-Path -Path $DestinationPath -ChildPath "fslogix.adml"
-    $ADMXFilePath = Join-Path -Path $DestinationPath -ChildPath "fslogix.admx"
+    $ADMLFilePath = Join-Path -Path $DestinationPath -ChildPath "FSLogix.adml"
+    $ADMXFilePath = Join-Path -Path $DestinationPath -ChildPath "FSLogix.admx"
 
     #region ADML file
     $ADMLFileData = Get-Content -Path $ADMLFilePath -Encoding Byte -Raw
@@ -1738,7 +1805,7 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
             if ($CurrentChildSetting.'@odata.type' -eq '#microsoft.graph.deviceManagementConfigurationChoiceSettingDefinition') {
                 if ($null -ne $SettingValue) {
                     if ($SettingValue -is [hashtable]) {
-                        $choiceSettingValueValue = $SettingValue[$CurrentChildSetting.displayName -replace "\s*\(Device\)"]
+                        $choiceSettingValueValue = $SettingValue[$CurrentChildSetting.displayName -replace ":?\s*\(Device\)"]
                         $choiceSettingValue = ($CurrentChildSetting.options | Where-Object -FilterScript { $_.optionValue.value -eq $choiceSettingValueValue }).ItemId
                     }
                     else {
@@ -1752,10 +1819,10 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
                 else {
                     $choiceSettingValue = $CurrentChildSetting.defaultOptionId
                 }
-                @{
+                [ordered]@{
                     "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
                     "settingDefinitionId" = $CurrentChildSetting.id
-                    "choiceSettingValue"  = @{
+                    "choiceSettingValue"  = [ordered]@{
                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingValue"
                         "value"       = $choiceSettingValue
                         "children"    = @()
@@ -1768,20 +1835,20 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
                     $ValueSettingDefinitionId = $CurrentChildSetting.dependedOnBy.dependedOnBy | Where-Object { $_ -match "value$" }
                     [array] $groupSettingCollectionValue = foreach ($CurrentKey in $SettingValue.Keys) {
                         $CurrentValue = $SettingValue[$CurrentKey].ToString()
-                        @{
+                        [ordered]@{
                             "children" = @(
-                                @{
+                                [ordered]@{
                                     "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
                                     "settingDefinitionId" = $KeySettingDefinitionId
-                                    "simpleSettingValue"  = @{
+                                    "simpleSettingValue"  = [ordered]@{
                                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
                                         "value"       = $CurrentKey
                                     }
                                 }
-                                @{
+                                [ordered]@{
                                     "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
                                     "settingDefinitionId" = $ValueSettingDefinitionId
-                                    "simpleSettingValue"  = @{
+                                    "simpleSettingValue"  = [ordered]@{
                                         "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
                                         "value"       = $CurrentValue
                                     }
@@ -1789,25 +1856,42 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
                             )
                         }
                     }
-                    @{
+                    [ordered]@{
                         "@odata.type"                 = "#microsoft.graph.deviceManagementConfigurationGroupSettingCollectionInstance"
                         "settingDefinitionId"         = $CurrentChildSetting.id
                         "groupSettingCollectionValue" = $groupSettingCollectionValue
                     }
                 }
             }
+            elseif ($CurrentChildSetting.'@odata.type' -eq '#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionDefinition') {
+                if ($SettingValue -is [array]) {
+                    [array] $simpleSettingCollectionValue = foreach ($CurrentSettingValue in $SettingValue) {
+                        [ordered]@{
+                            "@odata.type" = "#microsoft.graph.deviceManagementConfigurationStringSettingValue"
+                            "value"       = $CurrentSettingValue
+                        }
+                    }
+                    @(
+                        [ordered]@{
+                            "@odata.type"                  = "#microsoft.graph.deviceManagementConfigurationSimpleSettingCollectionInstance"
+                            "settingDefinitionId"          = $CurrentChildSetting.Id
+                            "simpleSettingCollectionValue" = $simpleSettingCollectionValue
+                        }
+                    )
+                }
+            }
             else {
                 #if ($CurrentChildSetting.'@odata.type' -eq '#microsoft.graph.deviceManagementConfigurationSimpleSettingDefinition') {
                 if ($SettingValue -is [hashtable]) {
-                    $simpleSettingValue = $SettingValue[$CurrentChildSetting.displayName -replace "\s*\(Device\)"]
+                    $simpleSettingValue = $SettingValue[$CurrentChildSetting.displayName -replace ":?\s*\(Device\)"]
                 }
                 else {
                     $simpleSettingValue = $SettingValue.ToString()
                 }
-                @{
+                [ordered]@{
                     "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationSimpleSettingInstance"
                     "settingDefinitionId" = $CurrentChildSetting.id
-                    "simpleSettingValue"  = @{
+                    "simpleSettingValue"  = [ordered]@{
                         "@odata.type" = $CurrentChildSetting.defaultValue.'@odata.type'
                         "value"       = $simpleSettingValue
                     }
@@ -1825,12 +1909,12 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
         $value = ($_.options | Where-Object -FilterScript { $_.Name -eq "Disabled" }).itemId
         $Children = @()
     }
-    $CurrentSettings = @{
+    $CurrentSettings = [ordered]@{
         "@odata.type"     = "#microsoft.graph.deviceManagementConfigurationSetting"
-        "settingInstance" = @{
+        "settingInstance" = [ordered]@{
             "@odata.type"         = "#microsoft.graph.deviceManagementConfigurationChoiceSettingInstance"
             "settingDefinitionId" = $_.id
-            "choiceSettingValue"  = @{
+            "choiceSettingValue"  = [ordered]@{
                 "@odata.type" = "#microsoft.graph.deviceManagementConfigurationChoiceSettingValue"
                 "value"       = $value
                 "children"    = $Children
@@ -1841,6 +1925,7 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
     $CurrentSettings
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
+
 
 function Add-PsAvdCategoryFullPath {
     [CmdletBinding(PositionalBinding = $false)]
@@ -1868,6 +1953,138 @@ function Add-PsAvdCategoryFullPath {
         Add-PsAvdCategoryFullPath -Categories $Categories -ParentCategory $CurrentChildCategory
     }
     
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
+#From https://www.mdmandgpanswers.com/blogs/view-blog/redirect-to-onedrive-for-business-with-intune-and-group-policy
+function New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
+    [CmdletBinding(PositionalBinding = $false)]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$HostPoolName
+    )
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
+    #region Graph API
+    #region Devices Azure AD group 
+    $HostPoolDeviceAzADGroupName = "{0} - Devices" -f $HostPoolName
+    #$HostPoolDeviceAzADGroup = Get-AzADGroup -DisplayName $HostPoolDeviceAzADGroupName
+    $HostPoolDeviceAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$HostPoolDeviceAzADGroupName'"
+    if ($null -eq $HostPoolDeviceAzADGroup) {
+        Write-Error -Message "The '$HostPoolDeviceAzADGroupName' doesn't exist !"
+        return $null
+    }
+    #endregion
+
+    [array] $settings = @()
+
+    #region OneDrive Category and Child Categories
+    #region Getting OneDrive Category and Child Categories
+    $OneDriveConfigurationCategory = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=technologies+has+'mdm'+and+description+eq+'OneDrive'"
+    [array] $OneDriveConfigurationChildCategories = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=rootCategoryId+eq+'$($OneDriveConfigurationCategory.id)'"
+    Add-PsAvdCategoryFullPath -Categories $OneDriveConfigurationChildCategories
+    #endregion
+
+    #region 'OneDrive' Settings
+    $OneDriveProfileContainersConfigurationChildCategory = $OneDriveConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\OneDrive" }
+    $OneDriveProfileContainersConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($OneDriveProfileContainersConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
+
+    #Adding a FullPath Property
+    $OneDriveProfileContainersConfigurationSettings = $OneDriveProfileContainersConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $OneDriveProfileContainersConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
+
+    $TenantId = (Get-AzContext).Tenant.Id
+    [array] $settings += switch ($OneDriveProfileContainersConfigurationSettings) {
+        { $_.FullPath -eq '\OneDrive\Allow syncing OneDrive accounts for only specific organizations' } {
+            $SettingValue = @($TenantID)
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $OneDriveProfileContainersConfigurationSettings -Setting $_ -SettingValue $SettingValue -Enable ; continue 
+        }  
+        { $_.FullPath -eq '\OneDrive\Prompt users to move Windows known folders to OneDrive' } {
+            $SettingValue = $TenantID
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $OneDriveProfileContainersConfigurationSettings -Setting $_ -SettingValue $SettingValue -Enable ; continue 
+        } 
+        { $_.FullPath -eq '\OneDrive\Silently move Windows known folders to OneDrive' } {
+            if ($_.options.dependedOnBy.count -eq 2) {
+                #Skipping this option in favor of the one with 5 parameters (Allow to choose which folders we want to redirect to OneDrive)
+                continue
+                $SettingValue = @{
+                    "Show notification to users after folders have been redirected" = 0
+                    "Tenant ID"                                                     = $TenantID
+                }
+                New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $OneDriveProfileContainersConfigurationSettings -Setting $_ -SettingValue $SettingValue -Enable ; continue 
+            }
+            elseif ($_.options.dependedOnBy.count -eq 5) {
+                $SettingValue = @{
+                    "Desktop"                                                      = 1
+                    "Documents"                                                     = 1
+                    "Pictures"                                                      = 1
+                    "Show notification to users after folders have been redirected" = 0
+                    "Tenant ID"                                                     = $TenantID
+                }
+                New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Settings $OneDriveProfileContainersConfigurationSettings -Setting $_ -SettingValue $SettingValue -Enable ; continue 
+            }
+            else {
+                Write-Warning -Message "Unknown case for '$($_.FullPath)'"
+            }
+        }
+        <#
+        { $_.FullPath -eq '\OneDrive\Silently sign in users to the OneDrive sync app with their Windows credentials' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -Enable; continue 
+        }
+        #>
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
+    }
+    #endregion
+
+    #endregion
+
+    #endregion
+
+    #region configurationPolicies
+    $ConfigurationPolicyName = "[{0}] OneDrive Policy" -f $HostPoolName
+
+    
+    $Body = [ordered]@{
+        name         = $ConfigurationPolicyName
+        description  = $ConfigurationPolicyName
+        platforms    = "windows10"
+        technologies = "mdm"
+        settings     = $settings
+    }
+
+    #Checking if the Configuration Policy is already present
+    [array] $ConfigurationPolicy = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies?`$filter=name+eq+'$ConfigurationPolicyName'+and+technologies+has+'mdm'+and+platforms+has+'windows10'"
+    if (-not([string]::IsNullOrEmpty($ConfigurationPolicy.id))) {
+        foreach ($CurrentValue in $ConfigurationPolicy) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Deleting the previously '$($CurrentValue.name)' groupPolicyConfigurations (id: '$($CurrentValue.id)')"
+            Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationPolicies/$($CurrentValue.id)" -Method DELETE -OutputType PSObject
+        }
+        Start-Sleep -Seconds 10
+    }
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$ConfigurationPolicyName' Configuration Policy"
+    $ConfigurationPolicy = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/configurationPolicies" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$ConfigurationPolicyName' Configuration Policy is created"
+    #endregion
+
+    #region Assign
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$ConfigurationPolicyName' Configuration Policy to '$HostPoolDeviceAzADGroupName' Entra ID Group"
+    $Body = [ordered]@{
+        assignments = @(
+            @{
+                target = @{
+                    "@odata.type" = "#microsoft.graph.groupAssignmentTarget"
+                    groupId       = $HostPoolDeviceAzADGroup.Id
+                }
+            }
+        )
+    }
+
+    $Assign = Invoke-MgGraphRequest -Uri "https://graph.microsoft.com/Beta/deviceManagement/configurationPolicies/$($ConfigurationPolicy.id)/assign" -Method POST -Body $($Body | ConvertTo-Json -Depth 100) -OutputType PSObject
+    #endregion
+
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
@@ -2644,19 +2861,19 @@ function Import-PsAvdFSLogixADMXViaCmdlet {
 
     #region Powershell Cmdlets
     #Checking if the ADMX is already present
-    Get-MgBetaDeviceManagementGroupPolicyUploadedDefinitionFile -Filter "fileName eq 'fslogix.admx'" -All | Remove-MgBetaDeviceManagementGroupPolicyUploadedDefinitionFile
+    Get-MgBetaDeviceManagementGroupPolicyUploadedDefinitionFile -Filter "fileName eq 'FSLogix.admx'" -All | Remove-MgBetaDeviceManagementGroupPolicyUploadedDefinitionFile
 
     #Always get the latest version of FSLogix
-    #$FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest").Links | Where-Object -FilterScript { $_.innerText -eq "Download" }).href
-    $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/fslogix-latest" -UseBasicParsing).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
+    #$FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest").Links | Where-Object -FilterScript { $_.innerText -eq "Download" }).href
+    $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest" -UseBasicParsing).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
     $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$FSLogixLatestURI' to '$OutFile'"
     Start-BitsTransfer $FSLogixLatestURI -Destination $OutFile
     $DestinationPath = Join-Path -Path $env:Temp -ChildPath "FSLogixLatest"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Unzipping '$OutFile' into '$DestinationPath'"
     Expand-Archive -Path $OutFile -DestinationPath $DestinationPath -Force
-    $ADMLFilePath = Join-Path -Path $DestinationPath -ChildPath "fslogix.adml"
-    $ADMXFilePath = Join-Path -Path $DestinationPath -ChildPath "fslogix.admx"
+    $ADMLFilePath = Join-Path -Path $DestinationPath -ChildPath "FSLogix.adml"
+    $ADMXFilePath = Join-Path -Path $DestinationPath -ChildPath "FSLogix.admx"
 
     #region ADML file
     $ADMLFileData = Get-Content -Path $ADMLFilePath -Encoding Byte -Raw
@@ -2952,7 +3169,6 @@ function Get-CallerPreference {
         .LINK
         about_Preference_Variables
     #>
-    #Requires -Version 2
     [CmdletBinding(DefaultParameterSetName = 'AllVariables')]
     param (
         [Parameter(Mandatory)]
@@ -4991,25 +5207,28 @@ function Get-GitFile {
         [Parameter(Mandatory = $true)]
         [ValidatePattern("^https://api.github.com/repos/.*|^https://(www\.)?github.com/")] 
         [string]$URI,
+        [Parameter(Mandatory = $false)]
+        [string]$FileRegExPattern = ".*",
         [Parameter(Mandatory = $true)]
-        [string]$FileRegExPattern,
-        [Parameter(Mandatory = $true)]
-        [string]$Destination
+        [string]$Destination,
+        [switch]$Recurse
     )   
 
+    #Be aware of the API rate limit when unauthenticated: https://docs.github.com/en/rest/using-the-rest-api/getting-started-with-the-rest-api?apiVersion=2022-11-28#2-authenticate
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$URI: $URI"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FileRegExPattern: $FileRegExPattern"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Destination: $Destination"
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Recurse: $Recurse"
 
     $null = New-Item -Path $Destination -ItemType Directory -Force -ErrorAction Ignore
 
     #region URI transformation (in case of the end-user doesn't give an https://api.github.com/repos/... URI
     if ($URI -match "^https://(www\.)?github.com/(?<organisation>[^/]+)/(?<repository>[^/]+)/tree/master/(?<contents>.*)") {
         #https://github.com/lavanack/laurentvanacker.com/tree/master/Azure/Azure%20Virtual%20Desktop/MSIX
-        #"https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX"
+        #https://api.github.com/repos/lavanack/laurentvanacker.com/contents/Azure/Azure%20Virtual%20Desktop/MSIX/MSIX
         $Organisation = $Matches["organisation"]
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Organisation: $Organisation"
         $Repository = $Matches["repository"]
@@ -5019,64 +5238,92 @@ function Get-GitFile {
         $GitHubURI = "https://api.github.com/repos/$Organisation/$Repository/contents/$Contents"
     }
     else {
-        $GitHubURI = $URI 
+        $GitHubURI = $URI
     }
     #endregion
     #region Getting all request files
     $Response = Invoke-WebRequest -Uri $GitHubURI -UseBasicParsing
     $Objects = $Response.Content | ConvertFrom-Json
-    $Files = $Objects | Where-Object -FilterScript { $_.type -eq "file" } | Select-Object -ExpandProperty download_url
+    [array] $Files = $Objects | Where-Object -FilterScript { $_.type -eq "file" } | Select-Object -ExpandProperty download_url
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Files:`r`n$($Files | Format-List -Property * | Out-String)"
+    if ($Recurse) {
+        $Directories = $Objects | Where-Object -FilterScript { $_.type -eq "dir" } | Select-Object -Property url, name
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Directories:`r`n$($Directories | Format-List -Property * | Out-String)"
+        foreach ($CurrentDirectory in $Directories) {
+            $CurrentDestination = Join-Path -Path $Destination -ChildPath $CurrentDirectory.name
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentDestination: $CurrentDestination"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `URI: $($CurrentDirectory.url)"
+            Get-GitFile -URI $CurrentDirectory.url -FileRegExPattern $FileRegExPattern -Destination $CurrentDestination -Recurse
+        }
+    }
     $FileURIs = $Files -match $FileRegExPattern
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FileURIs: $($FileURIs -join ', ')"
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Destination: $($(@($Destination) * $($FileURIs.Count)) -join ', ')"
-    Start-BitsTransfer -Source $FileURIs -Destination $(@($Destination) * $($FileURIs.Count))
-    $DestinationFiles = $FileURIs | ForEach-Object -Process { Join-Path -Path $Destination -ChildPath $($_ -replace ".*/") }
+    $DestinationFiles = $null
+    if ($FileURIs) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FileURIs: $($FileURIs -join ', ')"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Destination: $($(@($Destination) * $($FileURIs.Count)) -join ', ')"
+        Start-BitsTransfer -Source $FileURIs -Destination $(@($Destination) * $($FileURIs.Count))
+        #Getting the url-decoded local file path 
+        $DestinationFiles = $FileURIs | ForEach-Object -Process { 
+            $FileName = $_ -replace ".*/"
+            $DecodedFileName = [System.Web.HttpUtility]::UrlDecode($FileName)
+            if ($FileName -ne $DecodedFileName) {
+                Remove-Item -Path $(Join-Path -Path $Destination -ChildPath $DecodedFileName) -ErrorAction Ignore
+                Rename-Item -Path $(Join-Path -Path $Destination -ChildPath $FileName) -NewName $DecodedFileName -PassThru -Force 
+            }
+        }
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$DestinationFiles: $($DestinationFiles -join ', ')"
+    }
+    else {
+        Write-Warning -Message "No files to copy from '$GitHubURI'..."
+    }
     #endregion
 
     #region non-LFS/LFS processing
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $(Get-ChildItem -Path $DestinationFiles | Out-String)"
-    $GitFile = foreach ($CurrentDestinationFile in $DestinationFiles) {
-        #Checking if the file is a Github LFS file
-        if ($(Get-Content -Path $CurrentDestinationFile -TotalCount 1) -match "version https://git-lfs.github.com") {
-            #From https://gist.github.com/fkraeutli/66fa741d9a8c2a6a238a01d17ed0edc5#retrieving-lfs-files
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $CurrentDestinationFile is a LFS File"
-            $FileContent = Get-Content -Path $CurrentDestinationFile
-            $SizeResult = [regex]::Match($FileContent, "size\s(?<size>\d+)")
-            $OidResult = [regex]::Match($FileContent, "oid\ssha256:(?<oid>\w+)")
-            [int]$Size = ($SizeResult.Groups.Captures | Where-Object -FilterScript { $_.Name -eq 'size' }).Value
-            $Oid = ($OidResult.Groups.Captures | Where-Object -FilterScript { $_.Name -eq 'oid' }).Value
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Size: $Size"
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Oid: $Oid"
-            $JSONHT = @{
-                "operation" = "download" 
-                "transfer"  = @("basic") 
-                "objects"   = @(@{"oid" = $Oid; "size" = $size })
+    if ($DestinationFiles) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $(Get-ChildItem -Path $DestinationFiles | Out-String)"
+        $GitFile = foreach ($CurrentDestinationFile in $DestinationFiles) {
+            #Checking if the file is a Github LFS file
+            if ($(Get-Content -Path $CurrentDestinationFile -TotalCount 1) -match "version https://git-lfs.github.com") {
+                #From https://gist.github.com/fkraeutli/66fa741d9a8c2a6a238a01d17ed0edc5#retrieving-lfs-files
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $CurrentDestinationFile is a LFS File"
+                $FileContent = Get-Content -Path $CurrentDestinationFile
+                $SizeResult = [regex]::Match($FileContent, "size\s(?<size>\d+)")
+                $OidResult = [regex]::Match($FileContent, "oid\ssha256:(?<oid>\w+)")
+                [int]$Size = ($SizeResult.Groups.Captures | Where-Object -FilterScript { $_.Name -eq 'size' }).Value
+                $Oid = ($OidResult.Groups.Captures | Where-Object -FilterScript { $_.Name -eq 'oid' }).Value
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Size: $Size"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Oid: $Oid"
+                $JSONHT = @{
+                    "operation" = "download" 
+                    "transfer"  = @("basic") 
+                    "objects"   = @(@{"oid" = $Oid; "size" = $size })
+                }
+                $JSON = $JSONHT | ConvertTo-Json
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$JSON: $JSON"
+                if ($GitHubURI -match "^https://api.github.com/repos/(?<organisation>[^/]+)/(?<repository>[^/]+)") {
+                    $Organisation = $Matches["organisation"]
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Organisation: $Organisation"
+                    $Repository = $Matches["repository"]
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Repository: $Repository"
+                    $NewURI = "https://github.com/$Organisation/$Repository.git/info/lfs/objects/batch"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NewURI: $NewURI"
+                    $Result = Invoke-WebRequest -Method POST -Headers @{"Accept" = "application/vnd.git-lfs+json"; "Content-type" = "application/json" } -Body $JSON -Uri $NewURI -UseBasicParsing
+                    $LFSDownloadURI = ($Result.Content | ConvertFrom-Json).objects.actions.download.href
+                    Invoke-WebRequest -Uri $LFSDownloadURI -UseBasicParsing -OutFile $CurrentDestinationFile
+                    Get-Item -Path $CurrentDestinationFile
+                }
+                else {
+                    Write-Warning "Unable to determine the Organisation and the Repository from '$GitHubURI'"
+                }
             }
-            $JSON = $JSONHT | ConvertTo-Json
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$JSON: $JSON"
-            if ($GitHubURI -match "^https://api.github.com/repos/(?<organisation>[^/]+)/(?<repository>[^/]+)") {
-                $Organisation = $Matches["organisation"]
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Organisation: $Organisation"
-                $Repository = $Matches["repository"]
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Repository: $Repository"
-                $NewURI = "https://github.com/$Organisation/$Repository.git/info/lfs/objects/batch"
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NewURI: $NewURI"
-                $Result = Invoke-WebRequest -Method POST -Headers @{"Accept" = "application/vnd.git-lfs+json"; "Content-type" = "application/json" } -Body $JSON -Uri $NewURI -UseBasicParsing
-                $LFSDownloadURI = ($Result.Content | ConvertFrom-Json).objects.actions.download.href
-                Invoke-WebRequest -Uri $LFSDownloadURI -UseBasicParsing -OutFile $CurrentDestinationFile
+            #Non-LFS file
+            else {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $CurrentDestinationFile is NOT a LFS File"
                 Get-Item -Path $CurrentDestinationFile
             }
-            else {
-                Write-Warning "Unable to determine the Organisation and the Repository from '$GitHubURI'"
-            }
         }
-        #Non-LFS file
-        else {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $CurrentDestinationFile is NOT a LFS File"
-            Get-Item -Path $CurrentDestinationFile
-        }
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $(Get-ChildItem -Path $GitFile | Out-String)"
     }
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] $(Get-ChildItem -Path $GitFile | Out-String)"
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -6610,7 +6857,7 @@ function New-PsAvdPooledHostPoolSetup {
             #New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
              
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; OneDriveForKnownFolders = $Status[$CurrentHostPool.OneDriveForKnownFolders]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
             if ($CurrentHostPool.$PreferredAppGroupType) {
                 $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
             }
@@ -6686,8 +6933,50 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
 
+            #region OneDrive
+            if ($CurrentHostPool.OneDriveForKnownFolders) {
+                #region Dedicated Host Pool AD GPO Management (1 OneDrive GPO per Host Pool)
+                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                    #region OneDrive GPO
+                    $CurrentHostPoolOneDriveGPO = Get-GPO -Name "$($CurrentHostPool.Name) - OneDrive Settings" -ErrorAction Ignore
+                    if (-not($CurrentHostPoolOneDriveGPO)) {
+                        $CurrentHostPoolOneDriveGPO = New-GPO -Name "$($CurrentHostPool.Name) - OneDrive Settings"
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolOneDriveGPO.DisplayName)' GPO (linked to '($($CurrentHostPoolOU.DistinguishedName))'"
+                    }
+                    $null = $CurrentHostPoolOneDriveGPO | New-GPLink -Target $CurrentHostPoolOU.DistinguishedName -LinkEnabled Yes -ErrorAction Ignore
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
+                    Start-Sleep -Seconds 10
+                    #region OneDrive GPO Management: Dedicated GPO settings for OneDrive profiles for this HostPool 
+                    #From https://learn.microsoft.com/en-us/OneDrive/tutorial-configure-profile-containers#profile-container-configuration
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'OneDrive' related registry values for '$($CurrentHostPoolOneDriveGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
+                    [array] $TenantId = (Get-AzContext).Tenant.Id
+                    foreach ($CurrentTenantId in $TenantId) {
+                        $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive\AllowTenantList' -ValueName $CurrentTenantId -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $CurrentTenantId
+                    }
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive' -ValueName "KFMOptInWithWizard" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $TenantId
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive' -ValueName "KFMSilentOptIn" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $TenantId
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive' -ValueName "KFMSilentOptInDesktop" -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value 1
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive' -ValueName "KFMSilentOptInDocuments" -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value 1
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive' -ValueName "KFMSilentOptInPictures" -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value 1
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive' -ValueName "KFMSilentOptInWithNotification" -Type ([Microsoft.Win32.RegistryValueKind]::MultiString) -Value 0
+                    #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\OneDrive' -ValueName "silentAccountConfig" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
+
+                    #region GPO Debug log file
+                    #From https://blog.piservices.fr/post/2017/12/21/active-directory-debug-avance-de-l-application-des-gpos
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolOneDriveGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Diagnostics' -ValueName "GPSvcDebugLevel" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0x30002
+                    #endregion
+                    #endregion
+                    #endregion
+                }
+                #endregion 
+            }
+            else {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] OneDriveForKnownFolders NOT enabled for '$($CurrentHostPool.Name)' HostPool"
+            }
+            #endregion 
+
             #region FSLogix
-            #From https://learn.microsoft.com/en-us/fslogix/reference-configuration-settings?tabs=profiles
+            #From https://learn.microsoft.com/en-us/FSLogix/reference-configuration-settings?tabs=profiles
             if ($CurrentHostPool.FSLogix) {
                 #region FSLogix Storage Account Name Setup
                 #$CurrentHostPoolStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName()
@@ -6742,7 +7031,7 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
                     Start-Sleep -Seconds 10
                     #region FSLogix GPO Management: Dedicated GPO settings for FSLogix profiles for this HostPool 
-                    #From https://learn.microsoft.com/en-us/fslogix/tutorial-configure-profile-containers#profile-container-configuration
+                    #From https://learn.microsoft.com/en-us/FSLogix/tutorial-configure-profile-containers#profile-container-configuration
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'FSLogix' related registry values for '$($CurrentHostPoolFSLogixGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "Enabled" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "DeleteLocalProfileWhenVHDShouldApply" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
@@ -6761,10 +7050,10 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "IsDynamic" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
 
                     #For running FSLogix System Tray at Logon
-                    #https://learn.microsoft.com/en-us/fslogix/reference-service-drivers-components#fslogix-profile-status-retired-frxtrayexe
+                    #https://learn.microsoft.com/en-us/FSLogix/reference-service-drivers-components#FSLogix-profile-status-retired-frxtrayexe
                     #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Run' -ValueName "frxtray" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value "C:\Program Files\FSLogix\Apps\frxtray.exe"
 
-                    #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' -ValueName "LogonScript" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 'powershell.exe -ExecutionPolicy ByPass -File "C:\Scripts\Send-FSlogixProfileToastNotification.ps1"'
+                    #$null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\Run' -ValueName "LogonScript" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 'powershell.exe -ExecutionPolicy ByPass -File "C:\Scripts\Send-FSLogixProfileToastNotification.ps1"'
 
                     $CurrentHostPoolStorageAccountProfileSharePath = "\\{0}.file.{1}\profiles" -f $CurrentHostPoolStorageAccountName, $StorageEndpointSuffix
                     if ($CurrentHostPool.FSLogixCloudCache) {
@@ -6801,7 +7090,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Diagnostics' -ValueName "GPSvcDebugLevel" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0x30002
                     #endregion
                     #region Microsoft Defender Endpoint A/V General Exclusions (the *.VHD and *.VHDX exclusions applies to FSLogix and MSIX) 
-                    #From https://learn.microsoft.com/en-us/fslogix/overview-prerequisites#configure-antivirus-file-and-folder-exclusions
+                    #From https://learn.microsoft.com/en-us/FSLogix/overview-prerequisites#configure-antivirus-file-and-folder-exclusions
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Microsoft Defender Endpoint A/V Exclusions for this HostPool' related registry values for '$($CurrentHostPoolFSLogixGPO.DisplayName)' GPO (linked to '$($CurrentHostPoolOU.DistinguishedName)' OU)"
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions' -ValueName "Exclusions_Paths" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -ValueName "%TEMP%\*\*.VHD" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
@@ -6842,7 +7131,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #region GPO "Local Users and Groups" Management via groups.xml
                     #From https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-gppref/37722b69-41dd-4813-8bcd-7a1b4d44a13d
-                    #From https://jans.cloud/2019/08/microsoft-fslogix-profile-container/
+                    #From https://jans.cloud/2019/08/microsoft-FSLogix-profile-container/
                     $GroupXMLGPOFilePath = "\\{0}\SYSVOL\{0}\Policies\{{{1}}}\Machine\Preferences\Groups\Groups.xml" -f $DomainName, $($CurrentHostPoolFSLogixGPO.Id)
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$GroupXMLGPOFilePath'"
                     #Generating an UTC time stamp
@@ -6955,7 +7244,7 @@ function New-PsAvdPooledHostPoolSetup {
                 else {
                     #region Enable Kerberos authentication
                     #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-powershell#enable-microsoft-entra-kerberos-authentication-for-hybrid-user-accounts
-                    #From https://smbtothecloud.com/azure-ad-joined-avd-with-fslogix-aad-kerberos-authentication/
+                    #From https://smbtothecloud.com/azure-ad-joined-avd-with-FSLogix-aad-kerberos-authentication/
                     $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -StorageAccountName $CurrentHostPoolStorageAccountName -EnableAzureActiveDirectoryKerberosForFile $true -ActiveDirectoryDomainName $domainName -ActiveDirectoryDomainGuid $domainGuid
                     #endregion
 
@@ -7108,7 +7397,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
                     #From https://blue42.net/windows/changing-ntfs-security-permissions-using-powershell/
-                    #From https://learn.microsoft.com/en-us/fslogix/how-to-configure-storage-permissions#recommended-acls
+                    #From https://learn.microsoft.com/en-us/FSLogix/how-to-configure-storage-permissions#recommended-acls
                     #region Sample NTFS permissions for FSLogix
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting the ACL for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
                     $existingAcl = Get-Acl Z:
@@ -7206,7 +7495,7 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion 
 
             #region Watermarking
-            #From https://learn.microsoft.com/en-us/fslogix/reference-configuration-settings?tabs=profiles
+            #From https://learn.microsoft.com/en-us/FSLogix/reference-configuration-settings?tabs=profiles
             if ($CurrentHostPool.Watermarking) {
                 #region FSLogix AD Management
 
@@ -7379,8 +7668,6 @@ function New-PsAvdPooledHostPoolSetup {
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
 
-                                    #In case of Spot Instance VMs that have been evicted
-                                    $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                                 }
@@ -7534,7 +7821,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #region Microsoft Defender Endpoint A/V Exclusions for this HostPool 
                     $CurrentHostPoolStorageAccountProfileSharePath = "\\{0}.file.{1}\appattach" -f $CurrentHostPoolStorageAccountName, $StorageEndpointSuffix
 
-                    #From https://learn.microsoft.com/en-us/fslogix/overview-prerequisites#configure-antivirus-file-and-folder-exclusions
+                    #From https://learn.microsoft.com/en-us/FSLogix/overview-prerequisites#configure-antivirus-file-and-folder-exclusions
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Microsoft Defender Endpoint A/V Exclusions for this HostPool' related registry values for '$($CurrentHostPoolMSIXGPO.DisplayName)' GPO (linked to '$($CurrentHostPoolOU.DistinguishedName)' OU)"
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolMSIXGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -ValueName "$CurrentHostPoolStorageAccountProfileSharePath\*.VHD" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolMSIXGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths' -ValueName "$CurrentHostPoolStorageAccountProfileSharePath\*.VHD.lock" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value 0
@@ -7798,8 +8085,6 @@ function New-PsAvdPooledHostPoolSetup {
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
 
-                                    #In case of Spot Instance VMs that have been evicted
-                                    $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                                     # Copying the  Demo MSIX Packages from my dedicated GitHub repository
                                     $MSIXDemoPackages = Copy-PsAvdMSIXDemoAppAttachPackage -Source WebSite -Destination "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
                                 }
@@ -8088,6 +8373,9 @@ function New-PsAvdPooledHostPoolSetup {
             elseif ($CurrentHostPool.FSLogix) {
                 $Options += 'FSLogix'
             }
+            if ($CurrentHostPool.OneDriveForKnownFolders) {
+                $Options += 'OneDrive (ForKnownFolders)'
+            }
             if ($CurrentHostPool.MSIX) {
                 $Options += 'MSIX'
             }
@@ -8194,8 +8482,8 @@ function New-PsAvdPooledHostPoolSetup {
                 #Adding a link for running a script for every logged in user
                 $StartupScriptString = @"
 `$Shell = New-Object -ComObject WScript.Shell
-`$Shortcut = `$Shell.CreateShortcut("`$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Send-FSlogixProfileToastNotification.lnk")
-`$Shortcut.TargetPath = "$(Join-Path -Path $Destination -ChildPath 'Send-FSlogixProfileToastNotification.cmd')"
+`$Shortcut = `$Shell.CreateShortcut("`$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup\Send-FSLogixProfileToastNotification.lnk")
+`$Shortcut.TargetPath = "$(Join-Path -Path $Destination -ChildPath 'Send-FSLogixProfileToastNotification.cmd')"
 `$Shortcut.Save()
 "@
 
@@ -8203,7 +8491,7 @@ function New-PsAvdPooledHostPoolSetup {
                 $ScheduledTaskScriptString = @"
 `$ActionParameters = @{
     Execute  = 'powershell.exe'
-    Argument = '-NoProfile -File "$(Join-Path -Path $Destination -ChildPath 'Send-FSlogixProfileToastNotification.ps1')"'
+    Argument = '-NoProfile -File "$(Join-Path -Path $Destination -ChildPath 'Send-FSLogixProfileToastNotification.ps1')"'
 }
 `$Action = New-ScheduledTaskAction @ActionParameters
 
@@ -8219,7 +8507,7 @@ function New-PsAvdPooledHostPoolSetup {
 `$Principal = New-ScheduledTaskPrincipal -RunLevel Highest -GroupId "Users"
 `$Settings = New-ScheduledTaskSettingsSet -Priority 7 -ExecutionTimeLimit `$(New-TimeSpan -Hours 1) -AllowStartIfOnBatteries -Compatibility Win8 -StartWhenAvailable
 `$Task = New-ScheduledTask -Action `$Action -Trigger `$Trigger -Principal `$Principal -Settings `$Settings
-Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputObject `$Task -Force
+Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputObject `$Task -Force
 "@
 
 
@@ -8236,17 +8524,24 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                 $ModuleBase = Get-ModuleBase
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
 
-                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.*"
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSLogixProfileToastNotification.*"
                 
                 #In case of Spot Instance VMs that have been evicted
                 $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                 Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostNames
                 <#
-                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSLogixProfileToastNotification.cmd"
                 Copy-PsAvdHelperScript -Source $Source -Destination "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -ComputerName $SessionHostNames
                 #>
                 #endregion 
             }
+
+            if (($CurrentHostPool.IsMicrosoftEntraIdJoined()) -and ($CurrentHostPool.OneDriveForKnownFolders)) {
+                #region Configuring OneDrive - Intune Configuration Profile - Settings Catalog
+                New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolName $CurrentHostPool.Name
+                #endregion
+            }
+
 
             if (($CurrentHostPool.IsMicrosoftEntraIdJoined()) -and ($CurrentHostPool.FSLogix)) {
                 #region Configuring the session hosts
@@ -8264,14 +8559,14 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                 $ModuleBase = Get-ModuleBase
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
 
-                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.*"
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSLogixProfileToastNotification.*"
                 #In case of Spot Instance VMs that have been evicted
                 $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
                 $SessionHostPrivateIpAddresses = ($SessionHostVMs.NetworkProfile.NetworkInterfaces.Id | Get-AzNetworkInterface).IpConfigurations.PrivateIpAddress
                 Copy-PsAvdHelperScript -Source $Source -Destination $Destination -ComputerName $SessionHostPrivateIpAddresses -Credential $LocalAdminCredential
 
                 <#
-                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.cmd"
+                $Source = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSLogixProfileToastNotification.cmd"
                 Copy-PsAvdHelperScript -Source $Source -Destination "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\Startup" -ComputerName $SessionHostNames -Credential $LocalAdminCredential
                 #>
                 #endregion 
@@ -8353,11 +8648,11 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                     }
                 }
                 else {
-                    #From https://smbtothecloud.com/azure-ad-joined-avd-with-fslogix-aad-kerberos-authentication/
-                    #From https://andrewstaylor.com/2021/06/18/configuring-fslogix-without-gpo-part-1/
+                    #From https://smbtothecloud.com/azure-ad-joined-avd-with-FSLogix-aad-kerberos-authentication/
+                    #From https://andrewstaylor.com/2021/06/18/configuring-FSLogix-without-gpo-part-1/
                     #From https://msendpointmgr.com/2019/01/17/use-intune-graph-api-export-and-import-intune-admx-templates/
                     #From https://msendpointmgr.com/2018/10/17/configure-admx-settings-with-microsoft-intune-administrative-templates/
-                    #From https://incas-training.de/blog/azure-virtual-desktop-teil-3-user-profil-management-mit-fslogix-konfiguration/
+                    #From https://incas-training.de/blog/azure-virtual-desktop-teil-3-user-profil-management-mit-FSLogix-konfiguration/
                     #From https://github.com/microsoftgraph/powershell-intune-samples/tree/master/DeviceConfiguration
 
                     #region Intune Configuration Profile - Settings Catalog
@@ -8368,6 +8663,7 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
                     #region Configuring FSLogix - Intune Configuration Profile - Settings Catalog
                     New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolStorageAccountName $CurrentHostPool.GetFSLogixStorageAccountName() -HostPoolName $CurrentHostPool.Name -HostPoolRecoveryLocationStorageAccountName $CurrentHostPool.GetRecoveryLocationFSLogixStorageAccountName()
                     #endregion
+
                     #endregion
 
                     <#
@@ -8381,7 +8677,7 @@ Register-ScheduledTask -TaskName 'Send-FSlogixProfileToastNotification' -InputOb
 
                     <#
                     $ModuleBase = Get-ModuleBase
-                    $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSlogixProfileToastNotification.ps1"
+                    $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Send-FSLogixProfileToastNotification.ps1"
                     New-PsAvdIntunePowerShellScriptViaCmdlet -ScriptPath $ScriptPath -HostPoolName $CurrentHostPool.Name -RunAsAccount "user"
 					#>
                 }
@@ -9076,6 +9372,7 @@ function New-PsAvdHostPoolSetup {
                 Function New-PsAvdSessionHost { ${Function:New-PsAvdSessionHost} }
                 Function Add-PsAvdCategoryFullPath { ${Function:Add-PsAvdCategoryFullPath} }                
                 Function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI { ${Function:New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI} }  
+                Function New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI { ${Function:New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI} }  
                 Function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI { ${Function:New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI} }  
                 Function New-PsAvdIntunePowerShellScriptViaCmdlet { ${Function:New-PsAvdIntunePowerShellScriptViaCmdlet} }  
                 Function Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet { ${Function:New-PsAvdGroupPolicyDefinitionSettingViaCmdlet} } 
@@ -10139,8 +10436,8 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
             $StorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetAppAttachStorageAccountName() -ResourceGroupName $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
             $storageAccountResourceIds += $StorageAccount.Id
         }
-        if ($CurrentHostPool.FSlogix) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' FSlogix: $($CurrentHostPool.FSlogix)"
+        if ($CurrentHostPool.FSLogix) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' FSLogix: $($CurrentHostPool.FSLogix)"
             $StorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetFSLogixStorageAccountName() -ResourceGroupName $CurrentHostPool.GetResourceGroupName()
             $storageAccountResourceIds += $StorageAccount.Id
         }
