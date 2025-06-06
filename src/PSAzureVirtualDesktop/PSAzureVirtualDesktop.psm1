@@ -80,7 +80,7 @@ Class HostPool {
     hidden static BuildAzureEphemeralOsDiskSkuHashtable([String] $Location, [uint16]$OSImageSizeInGB) {
         if (($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) -or (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($Location)))) {
             #Based on https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-faq
-            $VmSkus = Get-AzComputeResourceSku $Location | Where-Object -FilterScript { ($_.ResourceType -eq "virtualMachines") -and ($_.Capabilities | Where-Object -FilterScript { ($_.Name -eq "EphemeralOSDiskSupported") -and ($_.Value -eq "True") }) }
+            $VmSkus = Get-AzComputeResourceSku -Location $Location | Where-Object -FilterScript { ($_.ResourceType -eq "virtualMachines") -and ($_.Capabilities | Where-Object -FilterScript { ($_.Name -eq "EphemeralOSDiskSupported") -and ($_.Value -eq "True") }) }
             $EphemeralOsDisk = foreach ($sku in $VmSkus) {
                 $MaxResourceVolumeGB = 0
                 $CachedDiskGB = 0

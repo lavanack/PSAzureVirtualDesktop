@@ -13,6 +13,9 @@
 
 ## Release Notes
 
+- [1.0.14]
+  - [Configuring the session lock behavior for Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy)
+  - OneDrive management for redirection of the known folders (Desktop, Documents, Pictures) 
 - [1.0.13]
   - Enabling SSO
   - Switching from Standard_D2s_v4 to Standard_D2s_v6 for the AVD Session Hosts
