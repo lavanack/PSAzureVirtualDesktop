@@ -430,10 +430,10 @@ class PooledHostPool : HostPool {
         $this.ImagePublisherName = "microsoftwindowsdesktop"
         $this.ImageOffer = "office-365"
         $this.ImageSku = "win11-24h2-avd-m365"
-        $this.EnableFSLogix()
         #$this.DisableOneDriveForKnownFolders()
-        $this.EnableMSIX()
-        #$this.DisableAppAttach()
+        $this.EnableFSLogix()
+        #$this.DisableMSIX()
+        $this.EnableAppAttach()
         $this.LoadBalancerType = "BreadthFirst"
         $this.PreferredAppGroupType = "Desktop"
         $this.FSLogixCloudCachePairedPooledHostPool = $null
@@ -592,13 +592,13 @@ class PooledHostPool : HostPool {
         return $this
     }
 
-    [PooledHostPool]DisableMSIX() {
+    hidden [PooledHostPool]DisableMSIX() {
         $this.MSIX = $false
         $this.RefreshNames()        
         return $this
     }
 
-    [PooledHostPool]EnableMSIX() {
+    hidden [PooledHostPool]EnableMSIX() {
         #if (-not($this.IsMicrosoftEntraIdJoined())) {
         if ($this.IsActiveDirectoryJoined()) {
             $this.MSIX = $true
@@ -688,7 +688,7 @@ class PooledHostPool : HostPool {
             $this.AppAttachStorageAccountName = [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location]
             if (-not($this.AppAttachStorageAccountName)) {
                 #Checking if an existing StorageAccount already exists in this Azure location. If yes we are reusing it.
-                $LatestExistingStorageAccount = Get-AzStorageAccount -ResourceGroupName $this.AppAttachStorageAccountResourceGroupName -ErrorAction Ignore | Where-Object -FilterScript { $_.StorageAccountName -match $("saavdappattachpoc{0}" -f [HostPool]::GetAzLocationShortName($this.Location)) } | Sort-Object -Property CreationTime -Descending | Select-Object -First 1
+                $LatestExistingStorageAccount = Get-AzStorageAccount -ResourceGroupName $this.AppAttachStorageAccountResourceGroupName -ErrorAction Ignore | Where-Object -FilterScript { $_.StorageAccountName -match $("saavdapatpoc{0}" -f [HostPool]::GetAzLocationShortName($this.Location)) } | Sort-Object -Property CreationTime -Descending | Select-Object -First 1
                 if ($null -ne $LatestExistingStorageAccount) {
                     $this.AppAttachStorageAccountName = $LatestExistingStorageAccount.StorageAccountName
                     [PooledHostPool]::AppAttachStorageAccountNameHT[$this.Location] = $this.AppAttachStorageAccountName
@@ -697,7 +697,7 @@ class PooledHostPool : HostPool {
                 else {
                     Do {
                         $RandomNumber = Get-Random -Minimum 1 -Maximum 1000
-                        $this.AppAttachStorageAccountName = "saavdappattachpoc{0}{1:D3}" -f [HostPool]::GetAzLocationShortName($this.Location), $RandomNumber
+                        $this.AppAttachStorageAccountName = "saavdapatpoc{0}{1:D3}" -f [HostPool]::GetAzLocationShortName($this.Location), $RandomNumber
                         $this.AppAttachStorageAccountName = $this.AppAttachStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.AppAttachStorageAccountName.Length)).ToLower()
                     } While (-not(Get-AzStorageAccountNameAvailability -Name $this.AppAttachStorageAccountName).NameAvailable)
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] [PooledHostPool]::AppAttachStorageAccountNameHT: $([PooledHostPool]::AppAttachStorageAccountNameHT)"
@@ -3806,7 +3806,8 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     $KeyVaultAdministratorRole = Get-AzRoleDefinition "Key Vault Administrator"
     While (-not(Get-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $KeyVault.ResourceId)) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($KeyVaultAdministratorRole.Name)' RBAC role to the '$((Get-AzContext).Account.Id)' user on the '$($KeyVault.ResourceId)' KeyVault"
-        $null = New-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $KeyVault.ResourceId
+        $RoleAssignment = New-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $KeyVault.ResourceId
+        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
         Start-Sleep -Seconds 30
     }
@@ -3908,7 +3909,8 @@ function New-PsAvdHostPoolCredentialKeyVault {
         $KeyVaultAdministratorRole = Get-AzRoleDefinition "Key Vault Administrator"
         if (-not(Get-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $HostPoolKeyVault.ResourceId)) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($KeyVaultAdministratorRole.Name)' RBAC role to the '$((Get-AzContext).Account.Id)' user on the '$($HostPoolKeyVault.ResourceId)' KeyVault"
-            $null = New-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $HostPoolKeyVault.ResourceId
+            $RoleAssignment = New-AzRoleAssignment -SignInName $((Get-AzContext).Account.Id) -RoleDefinitionName $KeyVaultAdministratorRole.Name -Scope $HostPoolKeyVault.ResourceId
+            Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
         }
         #endregion 
         #endregion 
@@ -3975,7 +3977,7 @@ function Get-PsAvdKeyVaultNameAvailability {
     # Log in first with Connect-AzAccount if not using Cloud Shell
 
     $azContext = Get-AzContext
-    $SubcriptionID = $azContext.Subscription.Id
+    $SubscriptionID = $azContext.Subscription.Id
     $azProfile = [Microsoft.Azure.Commands.Common.Authentication.Abstractions.AzureRmProfileProvider]::Instance.Profile
     $profileClient = New-Object -TypeName Microsoft.Azure.Commands.ResourceManager.Common.RMProfileClient -ArgumentList ($azProfile)
     $token = $profileClient.AcquireAccessToken($azContext.Subscription.TenantId)
@@ -4033,7 +4035,7 @@ function Expand-PsAvdMSIXImage {
     # Log in first with Connect-AzAccount if not using Cloud Shell
 
     $azContext = Get-AzContext
-    $SubcriptionID = $azContext.Subscription.Id
+    $SubscriptionID = $azContext.Subscription.Id
     $azProfile = [Microsoft.Azure.Commands.Common.Authentication.Abstractions.AzureRmProfileProvider]::Instance.Profile
     $profileClient = New-Object -TypeName Microsoft.Azure.Commands.ResourceManager.Common.RMProfileClient -ArgumentList ($azProfile)
     $token = $profileClient.AcquireAccessToken($azContext.Subscription.TenantId)
@@ -4379,6 +4381,7 @@ function New-AzureComputeGallery {
         Write-Verbose -Message "Sleeping 10 seconds ..."
         Start-Sleep -Seconds 10
         $RoleAssignment = New-AzRoleAssignment -ObjectId $AssignedIdentity.PrincipalId -RoleDefinitionName $RoleDefinition.Name -Scope $ResourceGroup.ResourceId -ErrorAction Ignore #-Debug
+        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
     } While ($null -eq $RoleAssignment)
   
     #endregion
@@ -4733,7 +4736,7 @@ function New-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $OSDiskSize = [HostPool]::VMProfileOsdiskSizeGb
-    $OSDiskType = "Premium_LRS"
+    $OSDiskType = "StandardSSD_LRS"
 
     Import-Module -Name Az.Compute #-DisableNameChecking
 
@@ -4795,11 +4798,11 @@ function New-PsAvdSessionHost {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] No Ephemeral OS disk for '$VMName' Azure VM"
     } 
     elseif ($DiffDiskPlacement -eq [DiffDiskPlacement]::CacheDisk) {
-        $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -CreateOption fromImage -DiffDiskSetting Local -DiffDiskPlacement CacheDisk -Caching ReadOnly
+        $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage -DiffDiskSetting Local -DiffDiskPlacement CacheDisk -Caching ReadOnly
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Ephemeral OS disk for '$VMName' Azure VM set to 'CacheDisk'"
     }
     else { 
-        $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -CreateOption fromImage -DiffDiskSetting Local -DiffDiskPlacement ResourceDisk -Caching ReadOnly
+        $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage -DiffDiskSetting Local -DiffDiskPlacement ResourceDisk -Caching ReadOnly
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Ephemeral OS disk for '$VMName' Azure VM set to 'ResourceDisk'"
     }
     try {
@@ -4899,11 +4902,11 @@ function New-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Result: `r`n$($result | Out-String)"
     #>
 
-    #URI updated on : 01/17/2025
+	#URI updated on : 06/02/2025
     #To Get the latest version of the zip by looking in the Resource Group Deployement
     #$avdModuleLocation = ((Get-AzWvdHostPool).ResourcegroupName | ForEach-Object -Process { Get-AzResourceGroupDeployment -ResourceGroupName $_} | Where-Object -FilterScript { $_.Parameters } | Foreach-Object -Process { $_.Parameters["artifactsLocation"]} | Sort-Object -Property Value -Descending | Select-Object -First 1).Value
-    $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02893.601.zip"
-    #$avdExtensionName = "DSC_{0:yyyyMMddHHmmss}" -f (Get-Date)
+    $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02990.697.zip"
+    #$avdModuleLocation = "hhttps://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/ARM-wvd-templates/DSC/Configuration.zip"
     $avdExtensionName = "DSC"
     $avdExtensionPublisher = "Microsoft.Powershell"
     $avdExtensionVersion = "2.73"
@@ -4911,12 +4914,14 @@ function New-PsAvdSessionHost {
         modulesUrl            = $avdModuleLocation
         ConfigurationFunction = "Configuration.ps1\AddSessionHost"
         Properties            = @{
-            hostPoolName          = $HostPool.Name
-            registrationInfoToken = $RegistrationInfoToken
-            aadJoin               = $IsMicrosoftEntraIdJoined.IsPresent
+            hostPoolName             = $HostPool.Name
+            registrationInfoToken    = $RegistrationInfoToken
+            aadJoin                  = $IsMicrosoftEntraIdJoined.IsPresent
+            UseAgentDownloadEndpoint = $true
         }
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding '$VMName' to '$($HostPool.Name)' Host Pool"
+
     $result = Set-AzVMExtension -VMName $VMName -ResourceGroupName $ResourceGroupName -Location  $Location -TypeHandlerVersion $avdExtensionVersion -Publisher $avdExtensionPublisher -ExtensionType $avdExtensionName -Name $avdExtensionName -Settings $avdExtensionSetting
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Result: `r`n$($result | Out-String)"
 
@@ -5765,7 +5770,7 @@ function Revoke-ActiveSASDiskAccess {
     $ActiveSASDisk = $Disks | Where-Object -FilterScript { $_.DiskState -eq "ActiveSAS" }
 
     $azContext = Get-AzContext
-    $SubcriptionID = $azContext.Subscription.Id
+    $SubscriptionID = $azContext.Subscription.Id
     $azProfile = [Microsoft.Azure.Commands.Common.Authentication.Abstractions.AzureRmProfileProvider]::Instance.Profile
     $profileClient = New-Object -TypeName Microsoft.Azure.Commands.ResourceManager.Common.RMProfileClient -ArgumentList ($azProfile)
     $token = $profileClient.AcquireAccessToken($azContext.Subscription.TenantId)
@@ -5970,9 +5975,9 @@ function Remove-PsAvdHostPoolSetup {
         $AppAttachStorageAccountNames = $AzureAppAttachPooledHostPools.AppAttachStorageAccountName | Select-Object -Unique
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$($AppAttachStorageAccountNames -join ', ')' Storage Accounts"
         $ResourceGroups = Get-AzResourceGroup -Name "rg-avd-appattach-poc-*" | Get-AzStorageAccount | Where-Object -FilterScript { $_.StorageAccountName -in $AppAttachStorageAccountNames } 
-        if ($ResourceGroups ) {
+        if ($ResourceGroups) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$($ResourceGroup.Name -join ', ')' Resource Groups"
-            $ResourceGroups | Remove-AzStorageAccount -Force -AsJob
+            $null = $ResourceGroups | Remove-AzStorageAccount -Force -AsJob
         }        
         #endregion
 
@@ -6145,7 +6150,8 @@ function Add-PsAvdAzureAppAttach {
                         $Scope = $AppAttachPackage.Id
                         if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope)) {
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] AppAttach: Assigning the '$($DesktopVirtualizationUserRole.Name)' RBAC role to the '$objId' Entra ID Group on the '$($AppAttachPackage.Name)' AppAttach Application"
-                            $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
+                            $RoleAssignment = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationUserRole.Name -Scope $Scope
+                            Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                         }
                     }
                 }
@@ -6193,9 +6199,6 @@ function New-PsAvdPersonalHostPoolSetup {
 
         $StartTime = Get-Date
         $AzContext = Get-AzContext
-
-        #region Variables
-        $SKUName = "Standard_LRS"
 
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
@@ -6309,7 +6312,8 @@ function New-PsAvdPersonalHostPoolSetup {
                 }
 
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the 'Virtual Machine Administrator Login' RBAC role to '$CurrentHostPoolDAGUsersADGroupName' AD Group on the '$CurrentHostPoolResourceGroupName' Resource Group"
-                $null = New-AzRoleAssignment @parameters
+                $RoleAssignment = New-AzRoleAssignment @parameters
+                Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                 #endregion 
 
             }
@@ -6412,7 +6416,8 @@ function New-PsAvdPersonalHostPoolSetup {
             }
 
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the 'Desktop Virtualization User' RBAC role to '$CurrentHostPoolDAGUsersADGroupName' AD Group on the Desktop Application Group (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $null = New-AzRoleAssignment @parameters
+            $RoleAssignment = New-AzRoleAssignment @parameters
+            Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
             #endregion 
 
             #endregion
@@ -7341,7 +7346,8 @@ function New-PsAvdPooledHostPoolSetup {
                     #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
                     if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixContributorADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        $RoleAssignment = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     }
                     #endregion
 
@@ -7360,7 +7366,8 @@ function New-PsAvdPooledHostPoolSetup {
 
                     if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixElevatedContributorADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        $RoleAssignment = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     }
                     #endregion
 
@@ -7378,7 +7385,8 @@ function New-PsAvdPooledHostPoolSetup {
                     } While (-not($AzADGroup.Id))
                     if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolFSLogixReaderADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        $RoleAssignment = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     }
                     #endregion
 
@@ -7923,7 +7931,8 @@ function New-PsAvdPooledHostPoolSetup {
                     #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
                     if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolMSIXHostsADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group)"
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        $RoleAssignment = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     }
                     #Assign the custom role to the target identity with the specified scope.
                     Do {
@@ -7936,7 +7945,8 @@ function New-PsAvdPooledHostPoolSetup {
                     } While (-not($AzADGroup.Id))
                     if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to 'CurrentPooledHostPoolMSIXUsersADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName'  (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group)"
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        $RoleAssignment = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     }
                     #endregion
 
@@ -7954,7 +7964,8 @@ function New-PsAvdPooledHostPoolSetup {
                     } While (-not($AzADGroup.Id))
                     if (-not(Get-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope)) {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($FileShareContributorRole.Name)' RBAC role to '$CurrentHostPoolMSIXShareAdminsADGroupName' AD Group on the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group)"
-                        $null = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        $RoleAssignment = New-AzRoleAssignment -ObjectId $AzADGroup.Id -RoleDefinitionName $FileShareContributorRole.Name -Scope $Scope
+                        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     }
                     #endregion
 
@@ -8130,7 +8141,8 @@ function New-PsAvdPooledHostPoolSetup {
                                     $Scope = $CurrentHostPoolStorageAccount.Id
                                     if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope)) {
                                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($ReaderAndDataAccessRole.Name)' RBAC role to Service Principal '$objId' on the '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account"
-                                        $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
+                                        $RoleAssignment = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
+                                        Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                                     }
                                 }
                                 else {
@@ -8165,7 +8177,8 @@ function New-PsAvdPooledHostPoolSetup {
                             $Scope = $CurrentHostPoolStorageAccount.Id
                             if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope)) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($ReaderAndDataAccessRole.Name)' RBAC role to Service Principal '$objId' on the '$($CurrentHostPoolStorageAccount.StorageAccountName)' Storage Account"
-                                $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
+                                $RoleAssignment = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $ReaderAndDataAccessRole.Name -Scope $Scope
+                                Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                             }
                         }
                         else {
@@ -8211,7 +8224,8 @@ function New-PsAvdPooledHostPoolSetup {
                 }
 
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($parameters.RoleDefinitionName)' RBAC role to '$CurrentHostPoolDAGUsersADGroupName' AD Group on the '$CurrentHostPoolResourceGroupName' Resource Group"
-                $null = New-AzRoleAssignment @parameters
+                $RoleAssignment = New-AzRoleAssignment @parameters
+                Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                 #endregion 
             }
             #endregion 
@@ -8312,7 +8326,8 @@ function New-PsAvdPooledHostPoolSetup {
             }
 
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($parameters.RoleDefinitionName)' RBAC role to '$CurrentHostPoolDAGUsersADGroupName' AD Group on the Desktop Application Group (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $null = New-AzRoleAssignment @parameters
+            $RoleAssignment = New-AzRoleAssignment @parameters
+            Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
             #endregion 
 
             #endregion
@@ -8354,7 +8369,8 @@ function New-PsAvdPooledHostPoolSetup {
             }
 
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($parameters.RoleDefinitionName)' RBAC role to '$CurrentHostPoolRAGUsersADGroupName' AD Group on the Remote Application Group (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $null = New-AzRoleAssignment @parameters
+            $RoleAssignment = New-AzRoleAssignment @parameters
+            Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
             #endregion 
 
             #endregion
@@ -9323,7 +9339,8 @@ function New-PsAvdHostPoolSetup {
         $Scope = "/subscriptions/$SubscriptionId"
         if (-not(Get-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationPowerOnOffContributorRole.Name -Scope $Scope)) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($DesktopVirtualizationPowerOnOffContributorRole.Name)' RBAC role to Service Principal '$objId' on the '$SubscriptionId' Subscription"
-            $null = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationPowerOnOffContributorRole.Name -Scope $Scope
+            $RoleAssignment = New-AzRoleAssignment -ObjectId $objId -RoleDefinitionName $DesktopVirtualizationPowerOnOffContributorRole.Name -Scope $Scope
+            Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
         }
         #endregion
 
@@ -10467,9 +10484,12 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
             $Index++
             Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
             #Don't know why but sometimes the first deployment fails
-            $Result = New-AzDeployment -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
+			$DeploymentName = (Get-Item -Path $TemplateFilePath).BaseName
+            $Result = New-AzDeployment -Name $DeploymentName -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -DeploymentDebugLogLevel All -ErrorAction Ignore
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
             if ($Result.ProvisioningState -ne "Succeeded") {
+				Write-Verbose -Message "`$Result:`r`n$($Result | Out-String)"
+				Write-Verbose -Message "`Deployment Operation:`r`n$(Get-AzDeploymentOperation -DeploymentName $DeploymentName | Out-String)"				
                 Write-Warning -Message "[$Index/$Limit] The Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
             }
         } Until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge $Limit))
@@ -10528,7 +10548,7 @@ function Import-PsAvdWorkbookTemplate {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
                 try {
                     #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
-                    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI
+                    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI -ErrorAction Stop
                     break
                 }
                 catch [System.Net.WebException] {
