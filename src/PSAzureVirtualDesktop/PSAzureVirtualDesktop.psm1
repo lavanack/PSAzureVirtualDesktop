@@ -6998,6 +6998,8 @@ function New-PsAvdPooledHostPoolSetup {
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersADGroupName' AD group to the '$CurrentHostPoolFSLogixContributorADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
                 $CurrentHostPoolFSLogixContributorADGroup | Add-ADGroupMember -Members $CurrentHostPoolDAGUsersADGroupName
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersADGroupName' AD group to the '$CurrentHostPoolFSLogixContributorADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                $CurrentHostPoolFSLogixContributorADGroup | Add-ADGroupMember -Members $CurrentHostPoolRAGUsersADGroupName
 
                 $CurrentHostPoolFSLogixElevatedContributorADGroupName = "$($CurrentHostPool.Name) - $FSLogixElevatedContributor"
                 $CurrentHostPoolFSLogixElevatedContributorADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolFSLogixElevatedContributorADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
@@ -7594,6 +7596,7 @@ function New-PsAvdPooledHostPoolSetup {
                             $CurrentHostPoolStorageAccount = Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -ErrorAction Ignore
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount:`r`n$($CurrentHostPoolStorageAccount | Out-String)"
                             if ($null -eq $CurrentHostPoolStorageAccount) {
+                                $IsNewCurrentHostPoolStorageAccountName = $true
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$CurrentHostPoolStorageAccountName' StorageAccount"
                                 $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -ErrorAction Ignore -AllowSharedKeyAccess $true
                                 $CurrentHostPoolStorageAccount | Disable-AzStorageContainerDeleteRetentionPolicy
@@ -7601,10 +7604,12 @@ function New-PsAvdPooledHostPoolSetup {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-string)"
                             }
                             else {
+                                $IsNewCurrentHostPoolStorageAccountName = $false
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
                                 #Creating a Private EndPoint for the MSIX / Azure App attach Storage Account on the HostPool Subnet and the Subnet used by this DC
                                 New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -StorageAccount $CurrentHostPoolStorageAccount
                             }
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$IsNewCurrentHostPoolStorageAccountName: $IsNewCurrentHostPoolStorageAccountName"
                             $null = $StorageAccountMutex.ReleaseMutex()
                             #$StorageAccountMutex.Dispose()
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
@@ -7726,6 +7731,37 @@ function New-PsAvdPooledHostPoolSetup {
                     }
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersADGroupName' AD group to the '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
                     $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolDAGUsersADGroupName
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersADGroupName' AD group to the '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolRAGUsersADGroupName
+                    #endregion
+
+                    #region AD MSIX groups (for include all dedicated HostPool AD MSIX Groups)
+                    $HostPoolMSIXHostsADGroupName = "HostPool - $MSIXHosts"
+                    $HostPoolMSIXHostsADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $PooledDesktopsOU.DistinguishedName
+                    if (-not($HostPoolMSIXHostsADGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXHostsADGroupName' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
+                        $HostPoolMSIXHostsADGroup = New-ADGroup -Name $HostPoolMSIXHostsADGroupName -SamAccountName $HostPoolMSIXHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXHostsADGroupName -Path $PooledDesktopsOU.DistinguishedName -PassThru
+                    }
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXHostsADGroup' AD group to the '$HostPoolMSIXHostsADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
+                    $HostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXHostsADGroup
+
+                    $HostPoolMSIXShareAdminsADGroupName = "HostPool - $MSIXShareAdmins"
+                    $HostPoolMSIXShareAdminsADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXShareAdminsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $PooledDesktopsOU.DistinguishedName
+                    if (-not($HostPoolMSIXShareAdminsADGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXShareAdminsADGroupName' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
+                        $HostPoolMSIXShareAdminsADGroup = New-ADGroup -Name $HostPoolMSIXShareAdminsADGroupName -SamAccountName $HostPoolMSIXShareAdminsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXShareAdminsADGroupName -Path $PooledDesktopsOU.DistinguishedName -PassThru
+                    }
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXShareAdminsADGroup' AD group to the '$HostPoolMSIXShareAdminsADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
+                    $HostPoolMSIXShareAdminsADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXShareAdminsADGroup
+
+                    $HostPoolMSIXUsersADGroupName = "HostPool - $MSIXUsers"
+                    $HostPoolMSIXUsersADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXUsersADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $PooledDesktopsOU.DistinguishedName
+                    if (-not($HostPoolMSIXUsersADGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXUsersADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
+                        $HostPoolMSIXUsersADGroup = New-ADGroup -Name $HostPoolMSIXUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXUsersADGroupName -Path $PooledDesktopsOU.DistinguishedName -PassThru
+                    }
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXUsersADGroup' AD group to the '$HostPoolMSIXUsersADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
+                    $HostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXUsersADGroup
                     #endregion
 
                     #region Run a sync with Azure AD
@@ -7765,7 +7801,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $existingAcl.SetAccessRule($AccessRule)
 
                     #Add Full Control for MSIXShareAdmins Group for This folder, subfolders and files
-                    $identity = $CurrentHostPoolMSIXShareAdminsADGroupName
+                    $identity = $HostPoolMSIXShareAdminsADGroupName
                     $colRights = [System.Security.AccessControl.FileSystemRights]::FullControl
                     $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
                     $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -7776,7 +7812,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $existingAcl.SetAccessRule($AccessRule)
 
                     #Add "Read And Execute" for MSIXUsers Group for This folder, subfolders and files
-                    $identity = $CurrentHostPoolMSIXUsersADGroupName
+                    $identity = $HostPoolMSIXUsersADGroupName
                     $colRights = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
                     $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
                     $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None           
@@ -7787,7 +7823,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $existingAcl.SetAccessRule($AccessRule)
 
                     #Add "Read And Execute" for MSIXHosts Group for This folder, subfolders and files
-                    $identity = $CurrentHostPoolMSIXHostsADGroupName
+                    $identity = $HostPoolMSIXHostsADGroupName
                     $colRights = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
                     $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
                     $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -10548,7 +10584,7 @@ function Import-PsAvdWorkbookTemplate {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
                 try {
                     #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
-                    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI -ErrorAction Stop
+                    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI #-ErrorAction Stop
                     break
                 }
                 catch [System.Net.WebException] {
