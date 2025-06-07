@@ -44,6 +44,7 @@ Class HostPool {
     hidden [string] $WorkSpaceName
     hidden [string] $ScalingPlanName
 
+    [String] $PreferredAppGroupType  
     [string] $ImagePublisherName
     [string] $ImageOffer
     [string] $ImageSku
@@ -129,6 +130,7 @@ Class HostPool {
         $this.DisableWatermarking()
         $this.KeyVault = $KeyVault
         $this.SetIdentityProvider([IdentityProvider]::ActiveDirectory)
+        $this.PreferredAppGroupType = "Desktop"
         <#
         $this.DisableSSO()            
         $this.DisableIntune()            
@@ -397,6 +399,11 @@ Class HostPool {
         $this.RefreshNames()
         return $([regex]::Match($this.Name, "-(?<Index>\d+)$").Groups["Index"].Value -as [int])
     }
+
+    [HostPool] SetPreferredAppGroupType ([String] $PreferredAppGroupType) {
+        $this.PreferredAppGroupType = $PreferredAppGroupType 
+        return $this
+    }
 }
 
 class PooledHostPool : HostPool {
@@ -407,7 +414,7 @@ class PooledHostPool : HostPool {
     [ValidateNotNullOrEmpty()] [boolean] $MSIX
     [ValidateNotNullOrEmpty()] [boolean] $AppAttach
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
-    [String] $PreferredAppGroupType  
+
     [PooledHostPool] $FSLogixCloudCachePairedPooledHostPool  
     hidden [string] $FSLogixStorageAccountName
     hidden [String] $FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
@@ -435,7 +442,6 @@ class PooledHostPool : HostPool {
         #$this.DisableMSIX()
         $this.EnableAppAttach()
         $this.LoadBalancerType = "BreadthFirst"
-        $this.PreferredAppGroupType = "Desktop"
         $this.FSLogixCloudCachePairedPooledHostPool = $null
         $this.FSLogixStorageAccountName = $null
         $this.RefreshNames()
@@ -716,11 +722,6 @@ class PooledHostPool : HostPool {
         return ([HostPool]$this).GetPropertyForJSON()
     }
     #>
-
-    [PooledHostPool] SetPreferredAppGroupType ([String] $PreferredAppGroupType) {
-        $this.PreferredAppGroupType = $PreferredAppGroupType 
-        return $this
-    }
 }
 
 class PersonalHostPool : HostPool {
@@ -1079,7 +1080,7 @@ function Install-PsAvdOneDriveGpoSettings {
         #endregion
 
         $TempUninstallString = Get-Package "*onedrive*" -ErrorAction Ignore | ForEach-Object -Process { $($_.Meta.Attributes["UninstallString"]) }
-        $OneDriveFolder = Split-Path -Path $($TempUninstallString -replace "(^.*\.exe)(.*)$",'$1') -Parent
+        $OneDriveFolder = Split-Path -Path $($TempUninstallString -replace "(^.*\.exe)(.*)$", '$1') -Parent
         $ADMXFilePath = Get-ChildItem -Path $OneDriveFolder -File -Filter *.admx -Recurse -Depth 1
         $ADMLFilePath = Get-ChildItem -Path $OneDriveFolder -File -Filter *.adml -Recurse -Depth 1
 
@@ -1091,7 +1092,7 @@ function Install-PsAvdOneDriveGpoSettings {
         #region Uninstalling One Drive if it was installed by this function/script
         if ([string]::IsNullOrEmpty($UninstallString)) {
             $UninstallString = Get-Package "*onedrive*" -ErrorAction Ignore | ForEach-Object -Process { $($_.Meta.Attributes["UninstallString"]) }
-            $UninstallString = $UninstallString -replace "(^.*\.exe)(.*)$",'"$1"$2'
+            $UninstallString = $UninstallString -replace "(^.*\.exe)(.*)$", '"$1"$2'
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Uninstalling OneDrive"
             Start-Process -FilePath "$env:comspec" -ArgumentList "/c", $UninstallString -Wait
         }
@@ -2015,7 +2016,7 @@ function New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
             }
             elseif ($_.options.dependedOnBy.count -eq 5) {
                 $SettingValue = @{
-                    "Desktop"                                                      = 1
+                    "Desktop"                                                       = 1
                     "Documents"                                                     = 1
                     "Pictures"                                                      = 1
                     "Show notification to users after folders have been redirected" = 0
@@ -4902,7 +4903,7 @@ function New-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Result: `r`n$($result | Out-String)"
     #>
 
-	#URI updated on : 06/02/2025
+    #URI updated on : 06/02/2025
     #To Get the latest version of the zip by looking in the Resource Group Deployement
     #$avdModuleLocation = ((Get-AzWvdHostPool).ResourcegroupName | ForEach-Object -Process { Get-AzResourceGroupDeployment -ResourceGroupName $_} | Where-Object -FilterScript { $_.Parameters } | Foreach-Object -Process { $_.Parameters["artifactsLocation"]} | Sort-Object -Property Value -Descending | Select-Object -First 1).Value
     $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02990.697.zip"
@@ -6212,7 +6213,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; Hibernation = $Status[$CurrentHostPool.HibernationEnabled]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
 
             if ($CurrentHostPool.$PreferredAppGroupType) {
-                $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
+                $Tag['PreferredAppGroupType'] = $CurrentHostPool.PreferredAppGroupType
             }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Tag['Image'] = 'Azure Compute Gallery'
@@ -6341,7 +6342,7 @@ function New-PsAvdPersonalHostPoolSetup {
                 HostPoolType                  = 'Personal'
                 PersonalDesktopAssignmentType = 'Automatic'
                 LoadBalancerType              = $CurrentHostPool.LoadBalancerType
-                PreferredAppGroupType         = "Desktop"
+                PreferredAppGroupType         = $CurrentHostPool.PreferredAppGroupType
                 Location                      = $CurrentHostPool.Location
                 StartVMOnConnect              = $true
                 ExpirationTime                = $RegistrationInfoExpirationTime.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
@@ -6371,56 +6372,106 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
             #endregion
 
-            #region Desktop Application Group Setup
-            $parameters = @{
-                Name                 = "{0}-DAG" -f $CurrentHostPool.Name
-                #FriendlyName         = $CurrentHostPool.Name
-                ResourceGroupName    = $CurrentHostPoolResourceGroupName
-                Location             = $CurrentHostPool.Location
-                HostPoolArmPath      = $CurrentAzWvdHostPool.Id
-                ApplicationGroupType = 'Desktop'
-                ShowInFeed           = $true
-                #Verbose              = $true
+            if ($CurrentHostPool.PreferredAppGroupType -eq "Desktop") {
+                #region Desktop Application Group Setup
+                $parameters = @{
+                    Name                 = "{0}-DAG" -f $CurrentHostPool.Name
+                    #FriendlyName         = $CurrentHostPool.Name
+                    ResourceGroupName    = $CurrentHostPoolResourceGroupName
+                    Location             = $CurrentHostPool.Location
+                    HostPoolArmPath      = $CurrentAzWvdHostPool.Id
+                    ApplicationGroupType = 'Desktop'
+                    ShowInFeed           = $true
+                    #Verbose              = $true
+                }
+
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Desktop Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                $CurrentAzDesktopApplicationGroup = New-AzWvdApplicationGroup @parameters
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Desktop Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
+
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Updating the friendly name of the Desktop for the Desktop Application Group of the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) to '$($CurrentHostPool.Name)'"
+                $parameters = @{
+                    ApplicationGroupName = $CurrentAzDesktopApplicationGroup.Name
+                    ResourceGroupName    = $CurrentHostPoolResourceGroupName
+                }
+                $null = Get-AzWvdDesktop @parameters | Update-AzWvdDesktop -FriendlyName $CurrentHostPool.Name
+
+                #region Assign 'Desktop Virtualization User' RBAC role to application groups
+                # Get the object ID of the user group you want to assign to the application group
+                Do {
+                    Start-MicrosoftEntraIDConnectSync
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                    Start-Sleep -Seconds 30
+                    $AzADGroup = $null
+                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersADGroupName
+                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersADGroupName'"
+                } While (-not($AzADGroup.Id))
+
+                # Assign users to the application group
+                $parameters = @{
+                    ObjectId           = $AzADGroup.Id
+                    ResourceName       = $CurrentAzDesktopApplicationGroup.Name
+                    ResourceGroupName  = $CurrentHostPoolResourceGroupName
+                    RoleDefinitionName = 'Desktop Virtualization User'
+                    ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
+                    #Verbose            = $true
+                }
+
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the 'Desktop Virtualization User' RBAC role to '$CurrentHostPoolDAGUsersADGroupName' AD Group on the Desktop Application Group (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                $RoleAssignment = New-AzRoleAssignment @parameters
+                Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+                #endregion 
+
+                #endregion
+
+                $ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
             }
+            else {
+                #region Remote Application Group Setup
+                $parameters = @{
+                    Name                 = "{0}-RAG" -f $CurrentHostPool.Name
+                    ResourceGroupName    = $CurrentHostPoolResourceGroupName
+                    Location             = $CurrentHostPool.Location
+                    HostPoolArmPath      = $CurrentAzWvdHostPool.Id
+                    ApplicationGroupType = 'RemoteApp'
+                    ShowInFeed           = $true
+                    #Verbose              = $true
+                }
 
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Desktop Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $CurrentAzDesktopApplicationGroup = New-AzWvdApplicationGroup @parameters
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Desktop Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Remote Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                $CurrentAzRemoteApplicationGroup = New-AzWvdApplicationGroup @parameters
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Remote Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
 
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Updating the friendly name of the Desktop for the Desktop Application Group of the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) to '$($CurrentHostPool.Name)'"
-            $parameters = @{
-                ApplicationGroupName = $CurrentAzDesktopApplicationGroup.Name
-                ResourceGroupName    = $CurrentHostPoolResourceGroupName
+                #region Assign required RBAC role to application groups
+                # Get the object ID of the user group you want to assign to the application group
+                Do {
+                    Start-MicrosoftEntraIDConnectSync
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                    Start-Sleep -Seconds 30
+                    $AzADGroup = $null
+                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolRAGUsersADGroupName
+                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolRAGUsersADGroupName'"
+                } While (-not($AzADGroup.Id))
+
+                # Assign users to the application group
+                $parameters = @{
+                    ObjectId           = $AzADGroup.Id
+                    ResourceName       = $CurrentAzRemoteApplicationGroup.Name
+                    ResourceGroupName  = $CurrentHostPoolResourceGroupName
+                    RoleDefinitionName = 'Desktop Virtualization User'
+                    ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
+                    #Verbose            = $true
+                }
+
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($parameters.RoleDefinitionName)' RBAC role to '$CurrentHostPoolRAGUsersADGroupName' AD Group on the Remote Application Group (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                $RoleAssignment = New-AzRoleAssignment @parameters
+                Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+                #endregion 
+
+                #endregion
+
+                $ApplicationGroupReference = $CurrentAzRemoteApplicationGroup.Id
             }
-            $null = Get-AzWvdDesktop @parameters | Update-AzWvdDesktop -FriendlyName $CurrentHostPool.Name
-
-            #region Assign 'Desktop Virtualization User' RBAC role to application groups
-            # Get the object ID of the user group you want to assign to the application group
-            Do {
-                Start-MicrosoftEntraIDConnectSync
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                Start-Sleep -Seconds 30
-                $AzADGroup = $null
-                #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersADGroupName
-                $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersADGroupName'"
-            } While (-not($AzADGroup.Id))
-
-            # Assign users to the application group
-            $parameters = @{
-                ObjectId           = $AzADGroup.Id
-                ResourceName       = $CurrentAzDesktopApplicationGroup.Name
-                ResourceGroupName  = $CurrentHostPoolResourceGroupName
-                RoleDefinitionName = 'Desktop Virtualization User'
-                ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
-                #Verbose            = $true
-            }
-
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the 'Desktop Virtualization User' RBAC role to '$CurrentHostPoolDAGUsersADGroupName' AD Group on the Desktop Application Group (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-            $RoleAssignment = New-AzRoleAssignment @parameters
-            Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-            #endregion 
-
-            #endregion
 
             #region Workspace Setup
             $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.IdentityProvider
@@ -6461,7 +6512,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $FriendlyName = "{0} ({1})" -f $CurrentHostPool.GetAzAvdWorkSpaceName(), $($Options -join ', ')
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FriendlyName: $FriendlyName"
 
-            $ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
+            #$ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ApplicationGroupReference: $($ApplicationGroupReference -join ', ')"
 
             $parameters = @{
@@ -6864,7 +6915,7 @@ function New-PsAvdPooledHostPoolSetup {
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
             $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; OneDriveForKnownFolders = $Status[$CurrentHostPool.OneDriveForKnownFolders]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
             if ($CurrentHostPool.$PreferredAppGroupType) {
-                $Tag['PreferredAppGroupType'] = $CurrentHostPool.$PreferredAppGroupType
+                $Tag['PreferredAppGroupType'] = $CurrentHostPool.PreferredAppGroupType
             }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Tag['Image'] = 'Azure Compute Gallery'
@@ -7214,7 +7265,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -AllowSharedKeyAccess $true
                     $CurrentHostPoolStorageAccount | Disable-AzStorageContainerDeleteRetentionPolicy
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolStorageAccountName' Storage Account (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-string)"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-String)"
                 }
                 #endregion 
                 
@@ -7601,7 +7652,7 @@ function New-PsAvdPooledHostPoolSetup {
                                 $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -ErrorAction Ignore -AllowSharedKeyAccess $true
                                 $CurrentHostPoolStorageAccount | Disable-AzStorageContainerDeleteRetentionPolicy
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolStorageAccountName' StorageAccount is created"
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-string)"
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-String)"
                             }
                             else {
                                 $IsNewCurrentHostPoolStorageAccountName = $false
@@ -8055,7 +8106,7 @@ function New-PsAvdPooledHostPoolSetup {
                                 $CurrentHostPoolStorageAccount = New-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -AccountName $CurrentHostPoolStorageAccountName -Location $CurrentHostPool.Location -SkuName $SKUName -MinimumTlsVersion TLS1_2 -EnableHttpsTrafficOnly $true -ErrorAction Ignore -AllowSharedKeyAccess $true
                                 $CurrentHostPoolStorageAccount | Disable-AzStorageContainerDeleteRetentionPolicy
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentHostPoolStorageAccountName' StorageAccount is created"
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-string)"
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccount: $($CurrentHostPoolStorageAccountCurrentHostPoolStorageAccount | Out-String)"
                             }
                             else {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
@@ -8459,12 +8510,15 @@ function New-PsAvdPooledHostPoolSetup {
             $FriendlyName = "{0} ({1})" -f $CurrentHostPool.GetAzAvdWorkSpaceName(), $($Options -join ', ')
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FriendlyName: $FriendlyName"
 
+            <#
             if ($CurrentHostPool.PreferredAppGroupType -eq "Desktop") {
                 $ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
             }
             else {
                 $ApplicationGroupReference = $CurrentAzRemoteApplicationGroup.Id
             }
+            #>
+            $ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id, $CurrentAzRemoteApplicationGroup.Id
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ApplicationGroupReference: $($ApplicationGroupReference -join ', ')"
 
             $parameters = @{
@@ -10520,12 +10574,12 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
             $Index++
             Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
             #Don't know why but sometimes the first deployment fails
-			$DeploymentName = (Get-Item -Path $TemplateFilePath).BaseName
+            $DeploymentName = (Get-Item -Path $TemplateFilePath).BaseName
             $Result = New-AzDeployment -Name $DeploymentName -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -DeploymentDebugLogLevel All -ErrorAction Ignore
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
             if ($Result.ProvisioningState -ne "Succeeded") {
-				Write-Verbose -Message "`$Result:`r`n$($Result | Out-String)"
-				Write-Verbose -Message "`Deployment Operation:`r`n$(Get-AzDeploymentOperation -DeploymentName $DeploymentName | Out-String)"				
+                Write-Verbose -Message "`$Result:`r`n$($Result | Out-String)"
+                Write-Verbose -Message "`Deployment Operation:`r`n$(Get-AzDeploymentOperation -DeploymentName $DeploymentName | Out-String)"				
                 Write-Warning -Message "[$Index/$Limit] The Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
             }
         } Until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge $Limit))
@@ -10578,7 +10632,7 @@ function Import-PsAvdWorkbookTemplate {
 
     #region WorkBook Template
     foreach ($DisplayName in $WorkBookTemplates.Keys) {
-        $ExistingWorkBookTemplate = Get-AzApplicationInsightsWorkBookTemplate -Name $DisplayName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
+        $ExistingWorkBookTemplate = Get-AzApplicationInsightsWorkbookTemplate -Name $DisplayName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
         if ($null -eq $ExistingWorkBookTemplate) {
             foreach ($CurrentURI in $WorkBookTemplates[$DisplayName]) {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
