@@ -400,10 +400,6 @@ Class HostPool {
         return $([regex]::Match($this.Name, "-(?<Index>\d+)$").Groups["Index"].Value -as [int])
     }
 
-    [HostPool] SetPreferredAppGroupType ([String] $PreferredAppGroupType) {
-        $this.PreferredAppGroupType = $PreferredAppGroupType 
-        return $this
-    }
 }
 
 class PooledHostPool : HostPool {
@@ -715,6 +711,11 @@ class PooledHostPool : HostPool {
             $this.AppAttachStorageAccountResourceGroupName = [string]::Empty
             $this.AppAttachStorageAccountName = [string]::Empty
         }
+    }
+
+    [HostPool] SetPreferredAppGroupType ([String] $PreferredAppGroupType) {
+        $this.PreferredAppGroupType = $PreferredAppGroupType 
+        return $this
     }
 
     <#
@@ -6210,11 +6211,8 @@ function New-PsAvdPersonalHostPoolSetup {
             Write-Host -Object "Starting '$($CurrentHostPool.Name)' Setup"
             $CurrentHostPoolStartTime = Get-Date
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; Hibernation = $Status[$CurrentHostPool.HibernationEnabled]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; Hibernation = $Status[$CurrentHostPool.HibernationEnabled]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking]; PreferredAppGroupType = $CurrentHostPool.PreferredAppGroupType }
 
-            if ($CurrentHostPool.$PreferredAppGroupType) {
-                $Tag['PreferredAppGroupType'] = $CurrentHostPool.PreferredAppGroupType
-            }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Tag['Image'] = 'Azure Compute Gallery'
                 $Tag['VMSourceImageId'] = $CurrentHostPool.VMSourceImageId
@@ -6425,52 +6423,6 @@ function New-PsAvdPersonalHostPoolSetup {
                 #endregion
 
                 $ApplicationGroupReference = $CurrentAzDesktopApplicationGroup.Id
-            }
-            else {
-                #region Remote Application Group Setup
-                $parameters = @{
-                    Name                 = "{0}-RAG" -f $CurrentHostPool.Name
-                    ResourceGroupName    = $CurrentHostPoolResourceGroupName
-                    Location             = $CurrentHostPool.Location
-                    HostPoolArmPath      = $CurrentAzWvdHostPool.Id
-                    ApplicationGroupType = 'RemoteApp'
-                    ShowInFeed           = $true
-                    #Verbose              = $true
-                }
-
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Remote Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $CurrentAzRemoteApplicationGroup = New-AzWvdApplicationGroup @parameters
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Remote Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
-
-                #region Assign required RBAC role to application groups
-                # Get the object ID of the user group you want to assign to the application group
-                Do {
-                    Start-MicrosoftEntraIDConnectSync
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                    Start-Sleep -Seconds 30
-                    $AzADGroup = $null
-                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolRAGUsersADGroupName
-                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolRAGUsersADGroupName'"
-                } While (-not($AzADGroup.Id))
-
-                # Assign users to the application group
-                $parameters = @{
-                    ObjectId           = $AzADGroup.Id
-                    ResourceName       = $CurrentAzRemoteApplicationGroup.Name
-                    ResourceGroupName  = $CurrentHostPoolResourceGroupName
-                    RoleDefinitionName = 'Desktop Virtualization User'
-                    ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
-                    #Verbose            = $true
-                }
-
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($parameters.RoleDefinitionName)' RBAC role to '$CurrentHostPoolRAGUsersADGroupName' AD Group on the Remote Application Group (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                $RoleAssignment = New-AzRoleAssignment @parameters
-                Write-Verbose -Message "`$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-                #endregion 
-
-                #endregion
-
-                $ApplicationGroupReference = $CurrentAzRemoteApplicationGroup.Id
             }
 
             #region Workspace Setup
@@ -6913,10 +6865,7 @@ function New-PsAvdPooledHostPoolSetup {
             #New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId -KeyVault $CurrentHostPool.KeyVault
              
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; OneDriveForKnownFolders = $Status[$CurrentHostPool.OneDriveForKnownFolders]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking] }
-            if ($CurrentHostPool.$PreferredAppGroupType) {
-                $Tag['PreferredAppGroupType'] = $CurrentHostPool.PreferredAppGroupType
-            }
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; OneDriveForKnownFolders = $Status[$CurrentHostPool.OneDriveForKnownFolders]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking]; PreferredAppGroupType = $CurrentHostPool.PreferredAppGroupType }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Tag['Image'] = 'Azure Compute Gallery'
                 $Tag['VMSourceImageId'] = $CurrentHostPool.VMSourceImageId
