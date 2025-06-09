@@ -8953,6 +8953,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                 }
             }
             #endregion
+            #endregion
 
             #region Log Analytics WorkSpace Setup : Monitor and manage performance and health
             #From https://learn.microsoft.com/en-us/training/modules/monitor-manage-performance-health/3-log-analytics-workspace-for-azure-monitor
