@@ -6,7 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Changelog for PSAzureVirtualDesktop](#changelog-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
-  - [\[1.0.14\] - 2025-05-22](#1014---2025-05-22)
+  - [\[1.0.14\] - 2025-06-10](#1014---2025-06-10)
   - [\[1.0.12\] - 2025-04-29](#1012---2025-04-29)
   - [\[1.0.11\] - 2025-04-16](#1011---2025-04-16)
   - [\[1.0.10\] - 2025-04-14](#1010---2025-04-14)
@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2025-06-10 - Updated `CHANGELOG.md`
 - 2025-05-22 - Updated `CHANGELOG.md`
 - 2025-05-11 - Updated `CHANGELOG.md`
 - 2025-04-29 - Updated `CHANGELOG.md`
@@ -34,10 +35,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
 
-## [1.0.14] - 2025-05-22
+## [1.0.14] - 2025-06-10
 
 - [Configuring the session lock behavior for Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy)
 - OneDrive management for redirection of the known folders (Desktop, Documents, Pictures) 
+- As MSIX App Attach is deprecated from June 1 2025, all MSIX App Attach related feature has been disabled. The related code will be removed in an upcoming release.
+- Migrating disks from Standard HDD to Standard SSD for the AVD Session Hosts
+- Updating the DSC Configuration for the AVD Session Hosts to [https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02990.697.zip](https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02990.697.zip)
+- Bug fix for Remote App on Personal Host Pools
   
 - ## [1.0.13] - 2025-05-11
 
