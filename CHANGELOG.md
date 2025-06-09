@@ -39,7 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - [Configuring the session lock behavior for Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy)
 - OneDrive management for redirection of the known folders (Desktop, Documents, Pictures) 
-- As MSIX App Attach is deprecated from June 1 2025, all MSIX App Attach related feature has been disabled. The related code will be removed in an upcoming release.
+- As MSIX App Attach is deprecated from June 1 2025, all MSIX App Attach related features have been disabled. The related code will be removed in an upcoming release.
 - Migrating disks from Standard HDD to Standard SSD for the AVD Session Hosts
 - Updating the DSC Configuration for the AVD Session Hosts to [https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02990.697.zip](https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02990.697.zip)
 - Bug fix for Remote App on Personal Host Pools
