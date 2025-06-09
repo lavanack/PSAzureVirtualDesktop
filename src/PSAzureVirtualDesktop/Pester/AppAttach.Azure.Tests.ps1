@@ -9,7 +9,7 @@ BeforeDiscovery {
 
 Describe "<_.Name> HostPool - AppAttach File Shares" -ForEach $AppAttachHostPools {
         BeforeEach {
-            $StorageAccount = Get-AzStorageAccount -Name $_.GetAppAttachStorageAccountName() -ResourceGroupName $_.GetResourceGroupName()
+            $StorageAccount = Get-AzResourceGroup -Name "rg-avd-appattach-poc*" | Get-AzStorageAccount -Name $_.GetAppAttachStorageAccountName()
             # Get the list of file shares in the storage account
             $StorageShare = Get-AzStorageShare -Context $StorageAccount.Context
             $AppAttachStorageShare = $StorageShare | Where-Object  -FilterScript {$_.Name -eq "appattach"}
