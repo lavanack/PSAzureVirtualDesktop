@@ -1201,13 +1201,23 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
                 $IncludeApplications += $AVDSP.AppId
             }
 
+            $ExcludeApplications = @()
+            $AWVSI = Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Windows VM Sign-In'"
+            $MAWVMSI = Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Microsoft Azure Windows Virtual Machine Sign-in'"
+            if ($null -ne $AWVSI) {
+                $ExcludeApplications += $AWVSI.AppId
+            }
+            if ($null -ne $MAWVMSI) {
+                $ExcludeApplications += $MAWVMSI.AppId
+            }
+
             $policyProperties = @{
                 DisplayName     = $DisplayName
                 State           = "Enabled"
                 Conditions      = @{
                     Applications = @{
                         IncludeApplications = $IncludeApplications
-                        ExcludeApplications = @((Get-MgBetaServicePrincipal -Filter "DisplayName eq 'Azure Windows VM Sign-In'").AppId)
+                        ExcludeApplications = $ExcludeApplications
                     }
                     Users        = @{
                         IncludeUsers  = $IncludeUsers
@@ -5962,7 +5972,7 @@ function Remove-PsAvdHostPoolSetup {
     #region Cleanup of the previously existing resources
 
     #region Removing SSO Settings
-    Remove-SSO -HostPool $HostPool
+    Remove-SSO -HostPool $HostPools
     #endregion
     
     #region Revoke-Active SAS Disk Access in the HostPool ResourceGroups
@@ -10843,6 +10853,75 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     }
 }
 
+function Import-PsAvdWorkbook {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $false)]
+        [string] $Location = (Get-AzVMCompute).Location
+    )
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
+    $WorkBooks = @{
+        #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook (similar to https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json)
+        #"Deep Insights Workbook - AVD Accelerator"      = "https://raw.githubusercontent.com/Azure/avdaccelerator/main/workload/workbooks/deepInsightsWorkbook/deepInsights.workbook"
+        #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/errorReporting
+        "Error Reporting Workbook - AVD Accelerator" = "https://raw.githubusercontent.com/Azure/avdaccelerator/refs/heads/main/workload/workbooks/errorReporting/errorReporting.workbook"
+        #https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/errorTracking
+        "Error Tracking Workbook - AVD Accelerator" = "https://raw.githubusercontent.com/Azure/avdaccelerator/refs/heads/main/workload/workbooks/errorTracking/errorTracking.workbook"
+        #From https://github.com/scautomation/Azure-Inventory-Workbook/tree/master/galleryTemplate
+        "Windows Virtual Desktop Workbook - Billy York" = "https://raw.githubusercontent.com/scautomation/WVD-Workbook/master/galleryTemplate/template.json"
+        #From https://github.com/microsoft/Application-Insights-Workbooks/tree/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights
+        "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
+    }
+
+    [HostPool]::BuildAzureLocationShortNameHashtable()
+    $Index = 1 
+    $ResourceGroupName = "rg-avd-workbook-poc-{0}-{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
+    if ($null -eq (Get-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Ignore)) {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group in the '$Location' Location"
+        $null = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
+    }
+
+    #region WorkBook
+    #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
+    foreach ($DisplayName in $WorkBooks.Keys) {
+        $ExistingWorkBook = (Get-AzApplicationInsightsWorkbook -Category 'workbook' | Where-Object -FilterScript { $_.DisplayName -eq $DisplayName })
+        if ($null -eq $ExistingWorkBook) {
+            foreach ($CurrentURI in $WorkBooks[$DisplayName]) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Workbook in the '$Location' Location from '$CurrentURI'"
+                $Name = (New-Guid).ToString()
+                try {
+                    #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
+                    $WorkbookContent = Invoke-RestMethod -Uri $CurrentURI -ErrorAction Stop | ConvertTo-Json -Depth 100
+                    $AzApplicationInsightsWorkbook = New-AzApplicationInsightsWorkbook -ResourceGroupName $ResourceGroupName -Name $Name -Location $Location -DisplayName $DisplayName -SourceId "microsoft_azure_wvd" -Category 'workbook' -SerializedData $workbookContent
+                    break
+                }
+                catch [System.Net.WebException] {
+                    Write-Warning  -Message $($_.Exception.Message)
+                }
+            }
+        }
+        else {
+            Write-Warning -Message "The '$DisplayName' WorkBook already exists:`r`n:$($ExistingWorkBook | Out-String)"
+        }
+    }
+    #endregion
+
+    #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
+    $ModuleBase = Get-ModuleBase
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+    $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
+    $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $WorkBooks.Keys }
+    Invoke-Pester -Container $Container -Output Detailed
+    #endregion
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
 function Import-PsAvdWorkbookTemplate {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
@@ -10859,9 +10938,8 @@ function Import-PsAvdWorkbookTemplate {
     $WorkBookTemplates = @{
         #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
         #Sometimes ==> Invoke-RestMethod : The remote name could not be resolved: 'blog.itprocloud.de' raised an error so I'm hosting a copy on my own github as fallback
-        #"750ec0fd-74d1-4e80-be97-3001485303e8" = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
-        #(New-Guid).Guid = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
-        "Azure Virtual Desktop - Deep-Insights" = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
+        #"Azure Virtual Desktop - Deep-Insights" = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
+        "750ec0fd-74d1-4e80-be97-3001485303e8" = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
     }
 
     [HostPool]::BuildAzureLocationShortNameHashtable()
@@ -10933,71 +11011,6 @@ function Import-PsAvdWorkbookTemplate {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $AzApplicationInsightsWorkbook
-}
-
-function Import-PsAvdWorkbook {
-    [CmdletBinding(PositionalBinding = $false)]
-    Param(
-        [Parameter(Mandatory = $false)]
-        [string] $Location = (Get-AzVMCompute).Location
-    )
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
-
-    $WorkBooks = @{
-        #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
-        "Deep Insights Workbook - AVD Accelerator"      = "https://raw.githubusercontent.com/Azure/avdaccelerator/main/workload/workbooks/deepInsightsWorkbook/deepInsights.workbook"
-        #From https://github.com/scautomation/Azure-Inventory-Workbook/tree/master/galleryTemplate
-        "Windows Virtual Desktop Workbook - Billy York" = "https://raw.githubusercontent.com/scautomation/WVD-Workbook/master/galleryTemplate/template.json"
-        #From https://github.com/microsoft/Application-Insights-Workbooks/tree/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights
-        "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
-    }
-
-    [HostPool]::BuildAzureLocationShortNameHashtable()
-    $Index = 1 
-    $ResourceGroupName = "rg-avd-workbook-poc-{0}-{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
-    if ($null -eq (Get-AzResourceGroup -Name $ResourceGroupName -Location $Location -ErrorAction Ignore)) {
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$ResourceGroupName' Resource Group in the '$Location' Location"
-        $null = New-AzResourceGroup -Name $ResourceGroupName -Location $Location -Force
-    }
-
-    #region WorkBook
-    #From https://github.com/Azure/avdaccelerator/tree/main/workload/workbooks/deepInsightsWorkbook
-    foreach ($DisplayName in $WorkBooks.Keys) {
-        $ExistingWorkBook = (Get-AzApplicationInsightsWorkbook -Category 'workbook' | Where-Object -FilterScript { $_.DisplayName -eq $DisplayName })
-        if ($null -eq $ExistingWorkBook) {
-            foreach ($CurrentURI in $WorkBooks[$DisplayName]) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' Workbook in the '$Location' Location from '$CurrentURI'"
-                $Name = (New-Guid).ToString()
-                try {
-                    #If Invoke-RestMethod raised "The remote name could not be resolved" we take the next entry in the list
-                    $WorkbookContent = Invoke-RestMethod -Uri $CurrentURI -ErrorAction Stop | ConvertTo-Json -Depth 100
-                    $AzApplicationInsightsWorkbook = New-AzApplicationInsightsWorkbook -ResourceGroupName $ResourceGroupName -Name $Name -Location $Location -DisplayName $DisplayName -SourceId "microsoft_azure_wvd" -Category 'workbook' -SerializedData $workbookContent
-                    break
-                }
-                catch [System.Net.WebException] {
-                    Write-Warning  -Message $($_.Exception.Message)
-                }
-            }
-        }
-        else {
-            Write-Warning -Message "The '$DisplayName' WorkBook already exists:`r`n:$($ExistingWorkBook | Out-String)"
-        }
-    }
-    #endregion
-
-    #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
-    $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $WorkBooks.Keys }
-    Invoke-Pester -Container $Container -Output Detailed
-    #endregion
-
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
 function New-PsAvdStopInactiveSessionHostAzFunction {
