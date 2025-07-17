@@ -7923,33 +7923,65 @@ function New-PsAvdPooledHostPoolSetup {
                     $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolRAGUsersADGroupName
                     #endregion
 
-                    #region AD MSIX groups (for include all dedicated HostPool AD MSIX Groups)
-                    $HostPoolMSIXHostsADGroupName = "HostPool - $MSIXHosts"
-                    $HostPoolMSIXHostsADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $PooledDesktopsOU.DistinguishedName
-                    if (-not($HostPoolMSIXHostsADGroup)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXHostsADGroupName' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
-                        $HostPoolMSIXHostsADGroup = New-ADGroup -Name $HostPoolMSIXHostsADGroupName -SamAccountName $HostPoolMSIXHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXHostsADGroupName -Path $PooledDesktopsOU.DistinguishedName -PassThru
-                    }
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXHostsADGroup' AD group to the '$HostPoolMSIXHostsADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
-                    $HostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXHostsADGroup
+                    #region ADGroup Mutex
+                    $ADGroupMutex = $null
+                    $MutexName = "ADGroupMutex"
+                    $ADGroupMutex = New-Object System.Threading.Mutex($false, $MutexName)
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$MutexName' mutex"
 
-                    $HostPoolMSIXShareAdminsADGroupName = "HostPool - $MSIXShareAdmins"
-                    $HostPoolMSIXShareAdminsADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXShareAdminsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $PooledDesktopsOU.DistinguishedName
-                    if (-not($HostPoolMSIXShareAdminsADGroup)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXShareAdminsADGroupName' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
-                        $HostPoolMSIXShareAdminsADGroup = New-ADGroup -Name $HostPoolMSIXShareAdminsADGroupName -SamAccountName $HostPoolMSIXShareAdminsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXShareAdminsADGroupName -Path $PooledDesktopsOU.DistinguishedName -PassThru
-                    }
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXShareAdminsADGroup' AD group to the '$HostPoolMSIXShareAdminsADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
-                    $HostPoolMSIXShareAdminsADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXShareAdminsADGroup
+                    try {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for the '$MutexName' mutex lock to be released"
+                        If ($ADGroupMutex.WaitOne()) { 
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
-                    $HostPoolMSIXUsersADGroupName = "HostPool - $MSIXUsers"
-                    $HostPoolMSIXUsersADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXUsersADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $PooledDesktopsOU.DistinguishedName
-                    if (-not($HostPoolMSIXUsersADGroup)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXUsersADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
-                        $HostPoolMSIXUsersADGroup = New-ADGroup -Name $HostPoolMSIXUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXUsersADGroupName -Path $PooledDesktopsOU.DistinguishedName -PassThru
+                            $DefaultNamingContext = (Get-ADRootDSE).defaultNamingContext
+                            $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
+
+                            #region AD MSIX groups (for include all dedicated HostPool AD MSIX Groups)
+                            $HostPoolMSIXHostsADGroupName = "HostPool - $MSIXHosts"
+                            $HostPoolMSIXHostsADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $AVDRootOU
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolMSIXHostsADGroup:`r`n$($HostPoolMSIXHostsADGroup | Out-String)"
+                            if (-not($HostPoolMSIXHostsADGroup)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXHostsADGroupName' AD Group (under '$($AVDRootOU.DistinguishedName)')"
+                                $HostPoolMSIXHostsADGroup = New-ADGroup -Name $HostPoolMSIXHostsADGroupName -SamAccountName $HostPoolMSIXHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXHostsADGroupName -Path $AVDRootOU.DistinguishedName -PassThru
+                            }
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXHostsADGroup' AD group to the '$HostPoolMSIXHostsADGroup' AD Group (under '$($AVDRootOU.DistinguishedName)')"
+                            $HostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXHostsADGroup
+
+                            $HostPoolMSIXShareAdminsADGroupName = "HostPool - $MSIXShareAdmins"
+                            $HostPoolMSIXShareAdminsADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXShareAdminsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $AVDRootOU.DistinguishedName
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolMSIXShareAdminsADGroup:`r`n$($HostPoolMSIXShareAdminsADGroup | Out-String)"
+                            if (-not($HostPoolMSIXShareAdminsADGroup)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXShareAdminsADGroupName' AD Group (under '$($AVDRootOU.DistinguishedName)')"
+                                $HostPoolMSIXShareAdminsADGroup = New-ADGroup -Name $HostPoolMSIXShareAdminsADGroupName -SamAccountName $HostPoolMSIXShareAdminsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXShareAdminsADGroupName -Path $AVDRootOU.DistinguishedName -PassThru
+                            }
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXShareAdminsADGroup' AD group to the '$HostPoolMSIXShareAdminsADGroup' AD Group (under '$($AVDRootOU.DistinguishedName)')"
+                            $HostPoolMSIXShareAdminsADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXShareAdminsADGroup
+
+                            $HostPoolMSIXUsersADGroupName = "HostPool - $MSIXUsers"
+                            $HostPoolMSIXUsersADGroup = Get-ADGroup -Filter "Name -eq '$HostPoolMSIXUsersADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $AVDRootOU.DistinguishedName
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolMSIXUsersADGroup:`r`n$($HostPoolMSIXUsersADGroup | Out-String)"
+                            if (-not($HostPoolMSIXUsersADGroup)) {
+                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$HostPoolMSIXUsersADGroup' AD Group (under '$($AVDRootOU.DistinguishedName)')"
+                                $HostPoolMSIXUsersADGroup = New-ADGroup -Name $HostPoolMSIXUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $HostPoolMSIXUsersADGroupName -Path $AVDRootOU.DistinguishedName -PassThru
+                            }
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXUsersADGroup' AD group to the '$HostPoolMSIXUsersADGroup' AD Group (under '$($AVDRootOU.DistinguishedName)')"
+                            $HostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXUsersADGroup
+                            #endregion
+
+                            $null = $ADGroupMutex.ReleaseMutex()
+                            #$ADGroupMutex.Dispose()
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+                        }
+                        else {
+                            Write-Warning "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Timed out acquiring '$MutexName' mutex!"
+                        }
                     }
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolMSIXUsersADGroup' AD group to the '$HostPoolMSIXUsersADGroup' AD Group (under '$($PooledDesktopsOU.DistinguishedName)')"
-                    $HostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolMSIXUsersADGroup
+                    catch [System.Threading.AbandonedMutexException] {
+                        #AbandonedMutexException means another thread exit without releasing the mutex, and this thread has acquired the mutext, therefore, it can be ignored
+                        $null = $ADGroupMutex.ReleaseMutex()
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$MutexName' mutex released"
+                    }
                     #endregion
 
                     #region Run a sync with Azure AD
@@ -10824,7 +10856,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
             Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
             #Don't know why but sometimes the first deployment fails
             $DeploymentName = (Get-Item -Path $TemplateFilePath).BaseName
-            $Result = New-AzDeployment -Name $DeploymentName -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -DeploymentDebugLogLevel All -ErrorAction Ignore
+            $Result = New-AzDeployment -Name $DeploymentName -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
             if ($Result.ProvisioningState -ne "Succeeded") {
                 Write-Verbose -Message "`$Result:`r`n$($Result | Out-String)"
