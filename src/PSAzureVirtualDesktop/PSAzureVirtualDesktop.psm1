@@ -3537,6 +3537,8 @@ function Get-PsAvdPrivateDnsResourceGroupName {
 function New-PsAvdPrivateDnsZoneSetup {
     [CmdletBinding(PositionalBinding = $false)]
     param(
+        #[string[]] $PrivateDnsZoneName = @('privatelink.vaultcore.azure.net', 'privatelink.file.core.windows.net')
+        [string[]] $PrivateDnsZoneName = @('privatelink.vaultcore.azure.net', 'privatelink.file.core.windows.net', 'privatelink.wvd.microsoft.com', 'privatelink-global.wvd.microsoft.com')
     )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -3545,19 +3547,18 @@ function New-PsAvdPrivateDnsZoneSetup {
 
     $PrivateDnsZoneSetup = @{}
 
-    $PrivateDnsZoneNames = 'privatelink.vaultcore.azure.net', 'privatelink.file.core.windows.net', 'privatelink.wvd.microsoft.com', 'privatelink-global.wvd.microsoft.com'
-    foreach ($PrivateDnsZoneName in $PrivateDnsZoneNames) {
+    foreach ($CurrentPrivateDnsZoneName in $PrivateDnsZoneName) {
         #region Configuring the Private DNS zone.
-        $ResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -PrivateDnsZoneName $PrivateDnsZoneName
-        $PrivateDnsZone = Get-AzPrivateDnsZone -Name $PrivateDnsZoneName -ErrorAction Ignore
+        $ResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -PrivateDnsZoneName $CurrentPrivateDnsZoneName
+        $PrivateDnsZone = Get-AzPrivateDnsZone -Name $CurrentPrivateDnsZoneName -ErrorAction Ignore
         if ([string]::IsNullOrEmpty($PrivateDnsZone)) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$PrivateDnsZoneName' Private DNS Zone (in the '$ResourceGroupName' Resource Group)"
-            $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName -Name $PrivateDnsZoneName
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$PrivateDnsZoneName' Private DNS Zone (in the '$ResourceGroupName' Resource Group) is created"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$CurrentPrivateDnsZoneName' Private DNS Zone (in the '$ResourceGroupName' Resource Group)"
+            $PrivateDnsZone = New-AzPrivateDnsZone -ResourceGroupName $ResourceGroupName -Name $CurrentPrivateDnsZoneName
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$CurrentPrivateDnsZoneName' Private DNS Zone (in the '$ResourceGroupName' Resource Group) is created"
         }
         else {
             #In case of multiple Private Dns Zones, we took only the first one (thanks to the Get-PsAvdPrivateDnsResourceGroupName function).
-            $PrivateDnsZone = Get-AzPrivateDnsZone -Name $PrivateDnsZoneName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
+            $PrivateDnsZone = Get-AzPrivateDnsZone -Name $CurrentPrivateDnsZoneName -ResourceGroupName $ResourceGroupName -ErrorAction Ignore
         }
 
         #region Configuring the DNS zone.
@@ -3567,7 +3568,7 @@ function New-PsAvdPrivateDnsZoneSetup {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The DNS Zone Configuration of the '$PrivateDnsZoneConfigName' Private Dns Zone Group  (in the '$ResourceGroupName' Resource Group) is created"
         #endregion
 
-        $PrivateDnsZoneSetup[$PrivateDnsZoneName] = [PSCustomObject]@{PrivateDnsZone = $PrivateDnsZone; PrivateDnsZoneConfig = $PrivateDnsZoneConfig }
+        $PrivateDnsZoneSetup[$CurrentPrivateDnsZoneName] = [PSCustomObject]@{PrivateDnsZone = $PrivateDnsZone; PrivateDnsZoneConfig = $PrivateDnsZoneConfig }
         #endregion
     }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
