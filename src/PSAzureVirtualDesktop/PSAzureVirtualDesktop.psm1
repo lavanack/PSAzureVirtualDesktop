@@ -23,7 +23,8 @@ class HostPool {
     [ValidateNotNullOrEmpty()] [string] $Name
     [ValidateNotNullOrEmpty()] [HostPoolType] $Type
     [ValidateNotNullOrEmpty()] [string] $Location
-    [ValidateNotNullOrEmpty()] [ValidatePattern("/subscriptions/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/resourceGroups/.*/providers/Microsoft\.Network/virtualNetworks/.*/subnets/.*")] [string] $SubnetId
+    [ValidateNotNullOrEmpty()] [ValidatePattern("/subscriptions/\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/resourceGroups/.*/providers/Microsoft\.Network/virtualNetworks/.*/subnets/.*")] 
+    [string] $SubnetId
     [ValidateLength(3, 11)] [string] $NamePrefix
     [ValidateRange(1, 10)] [uint16]    $VMNumberOfInstances
     [ValidateNotNullOrEmpty()] [Object] $KeyVault
@@ -9647,15 +9648,16 @@ function New-PsAvdHostPoolSetup {
         Invoke-Pester -Container $Container -Output Detailed
         #endregion
 
+        #From https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns
         Import-Module -Name DnsServer #-DisableNameChecking
-        $DnsServerConditionalForwarderZones = "file.core.windows.net", "vaultcore.azure.net", "vault.azure.net"
+        $DnsServerConditionalForwarderZones = "file.core.windows.net", "vaultcore.azure.net", "vault.azure.net", "wvd.microsoft.com"
         #region DNS Conditional Forwarders
         foreach ($CurrentDnsServerConditionalForwarderZone in $DnsServerConditionalForwarderZones) {
             if ($null -eq (Get-DnsServerZone -Name $CurrentDnsServerConditionalForwarderZone -ErrorAction Ignore)) {
                 #Adding Dns Server Conditional Forwarder Zone
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding Dns Server Conditional Forwarder Zone for '$CurrentDnsServerConditionalForwarderZone'"
                 #From https://learn.microsoft.com/en-us/azure/virtual-network/what-is-ip-address-168-63-129-16
-                Add-DnsServerConditionalForwarderZone -Name $CurrentDnsServerConditionalForwarderZone -MasterServers "168.63.129.16"
+                Add-DnsServerConditionalForwarderZone -Name $CurrentDnsServerConditionalForwarderZone -MasterServers "168.63.129.16" -ReplicationScope "Forest"
             }
         }
         #endregion
