@@ -35,7 +35,7 @@ class HostPool {
     [boolean] $ScalingPlan
     [boolean] $Watermarking
     [boolean] $SSO
-    [boolean] $PrivateEndpoint
+    [string[]] $PrivateEndpointSubnetId
 
     hidden [string] $PairedRegion
     hidden [string] $ResourceGroupName
@@ -254,13 +254,18 @@ class HostPool {
     }
 
     [HostPool]DisablePrivateEndpoint() {
-        $this.PrivateEndpoint = $false
+        $this.PrivateEndpointSubnetId = $null
+        return $this
+    }
+
+    [HostPool] EnablePrivateEndpoint([string[]] $PrivateEndpointSubnetId) {
+        $this.PrivateEndpointSubnetId = $PrivateEndpointSubnetId
         return $this
     }
 
     [HostPool] EnablePrivateEndpoint() {
-        $this.PrivateEndpoint = $true
-        return $this
+        $ThisDomainControllerSubnet = Get-AzVMSubnet
+        return $this.EnablePrivateEndpoint(@($this.SubnetId, $ThisDomainControllerSubnet.Id))
     }
 
     [HostPool]DisableSpotInstance() {
@@ -1124,7 +1129,8 @@ function Install-PsAvdOneDriveGpoSettings {
 function New-PsAvdNoMFAUserEntraIDGroup {
     [CmdletBinding(PositionalBinding = $false)]
     param (
-        [string] $NoMFAEntraIDGroupName = 'No-MFA Users'
+        [string] $NoMFAEntraIDGroupName = 'No-MFA Users',
+        [switch] $Pester
     )
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -1161,14 +1167,16 @@ function New-PsAvdNoMFAUserEntraIDGroup {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
     #region Pester Tests for Azure MFA - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $MFAAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MFA.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MFAAzurePesterTests: $MFAAzurePesterTests"
-    $Container = New-PesterContainer -Path $MFAAzurePesterTests
-    Invoke-Pester -Container $Container -Output Detailed
+    if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$MFAAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MFA.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MFAAzurePesterTests: $MFAAzurePesterTests"
+		$Container = New-PesterContainer -Path $MFAAzurePesterTests
+		Invoke-Pester -Container $Container -Output Detailed		
+	}
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -1180,7 +1188,8 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
     param (
         [string[]] $ExcludeGroupName = 'No-MFA Users',
         [string] $DisplayName = "[AVD] Require multifactor authentication for all users",
-        [string[]] $IncludeUsers = @("All")
+        [string[]] $IncludeUsers = @("All"),
+        [switch] $Pester
     )
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -1286,14 +1295,16 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
     }
 
     #region Pester Tests for Conditional Access Policy - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $ConditionalAccessPolicyAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ConditionalAccessPolicy.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ConditionalAccessPolicyAzurePesterTests: $ConditionalAccessPolicyAzurePesterTests"
-    $Container = New-PesterContainer -Path $ConditionalAccessPolicyAzurePesterTests
-    Invoke-Pester -Container $Container -Output Detailed
+	if($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$ConditionalAccessPolicyAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ConditionalAccessPolicy.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ConditionalAccessPolicyAzurePesterTests: $ConditionalAccessPolicyAzurePesterTests"
+		$Container = New-PesterContainer -Path $ConditionalAccessPolicyAzurePesterTests
+		Invoke-Pester -Container $Container -Output Detailed
+	}
     #endregion
 
     $MFAForAllUsersConditionalAccessPolicy
@@ -3357,21 +3368,25 @@ function Test-PsAvdStorageAccountNameAvailability {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [HostPool[]] $HostPool
+        [HostPool[]] $HostPool,
+        [switch] $Pester
+
     )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Pester Tests for Host Pool - Class Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
-    $Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
-    Invoke-Pester -Container $Container -Output Detailed
+	if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
+		$Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
+		Invoke-Pester -Container $Container -Output Detailed
+	}
     #endregion
 
     $result = $true
@@ -6420,7 +6435,8 @@ function New-PsAvdPersonalHostPoolSetup {
         [Parameter(Mandatory = $false)]
         [string]$LogDir = ".",
 
-        [switch] $AsJob
+        [switch] $AsJob,
+        [switch] $Pester
     )
 
     begin {
@@ -6752,14 +6768,16 @@ function New-PsAvdPersonalHostPoolSetup {
             }
 
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
-            $ModuleBase = Get-ModuleBase
-            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-            $HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
-            $Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
-            Invoke-Pester -Container $Container -Output Detailed
+            if ($Pester) {
+				$ModuleBase = Get-ModuleBase
+				$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+				#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+				$HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
+				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
+				$Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
+				Invoke-Pester -Container $Container -Output Detailed
+			}
             #endregion
 
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
@@ -6986,10 +7004,10 @@ function New-PsAvdPersonalHostPoolSetup {
             }
             #endregion 
 
-            if ($CurrentHostPool.PrivateEndPoint) {
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -HostPool $CurrentAzWvdHostPool
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -Workspace $CurrentAzWvdWorkspace
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -GlobalWorkspace
+            if ($null -ne $CurrentHostPool.PrivateEndpointSubnetId) {
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.PrivateEndpointSubnetId -HostPool $CurrentAzWvdHostPool
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.PrivateEndpointSubnetId -Workspace $CurrentAzWvdWorkspace
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.PrivateEndpointSubnetId -GlobalWorkspace
             }
 
             $CurrentHostPoolEndTime = Get-Date
@@ -7023,7 +7041,9 @@ function New-PsAvdPooledHostPoolSetup {
         [Parameter(Mandatory = $false)]
         [string]$LogDir = ".",
 
-        [switch] $AsJob
+        [switch] $AsJob,
+        [switch] $Pester
+
     )
 
     begin {
@@ -7523,7 +7543,7 @@ function New-PsAvdPooledHostPoolSetup {
                     if (-not($NoMFAEntraIDGroup)) {
                         Write-Warning -Message "'$NoMFAEntraIDGroupName' Entra ID group not found for disabling the MFA for the '$($ServicePrincipal.DisplayName)' Service Principal. We will create one"
                         #Creating the No MFA Entra ID Group
-                        $NoMFAEntraIDGroup = New-PsAvdNoMFAUserEntraIDGroup -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName
+                        $NoMFAEntraIDGroup = New-PsAvdNoMFAUserEntraIDGroup -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -Pester:$Pester
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
                     }
                     <#
@@ -7534,7 +7554,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #$result = Add-AzADGroupMember -TargetGroupObjectId $NoMFAEntraIDGroup.Id -MemberObjectId $ServicePrincipal.Id
                     $result = New-MgBetaGroupMember -GroupId $NoMFAEntraIDGroup.Id -DirectoryObjectId $ServicePrincipal.Id
                     #Creating the MFA Conditional Access Policy and excluding the No MFA Entra ID Group
-                    $MFAForAllUsersConditionalAccessPolicy = New-PsAvdMFAForAllUsersConditionalAccessPolicy -ExcludeGroupName $NoMFAEntraIDGroup.DisplayName
+                    $MFAForAllUsersConditionalAccessPolicy = New-PsAvdMFAForAllUsersConditionalAccessPolicy -ExcludeGroupName $NoMFAEntraIDGroup.DisplayName -Pester:$Pester
                     <#
                     Start-Process -FilePath "https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-portal#disable-multi-factor-authentication-on-the-storage-account"
                     Do {
@@ -8912,14 +8932,16 @@ function New-PsAvdPooledHostPoolSetup {
             }
 
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
-            $ModuleBase = Get-ModuleBase
-            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-            $HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
-            $Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
-            Invoke-Pester -Container $Container -Output Detailed
+			if ($Pester) {
+				$ModuleBase = Get-ModuleBase
+				$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+				#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+				$HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
+				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
+				$Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
+				Invoke-Pester -Container $Container -Output Detailed
+			}
             #endregion
 
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
@@ -9582,10 +9604,10 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
             }
             #endregion 
 
-            if ($CurrentHostPool.PrivateEndPoint) {
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -HostPool $CurrentAzWvdHostPool
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -Workspace $CurrentAzWvdWorkspace
-                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.SubnetId, $ThisDomainControllerSubnet.Id -GlobalWorkspace
+            if ($null -ne $CurrentHostPool.PrivateEndpointSubnetId) {
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.PrivateEndpointSubnetId -HostPool $CurrentAzWvdHostPool
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.PrivateEndpointSubnetId -Workspace $CurrentAzWvdWorkspace
+                New-PsAvdPrivateEndpointSetup -SubnetId $CurrentHostPool.PrivateEndpointSubnetId -GlobalWorkspace
             }
 
             $CurrentHostPoolEndTime = Get-Date
@@ -9619,6 +9641,7 @@ function New-PsAvdHostPoolSetup {
         [switch] $WorkBook,
         [switch] $Restart,
         [switch] $RDCMan,
+        [switch] $Pester,
         [switch] $AsJob
     )
 
@@ -9638,14 +9661,16 @@ function New-PsAvdHostPoolSetup {
         #Update-PsAvdSystemAssignedAzVM
 
         #region Pester Tests for Host Pool - Class Instantiation
-        $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-        $HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
-        $Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
-        Invoke-Pester -Container $Container -Output Detailed
+		if ($Pester) {
+			$ModuleBase = Get-ModuleBase
+			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+			$HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
+			$Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
+			Invoke-Pester -Container $Container -Output Detailed			
+		}
         #endregion
 
         #From https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns
@@ -9887,20 +9912,20 @@ function New-PsAvdHostPoolSetup {
         }
         else {
             if ($null -ne $PooledHostPools) {
-                #$PooledHostPools | New-PsAvdPooledHostPoolSetup -ADOrganizationalUnit $AVDRootOU -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -LogDir $LogDir 
-                New-PsAvdPooledHostPoolSetup -HostPool $PooledHostPools -ADOrganizationalUnit $AVDRootOU -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -LogDir $LogDir 
+                #$PooledHostPools | New-PsAvdPooledHostPoolSetup -ADOrganizationalUnit $AVDRootOU -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -LogDir $LogDir -Pester:$Pester
+                New-PsAvdPooledHostPoolSetup -HostPool $PooledHostPools -ADOrganizationalUnit $AVDRootOU -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -LogDir $LogDir -Pester:$Pester
                 <#
                 foreach ($CurrentPooledHostPool in $PooledHostPools) {
-                    New-PsAvdPooledHostPoolSetup -HostPool $CurrentPooledHostPool -ADOrganizationalUnit $AVDRootOU -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -LogDir $LogDir
+                    New-PsAvdPooledHostPoolSetup -HostPool $CurrentPooledHostPool -ADOrganizationalUnit $AVDRootOU -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -LogDir $LogDir -Pester:$Pester
                 }
                 #>
             }
             if ($null -ne $PersonalHostPools) {
-                #$PersonalHostPools | New-PsAvdPersonalHostPoolSetup -ADOrganizationalUnit $AVDRootOU -LogDir $LogDir
-                New-PsAvdPersonalHostPoolSetup -HostPool $PersonalHostPools -ADOrganizationalUnit $AVDRootOU -LogDir $LogDir
+                #$PersonalHostPools | New-PsAvdPersonalHostPoolSetup -ADOrganizationalUnit $AVDRootOU -LogDir $LogDir -Pester:$Pester
+                New-PsAvdPersonalHostPoolSetup -HostPool $PersonalHostPools -ADOrganizationalUnit $AVDRootOU -LogDir $LogDir -Pester:$Pester
                 <#
                 foreach ($CurrentPersonalHostPool in $PersonalHostPools) {
-                    New-PsAvdPersonalHostPoolSetup -HostPool $CurrentPersonalHostPool -ADOrganizationalUnit $AVDRootOU -LogDir $LogDir
+                    New-PsAvdPersonalHostPoolSetup -HostPool $CurrentPersonalHostPool -ADOrganizationalUnit $AVDRootOU -LogDir $LogDir -Pester:$Pester
                 }
                 #>  
             }
@@ -9918,42 +9943,48 @@ function New-PsAvdHostPoolSetup {
         }
 
         #region Pester Tests for Host Pool - Azure Instantiation
-        $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-        $HostPoolAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Azure.Tests.ps1'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolAzurePesterTests: $HostPoolAzurePesterTests"
-        $Container = New-PesterContainer -Path $HostPoolAzurePesterTests -Data @{ HostPool = $HostPool }
-        Invoke-Pester -Container $Container -Output Detailed
+		if ($Pester) {
+			$ModuleBase = Get-ModuleBase
+			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+			$HostPoolAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Azure.Tests.ps1'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolAzurePesterTests: $HostPoolAzurePesterTests"
+			$Container = New-PesterContainer -Path $HostPoolAzurePesterTests -Data @{ HostPool = $HostPool }
+			Invoke-Pester -Container $Container -Output Detailed
+		}
         #endregion
 
         #region Pester Tests for Azure Host Pool Session Host - OS Ephemeral Disk
-        $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-        $OSEphemeralDiskAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OSEphemeralDisk.Azure.Tests.ps1'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OSEphemeralDiskAzurePesterTests: $OSEphemeralDiskAzurePesterTests"
-        $Container = New-PesterContainer -Path $OSEphemeralDiskAzurePesterTests -Data @{ HostPool = $HostPool }
-        Invoke-Pester -Container $Container -Output Detailed
+		if ($Pester) {
+			$ModuleBase = Get-ModuleBase
+			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+			$OSEphemeralDiskAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OSEphemeralDisk.Azure.Tests.ps1'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OSEphemeralDiskAzurePesterTests: $OSEphemeralDiskAzurePesterTests"
+			$Container = New-PesterContainer -Path $OSEphemeralDiskAzurePesterTests -Data @{ HostPool = $HostPool }
+			Invoke-Pester -Container $Container -Output Detailed
+		}
         #endregion
 
         #region Pester Tests for Azure Host Pool Session Host - Operational Insights
-        $ModuleBase = Get-ModuleBase
-        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-        $OperationalInsightsQueryAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OperationalInsightsQuery.Azure.Tests.ps1'
-        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OperationalInsightsQueryAzurePesterTests: $OperationalInsightsQueryAzurePesterTests"
-        $Container = New-PesterContainer -Path $OperationalInsightsQueryAzurePesterTests -Data @{ HostPool = $HostPool }
-        Invoke-Pester -Container $Container -Output Detailed
+		if ($Pester) {
+			$ModuleBase = Get-ModuleBase
+			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+			$OperationalInsightsQueryAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OperationalInsightsQuery.Azure.Tests.ps1'
+			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OperationalInsightsQueryAzurePesterTests: $OperationalInsightsQueryAzurePesterTests"
+			$Container = New-PesterContainer -Path $OperationalInsightsQueryAzurePesterTests -Data @{ HostPool = $HostPool }
+			Invoke-Pester -Container $Container -Output Detailed
+		}
         #endregion
 
         $Location = (Get-AzVMCompute).Location
 
         #Setting up the hostpool scaling plan(s)
-        New-PsAvdScalingPlan -HostPool $HostPool 
+        New-PsAvdScalingPlan -HostPool $HostPool -Pester:$Pester
 
         #Setting up the Azure site Recovery for the Hostpools 
         New-PsAvdAzureSiteRecoveryPolicyAssignment -HostPool $HostPool
@@ -9963,9 +9994,9 @@ function New-PsAvdHostPoolSetup {
 
         if ($WorkBook) {
             #Importing some useful AVD WorkBook Templates
-            $AzApplicationInsightsWorkbook = Import-PsAvdWorkbookTemplate -HostPool $HostPool -Location $Location
+            $AzApplicationInsightsWorkbook = Import-PsAvdWorkbookTemplate -HostPool $HostPool -Location $Location -Pester:$Pester
             #Importing some useful AVD WorkBooks
-            Import-PsAvdWorkbook -Location $Location
+            Import-PsAvdWorkbook -Location $Location -Pester:$Pester
         }
         
         if ($AMBA) {
@@ -10003,13 +10034,13 @@ function Invoke-PsAvdErrorLogFilePester {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Pester Tests Errors - Log Files
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $ErrorLogFilePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'Error.LogFile.Tests.ps1'
-    $Container = New-PesterContainer -Path $ErrorLogFilePesterTests -Data @{ LogDir = $LogDir }
-    Invoke-Pester -Container $Container -Output Detailed
+	$ModuleBase = Get-ModuleBase
+	$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+	Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+	#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+	$ErrorLogFilePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'Error.LogFile.Tests.ps1'
+	$Container = New-PesterContainer -Path $ErrorLogFilePesterTests -Data @{ LogDir = $LogDir }
+	Invoke-Pester -Container $Container -Output Detailed
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -10525,7 +10556,9 @@ function Get-PsAvdFSLogixProfileShare {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [HostPool[]] $HostPool
+        [HostPool[]] $HostPool,
+        [switch] $Pester
+
     )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -10553,14 +10586,16 @@ function Get-PsAvdFSLogixProfileShare {
         }
     }
     #region Pester Tests for Azure Host Pool - FSLogix File Share - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $FSLogixAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'FSLogix.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FSLogixAzurePesterTests: $FSLogixAzurePesterTests"
-    $Container = New-PesterContainer -Path $FSLogixAzurePesterTests -Data @{ HostPool = $HostPool }
-    Invoke-Pester -Container $Container -Output Detailed
+	if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$FSLogixAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'FSLogix.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FSLogixAzurePesterTests: $FSLogixAzurePesterTests"
+		$Container = New-PesterContainer -Path $FSLogixAzurePesterTests -Data @{ HostPool = $HostPool }
+		Invoke-Pester -Container $Container -Output Detailed
+	}
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -10570,7 +10605,8 @@ function Get-PsAvdAppAttachProfileShare {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [HostPool[]] $HostPool
+        [HostPool[]] $HostPool,
+        [switch] $Pester
     )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -10598,14 +10634,16 @@ function Get-PsAvdAppAttachProfileShare {
         }
     }
     #region Pester Tests for Azure Host Pool - MSIX File Share - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $AppAttachAzurePesterTest = Join-Path -Path $PesterDirectory -ChildPath 'AppAttach.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachAzurePesterTest: $AppAttachAzurePesterTest"
-    $Container = New-PesterContainer -Path $AppAttachAzurePesterTest -Data @{ HostPool = $HostPool }
-    Invoke-Pester -Container $Container -Output Detailed
+	if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$AppAttachAzurePesterTest = Join-Path -Path $PesterDirectory -ChildPath 'AppAttach.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachAzurePesterTest: $AppAttachAzurePesterTest"
+		$Container = New-PesterContainer -Path $AppAttachAzurePesterTest -Data @{ HostPool = $HostPool }
+		Invoke-Pester -Container $Container -Output Detailed
+	}
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -10616,7 +10654,8 @@ function New-PsAvdScalingPlan {
     param(
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
-        [HostPool[]] $HostPool
+        [HostPool[]] $HostPool,
+        [switch] $Pester
     )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -10735,14 +10774,16 @@ function New-PsAvdScalingPlan {
         #endregion
     }
     #region Pester Tests for Azure Host Pool - Scaling Plan - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $ScalingPlanAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ScalingPlan.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScalingPlanAzurePesterTests: $ScalingPlanAzurePesterTests"
-    $Container = New-PesterContainer -Path $ScalingPlanAzurePesterTests -Data @{ HostPool = $HostPool }
-    Invoke-Pester -Container $Container -Output Detailed
+	if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$ScalingPlanAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ScalingPlan.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScalingPlanAzurePesterTests: $ScalingPlanAzurePesterTests"
+		$Container = New-PesterContainer -Path $ScalingPlanAzurePesterTests -Data @{ HostPool = $HostPool }
+		Invoke-Pester -Container $Container -Output Detailed
+	}
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -10991,7 +11032,8 @@ function Import-PsAvdWorkbook {
     [CmdletBinding(PositionalBinding = $false)]
     param(
         [Parameter(Mandatory = $false)]
-        [string] $Location = (Get-AzVMCompute).Location
+        [string] $Location = (Get-AzVMCompute).Location,
+        [switch] $Pester
     )
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -11043,14 +11085,16 @@ function Import-PsAvdWorkbook {
     #endregion
 
     #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
-    $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $WorkBooks.Keys }
-    Invoke-Pester -Container $Container -Output Detailed
+	if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
+		$Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $WorkBooks.Keys }
+		Invoke-Pester -Container $Container -Output Detailed		
+	}
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -11062,9 +11106,9 @@ function Import-PsAvdWorkbookTemplate {
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [HostPool[]] $HostPool,
-
         [Parameter(Mandatory = $false)]
-        [string] $Location = (Get-AzVMCompute).Location
+        [string] $Location = (Get-AzVMCompute).Location,
+        [switch] $Pester
     )
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
@@ -11122,25 +11166,29 @@ function Import-PsAvdWorkbookTemplate {
     #endregion
 
     #region Pester Tests for Azure Host Pool - Workbook Template - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
-    $Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplateName = $WorkBookTemplates.Keys; ResourceGroupName = $ResourceGroupName }
-    Invoke-Pester -Container $Container -Output Detailed
+	if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
+		$Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplateName = $WorkBookTemplates.Keys; ResourceGroupName = $ResourceGroupName }
+		Invoke-Pester -Container $Container -Output Detailed
+	}
     #endregion
 
     #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
-    $ModuleBase = Get-ModuleBase
-    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-    $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
-    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
-    $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $AzApplicationInsightsWorkbook.DisplayName }
-    Invoke-Pester -Container $Container -Output Detailed
+	if ($Pester) {
+		$ModuleBase = Get-ModuleBase
+		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+		$WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
+		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
+		$Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $AzApplicationInsightsWorkbook.DisplayName }
+		Invoke-Pester -Container $Container -Output Detailed
+	}
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
