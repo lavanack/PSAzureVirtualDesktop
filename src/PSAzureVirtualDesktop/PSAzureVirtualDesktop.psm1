@@ -1017,9 +1017,10 @@ function Install-PsAvdFSLogixGpoSettings {
         }
         catch {
             Write-Warning -Message "'https://aka.ms/FSLogix-latest' raised an error. We're using an hard-coded version URI (June 2024)"
-            #Version: October 2024
-            $FSLogixLatestURI = "https://download.microsoft.com/download/e/c/4/ec4b55b3-d2f3-4610-aebd-56478eb0d582/FSLogix_Apps_2.9.8884.27471.zip"
+            #Version: June 2025
+            $FSLogixLatestURI = "https://download.microsoft.com/download/a7599f72-a0b3-49a1-9ece-2f54f6557ee1/FSLogix_25.06.zip"
         }
+        #$FSLogixLatestURI = "https://aka.ms/fslogix_download"
         $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$FSLogixLatestURI' to '$OutFile'"
         Start-BitsTransfer $FSLogixLatestURI -Destination $OutFile
