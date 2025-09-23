@@ -11075,7 +11075,8 @@ function Import-PsAvdWorkbookTemplate {
         #From https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/
         #Sometimes ==> Invoke-RestMethod : The remote name could not be resolved: 'blog.itprocloud.de' raised an error so I'm hosting a copy on my own github as fallback
         #"Azure Virtual Desktop - Deep-Insights" = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
-        "750ec0fd-74d1-4e80-be97-3001485303e8" = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
+        #"750ec0fd-74d1-4e80-be97-3001485303e8" = "https://blog.itprocloud.de/assets/files/AzureDeployments/Workbook-AVD-Error-Logging.json", "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
+        "750ec0fd-74d1-4e80-be97-3001485303e8" = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/Workbook/Workbook-AVD-Error-Logging.json"
     }
 
     [HostPool]::BuildAzureLocationShortNameHashtable()
@@ -11093,7 +11094,7 @@ function Import-PsAvdWorkbookTemplate {
             foreach ($CurrentURI in $WorkBookTemplates[$DisplayName]) {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
                 try {
-                    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI -ErrorAction Ignore
+                    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI -ErrorAction Stop
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ResourceGroupDeployment: $ResourceGroupDeployment"
                     if ($null -eq $ResourceGroupDeployment) {
                         Write-Warning -Message "$CurrentURI is not reachable."
@@ -11103,7 +11104,7 @@ function Import-PsAvdWorkbookTemplate {
                     }
                 }
                 catch [System.Net.WebException] {
-                    Write-Warning  -Message $($_.Exception.Message)
+                    #Write-Warning  -Message $($_.Exception.Message)
                 }
             }
         }
