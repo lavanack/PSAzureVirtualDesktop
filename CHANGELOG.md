@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Changelog for PSAzureVirtualDesktop](#changelog-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.15\] - 2025-10-15](#1015---2025-10-15)
   - [\[1.0.14\] - 2025-06-10](#1014---2025-06-10)
   - [\[1.0.12\] - 2025-04-29](#1012---2025-04-29)
   - [\[1.0.11\] - 2025-04-16](#1011---2025-04-16)
@@ -25,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2025-10-15 - Updated `CHANGELOG.md`
 - 2025-06-10 - Updated `CHANGELOG.md`
 - 2025-05-22 - Updated `CHANGELOG.md`
 - 2025-05-11 - Updated `CHANGELOG.md`
@@ -34,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-11-11 - Updated `CHANGELOG.md`
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
+
+## [1.0.15] - 2025-10-15
+- Switching from Standard_D2s_v6 to Standard_D2s_v5 for the AVD Session Hosts (because v6 is not available in every Azure region)
+- Adding EnablePrivateEndpoint and DisablePrivateEndpoint HostPool class methods for [Azure Private Link with Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/private-link-overview). Some functions have been also updated to take private endpoints into considerations. 
+- Adding a -Pester switch on some functions to enable Pester Tests (was enabled by default before this)
+- Improving RBAC role management
+- Some bug fixes
 
 ## [1.0.14] - 2025-06-10
 
