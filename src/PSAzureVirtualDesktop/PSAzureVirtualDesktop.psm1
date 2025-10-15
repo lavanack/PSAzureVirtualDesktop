@@ -5110,8 +5110,8 @@ function New-PsAvdSessionHost {
     #URI updated on : 06/02/2025
     #To Get the latest version of the zip by looking in the Resource Group Deployement
     #$avdModuleLocation = ((Get-AzWvdHostPool).ResourcegroupName | ForEach-Object -Process { Get-AzResourceGroupDeployment -ResourceGroupName $_} | Where-Object -FilterScript { $_.Parameters } | Foreach-Object -Process { $_.Parameters["artifactsLocation"]} | Sort-Object -Property Value -Descending | Select-Object -First 1).Value
-    $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.02990.697.zip"
-    #$avdModuleLocation = "hhttps://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/ARM-wvd-templates/DSC/Configuration.zip"
+    $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.03188.965.zip"
+    #$avdModuleLocation = "https://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/ARM-wvd-templates/DSC/Configuration.zip"
     $avdExtensionName = "DSC"
     $avdExtensionPublisher = "Microsoft.Powershell"
     $avdExtensionVersion = "2.73"
@@ -5143,7 +5143,7 @@ function New-PsAvdSessionHost {
         }
         if ($Intune) {
             #From https://rozemuller.com/how-to-join-azure-ad-automated/
-            #From https://virtuallyflatfeet.com/category/intune/
+            #From https://virtuallyflatfeet.wordpress.com/category/intune/
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding '$VMName' as a device into 'Microsoft Entra ID' and enrolled with Intune"
             $domainJoinSettings = @{
                 mdmId = "0000000a-0000-0000-c000-000000000000"
