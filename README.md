@@ -13,6 +13,12 @@
 
 ## Release Notes
 
+- [1.0.15]
+  - Switching from Standard_D2s_v6 to Standard_D2s_v5 for the AVD Session Hosts (because v6 is not available in every Azure region)
+  - Enabling [Azure Private Link with Azure Virtual Desktop](https://learn.microsoft.com/fr-fr/azure/virtual-desktop/private-link-overview)
+  - Pester Tests are now optional (via -Pester switch on some functions)
+  - RBAC role management improvement
+  - Bug fixes
 - [1.0.14]
   - [Configuring the session lock behavior for Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy)
   - OneDrive management for redirection of the known folders (Desktop, Documents, Pictures) 
