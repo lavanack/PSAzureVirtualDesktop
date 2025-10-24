@@ -931,8 +931,7 @@ function Connect-PsAvdAzure {
     }
     catch {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Connecting to Microsoft Graph with all required Scopes"
-        Connect-MgGraph -NoWelcome -Scopes Application.Read.All, Application-RemoteDesktopConfig.ReadWrite.All, Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, DeviceManagementScripts.Read.All, 
-DeviceManagementScripts.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Group.Read.All, Group.ReadWrite.All, GroupMember.Read.All, Policy.ReadWrite.MobilityManagement
+        Connect-MgGraph -NoWelcome -Scopes Application.Read.All, Application-RemoteDesktopConfig.ReadWrite.All, Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, DeviceManagementScripts.Read.All, DeviceManagementScripts.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Group.Read.All, Group.ReadWrite.All, GroupMember.Read.All, Policy.ReadWrite.MobilityManagement
     }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -2483,6 +2482,32 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     #endregion
 
     [array] $settings = @()
+
+    #region Local Policies Security Options Category and Child Categories
+    #region Getting Local Policies Security Options Category and Child Categories
+    $LocalPoliciesSecurityOptionsConfigurationCategory = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=technologies+has+'mdm'+and+description+eq+'Local+Policies+Security+Options'"
+    [array] $LocalPoliciesSecurityOptionsConfigurationChildCategories = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationCategories?`$filter=rootCategoryId+eq+'$($LocalPoliciesSecurityOptionsConfigurationCategory.id)'"
+    Add-PsAvdCategoryFullPath -Categories $LocalPoliciesSecurityOptionsConfigurationChildCategories
+    #endregion
+
+    #region 'Local Policies Security Options' Settings
+    $LocalPoliciesSecurityOptionsConfigurationChildCategory = $LocalPoliciesSecurityOptionsConfigurationChildCategories | Where-Object -FilterScript { $_.FullPath -eq "\Local Policies Security Options" }
+    $LocalPoliciesSecurityOptionsConfigurationSettings = Get-MgGraphObject -Uri "https://graph.microsoft.com/beta/deviceManagement/configurationSettings?&`$filter=categoryId%20eq%20%27$($LocalPoliciesSecurityOptionsConfigurationChildCategory.id)%27%20and%20visibility%20has%20%27settingsCatalog%27%20and%20(applicability/platform%20has%20%27windows10%27)%20and%20(applicability/technologies%20has%20%27mdm%27)"
+
+    #Adding a FullPath Property
+    $LocalPoliciesSecurityOptionsConfigurationSettings = $LocalPoliciesSecurityOptionsConfigurationSettings | Select-Object -Property *, @{Name = "FullPath"; Expression = { Join-Path -Path $LocalPoliciesSecurityOptionsConfigurationChildCategory.FullPath -ChildPath $_.displayName } }
+    
+    [array] $settings += switch ($LocalPoliciesSecurityOptionsConfigurationSettings) {
+        { $_.FullPath -eq '\Local Policies Security Options\Network Security Allow PKU2U Authentication Requests' } {
+            New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI -Setting $_ -SettingValue 'Allow' -Enable; continue 
+        }  
+        default {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($_.FullPath)' not modified" 
+        }  
+    }
+    #endregion
+    #endregion
+
 
     #region Administrative Templates Category and Child Categories
     #region Getting Administrative Templates Category and Child Categories
