@@ -1365,7 +1365,7 @@ function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
             $Timer = [system.diagnostics.stopwatch]::StartNew()
             do {
                 try {
-                    $Result = New-MgBetaPolicyMobileDeviceManagementPolicyIncludedGroupByRef -MobilityManagementPolicyId $mobilityManagementPolicyId -OdataId $OdataId -PassThru -ErrorAction Stop
+                    $Result = New-MgBetaPolicyMobileDeviceManagementPolicyIncludedGroupByRef -MobileDeviceManagementPolicyId $mobilityManagementPolicyId -OdataId $OdataId -PassThru -ErrorAction Stop
                 }
                 catch {
                     Write-Warning -Message "$($_.Exception)"
