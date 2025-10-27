@@ -86,3 +86,7 @@ if (($WatermarkingBooleanString -eq [boolean]::TrueString) -or ($Watermarking)) 
 }
 #endregion
 
+#region Enable PKU2U
+#From https://github.com/Azure/avdaccelerator/blob/main/workload/scripts/Set-SessionHostConfiguration.ps1#L420-L431
+Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Lsa\pku2u' -Name "AllowOnlineID" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
+#endregion
