@@ -14,7 +14,7 @@
 ## Release Notes
 
 - [1.0.16]
-  - Adding more scope when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) 
+  - Adding more scopes when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) 
   - Enabling [PKU2U](https://github.com/Azure/avdaccelerator/blob/main/workload/scripts/Set-SessionHostConfiguration.ps1#L420-L431) when the IDP is EntraID
   - Update on New-AzureComputeGallery
   - Bug fixes
