@@ -13,6 +13,11 @@
 
 ## Release Notes
 
+- [1.0.16]
+  - Adding more scopes when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) 
+  - Enabling [PKU2U](https://github.com/Azure/avdaccelerator/blob/main/workload/scripts/Set-SessionHostConfiguration.ps1#L420-L431) when the IDP is EntraID
+  - Update on New-AzureComputeGallery
+  - Bug fixes
 - [1.0.15]
   - Switching from Standard_D2s_v6 to Standard_D2s_v5 for the AVD Session Hosts (because v6 is not available in every Azure region)
   - Enabling [Azure Private Link with Azure Virtual Desktop](https://learn.microsoft.com/fr-fr/azure/virtual-desktop/private-link-overview)

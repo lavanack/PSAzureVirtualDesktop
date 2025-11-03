@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Changelog for PSAzureVirtualDesktop](#changelog-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.16\] - 2025-10-27](#1016---2025-10-27)
   - [\[1.0.15\] - 2025-10-15](#1015---2025-10-15)
   - [\[1.0.14\] - 2025-06-10](#1014---2025-06-10)
   - [\[1.0.12\] - 2025-04-29](#1012---2025-04-29)
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - 2025-10-15 - Updated `CHANGELOG.md`
+- 2025-10-27 - Updated `CHANGELOG.md`
 - 2025-06-10 - Updated `CHANGELOG.md`
 - 2025-05-22 - Updated `CHANGELOG.md`
 - 2025-05-11 - Updated `CHANGELOG.md`
@@ -37,7 +39,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
 
+## [1.0.16] - 2025-10-27
+
+- Adding the DeviceManagementScripts.Read.All and DeviceManagementScripts.ReadWrite.All scopes when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) 
+- Enabling [PKU2U](https://github.com/Azure/avdaccelerator/blob/main/workload/scripts/Set-SessionHostConfiguration.ps1#L420-L431) when the IDP is EntraID
+- Update on New-AzureComputeGallery
+- Updating MobilityManagementPolicyId paramater from New-MgBetaPolicyMobileDeviceManagementPolicyIncludedGroupByRef to -MobileDeviceManagementPolicyId
+- Bug fixes
+
 ## [1.0.15] - 2025-10-15
+
 - Switching from Standard_D2s_v6 to Standard_D2s_v5 for the AVD Session Hosts (because v6 is not available in every Azure region)
 - Adding EnablePrivateEndpoint and DisablePrivateEndpoint HostPool class methods for [Azure Private Link with Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/private-link-overview). Some functions have been also updated to take private endpoints into considerations. 
 - Adding a -Pester switch on some functions to enable Pester Tests (was enabled by default before this)
