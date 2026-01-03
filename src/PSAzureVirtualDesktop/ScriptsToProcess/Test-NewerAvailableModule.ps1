@@ -12,7 +12,7 @@ Function Test-NewerAvailableModule {
     $GreatestInstalledModuleVersion = (Get-Module $ModuleName -ListAvailable | Select-Object -Property *, @{Name = "ParsedVersion"; Expression = { [version]::Parse($_.Version) } } | Sort-Object -Property ParsedVersion | Select-Object -Last 1).ParsedVersion
     $FoundModule = Find-Module -Name $ModuleName -ErrorAction Ignore
     if (-not([string]::IsNullOrEmpty($FoundModule))) {
-        $LatestAvailableModuleVersion = [version]::Parse((Find-Module -Name $ModuleName -ErrorAction Ignore).Version)
+        $LatestAvailableModuleVersion = [version]::Parse($FoundModule.Version)
         if ($GreatestInstalledModuleVersion -lt $LatestAvailableModuleVersion) {
             Write-Warning -Message "A newer version of the '$ModuleName' module is available: $LatestAvailableModuleVersion. Consider updating it ! (You're using $GreatestInstalledModuleVersion)"
             #Update-Module -Name $ModuleName -Force
