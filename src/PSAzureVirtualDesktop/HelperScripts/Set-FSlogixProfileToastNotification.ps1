@@ -254,7 +254,7 @@ $Error.Clear()
 $CurrentScript = $MyInvocation.MyCommand.Path
 #Getting the current directory (where this script file resides)
 $CurrentDir = Split-Path -Path $CurrentScript -Parent
-Set-Location -Path $CurrentDir
+#Set-Location -Path $CurrentDir
 
 #region Copying Git Files locally
 $Destination = New-Item -Path "C:\Scripts" -ItemType Directory -Force
