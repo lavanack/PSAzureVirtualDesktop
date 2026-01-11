@@ -4463,7 +4463,7 @@ function Grant-PsAvdADJoinPermission {
         }
     )
     #$ADUser = Get-ADUser -Filter "SamAccountName -eq '$($Credential.UserName)'"
-    $ADUser = Get-ADUser -Filter { UserPrincipalName -eq $($Credential.UserName) } -ErrorAction Ignore
+    $ADUser = Get-ADUser -Filter { UserPrincipalName -eq $Credential.UserName } -ErrorAction Ignore
     #If the user doesn't exist, we create it
     if (-not($ADUser)) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($Credential.UserName)' AD User (for adding Azure VM to ADDS)"
@@ -11029,7 +11029,7 @@ function New-PsAvdScalingPlan {
 
     $HostPoolWithScalingPlan = $HostPool | Where-Object -FilterScript { $_.ScalingPlan }
     foreach ($CurrentHostPoolWithScalingPlan in $HostPoolWithScalingPlan) {
-        #region Sclaing Plan
+        #region Scaling Plan
         $AzWvdHostPool = (Get-AzWvdHostPool | Where-Object -FilterScript { $_.Name -eq $($CurrentHostPoolWithScalingPlan.Name) })
         $ResourceGroupName = $CurrentHostPoolWithScalingPlan.GetResourceGroupName()
         $ScalingPlanName = $CurrentHostPoolWithScalingPlan.GetAzAvdScalingPlanName()
@@ -11965,6 +11965,61 @@ function Invoke-PsAvdAzVMRunPowerShellScript {
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     $Result
+}
+
+function ConvertTo-AzWvdHostPool {
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [HostPool[]]$HostPool
+    )
+    begin {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    }
+    process {
+        $AzWvdHostPools = foreach ($CurrentHostPool in $HostPool) {
+            Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName() -ErrorAction Ignore
+        }
+    }
+    end {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+        $AzWvdHostPools
+    }
+}
+function Get-PsAvdHostPoolDirectLaunchUrl {
+
+    [CmdletBinding(PositionalBinding = $false)]
+    Param(
+        [Parameter(Mandatory = $true, ValueFromPipeline = $true)]
+        [Microsoft.Azure.PowerShell.Cmdlets.DesktopVirtualization.Models.HostPool[]]$HostPool,
+        [switch] $Browse
+    )
+    begin {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+    }
+    process {
+        $Urls = foreach ($CurrentHostPool in $HostPool) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)' HostPool ..."
+            $ApplicationGroups  = $CurrentHostPool.ApplicationGroupReference | Get-AzWvdApplicationGroup
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] HostPool PreferredAppGroupType: $($CurrentHostPool.PreferredAppGroupType)"
+            $ApplicationGroup = $ApplicationGroups | Where-Object -FilterScript { $_.Kind -eq $CurrentHostPool.PreferredAppGroupType}
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] ApplicationGroup Kind: $($ApplicationGroup.Kind)"
+            $WorkspaceId = ($ApplicationGroup.WorkspaceArmPath | Get-AzWvdWorkspace).ObjectId
+            $Url = $("https://windows.cloud.microsoft/webclient/avd/{0}/{1}" -f $WorkspaceId, $ApplicationGroup.ObjectId)
+            [PSCustomObject] @{
+                HostPoolName = $CurrentHostPool.Name
+                URI = $Url
+            }
+            if ($Browse) {
+
+                Start-Process $Url
+            }
+        }
+    }
+    end {
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+        $Urls
+    }
 }
 #endregion
 
