@@ -11986,6 +11986,7 @@ function ConvertTo-AzWvdHostPool {
         $AzWvdHostPools
     }
 }
+
 function Get-PsAvdHostPoolDirectLaunchUrl {
 
     [CmdletBinding(PositionalBinding = $false)]
@@ -12003,11 +12004,23 @@ function Get-PsAvdHostPoolDirectLaunchUrl {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)' HostPool ..."
             $ApplicationGroups  = $CurrentHostPool.ApplicationGroupReference | Get-AzWvdApplicationGroup
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] HostPool PreferredAppGroupType: $($CurrentHostPool.PreferredAppGroupType)"
-            #Checking the PreferredAppGroupType because we set two Application Groups (Desktop and Remote App) and put thme in in the WorkSpace
-            $ApplicationGroup = $ApplicationGroups | Where-Object -FilterScript { $_.Kind -eq $CurrentHostPool.PreferredAppGroupType}
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] ApplicationGroup Kind: $($ApplicationGroup.Kind)"
-            $WorkspaceId = ($ApplicationGroup.WorkspaceArmPath | Get-AzWvdWorkspace).ObjectId
-            $Url = $("https://windows.cloud.microsoft/webclient/avd/{0}/{1}" -f $WorkspaceId, $ApplicationGroup.ObjectId)
+            $ApplicationGroupHT = $ApplicationGroups | Group-Object -Property Kind -AsHashTable -AsString
+            $Parameters = @{
+                    ResourceGroupName      = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].ResourceGroupName
+                    ApplicationGroupName   = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].Name
+            }
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Parameters:`r`n$($Parameters | Out-string)"
+            $WorkspaceArmPath = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].WorkspaceArmPath
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkspaceArmPath: $WorkspaceArmPath"
+
+            if ($CurrentHostPool.PreferredAppGroupType -eq "Desktop") {
+                $ApplicationGroup = Get-AzWvdDesktop @Parameters
+            }
+            elseif ($CurrentHostPool.PreferredAppGroupType -eq "RemoteApp") {
+                $ApplicationGroup = Get-AzWvdApplication @Parameters
+            }
+            $Workspace = $WorkspaceArmPath | Get-AzWvdWorkspace
+            $Url = $("https://windows.cloud.microsoft/webclient/avd/{0}/{1}" -f $Workspace.ObjectId, $ApplicationGroup.ObjectId)
             $HostPoolDirectLaunchUrls += [PSCustomObject] @{
                 HostPoolName = $CurrentHostPool.Name
                 URI = $Url
