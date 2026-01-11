@@ -11987,6 +11987,7 @@ function ConvertTo-AzWvdHostPool {
     }
 }
 
+#From https://learn.microsoft.com/en-us/windows-app/direct-launch-urls?tabs=avd
 function Get-PsAvdHostPoolDirectLaunchUrl {
 
     [CmdletBinding(PositionalBinding = $false)]
