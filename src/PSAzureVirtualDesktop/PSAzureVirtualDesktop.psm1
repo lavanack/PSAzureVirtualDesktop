@@ -11996,17 +11996,19 @@ function Get-PsAvdHostPoolDirectLaunchUrl {
     )
     begin {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+        $HostPoolDirectLaunchUrls = @()
     }
     process {
-        $Urls = foreach ($CurrentHostPool in $HostPool) {
+        foreach ($CurrentHostPool in $HostPool) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)' HostPool ..."
             $ApplicationGroups  = $CurrentHostPool.ApplicationGroupReference | Get-AzWvdApplicationGroup
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] HostPool PreferredAppGroupType: $($CurrentHostPool.PreferredAppGroupType)"
+            #Checking the PreferredAppGroupType because we set two Application Groups (Desktop and Remote App) and put thme in in the WorkSpace
             $ApplicationGroup = $ApplicationGroups | Where-Object -FilterScript { $_.Kind -eq $CurrentHostPool.PreferredAppGroupType}
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] ApplicationGroup Kind: $($ApplicationGroup.Kind)"
             $WorkspaceId = ($ApplicationGroup.WorkspaceArmPath | Get-AzWvdWorkspace).ObjectId
             $Url = $("https://windows.cloud.microsoft/webclient/avd/{0}/{1}" -f $WorkspaceId, $ApplicationGroup.ObjectId)
-            [PSCustomObject] @{
+            $HostPoolDirectLaunchUrls += [PSCustomObject] @{
                 HostPoolName = $CurrentHostPool.Name
                 URI = $Url
             }
@@ -12018,7 +12020,7 @@ function Get-PsAvdHostPoolDirectLaunchUrl {
     }
     end {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-        $Urls
+        $HostPoolDirectLaunchUrls
     }
 }
 #endregion
