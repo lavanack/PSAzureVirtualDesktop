@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Changelog for PSAzureVirtualDesktop](#changelog-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.17\] - 2026-01-12](#1017---2026-01-12)
   - [\[1.0.16\] - 2025-10-27](#1016---2025-10-27)
   - [\[1.0.15\] - 2025-10-15](#1015---2025-10-15)
   - [\[1.0.14\] - 2025-06-10](#1014---2025-06-10)
@@ -27,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-01-12 - Updated `CHANGELOG.md`
 - 2025-10-15 - Updated `CHANGELOG.md`
 - 2025-10-27 - Updated `CHANGELOG.md`
 - 2025-06-10 - Updated `CHANGELOG.md`
@@ -39,6 +41,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
 
+
+## [1.0.17] - 2026-01-12
+
+  - Code improvements
+  - Adding Code for [Session Host Configuration](https://learn.microsoft.com/en-us/azure/virtual-desktop/deploy-azure-virtual-desktop?tabs=portal-standard%2Cportal-session-host-configuration%2Cportal&pivots=host-pool-session-host-configuration) (Preview)
+  
 ## [1.0.16] - 2025-10-27
 
 - Adding the DeviceManagementScripts.Read.All and DeviceManagementScripts.ReadWrite.All scopes when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) 
