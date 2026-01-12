@@ -11052,42 +11052,70 @@ function New-PsAvdScalingPlan {
         Start-Sleep -Seconds 10
 
         if ($CurrentHostPoolWithScalingPlan.Type -eq [HostPoolType]::Pooled) {
-            $scalingPlanPooledScheduleParams = @{
-                ResourceGroupName              = $ResourceGroupName
-                ScalingPlanName                = $ScalingPlanName
-                ScalingPlanScheduleName        = 'PooledWeekDaySchedule'
-                DaysOfWeek                     = 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
-                RampUpStartTimeHour            = '8'
-                RampUpStartTimeMinute          = '0'
-                RampUpLoadBalancingAlgorithm   = 'BreadthFirst'
-                RampUpMinimumHostsPct          = '20'
-                RampUpCapacityThresholdPct     = '50'
-                PeakStartTimeHour              = '9'
-                PeakStartTimeMinute            = '0'
-                PeakLoadBalancingAlgorithm     = 'DepthFirst'
-                RampDownStartTimeHour          = '18'
-                RampDownStartTimeMinute        = '0'
-                RampDownLoadBalancingAlgorithm = 'BreadthFirst'
-                RampDownMinimumHostsPct        = '0'
-                RampDownCapacityThresholdPct   = '20'
-                RampDownForceLogoffUser        = $false
-                RampDownWaitTimeMinute         = '30'
-                RampDownNotificationMessage    = '"Log out now, please."'
-                RampDownStopHostsWhen          = 'ZeroSessions'
-                OffPeakStartTimeHour           = '19'
-                OffPeakStartTimeMinute         = '00'
-                OffPeakLoadBalancingAlgorithm  = 'DepthFirst'
-                #Verbose                        = $true
-            }
             if ($CurrentHostPool.SessionHostConfiguration) {
                 #From https://learn.microsoft.com/en-us/azure/virtual-desktop/autoscale-create-assign-scaling-plan?tabs=powershell%2Cintune&pivots=dynamic#create-a-scaling-plan
-                $scalingPlanPooledScheduleParams['ScalingPlanScheduleName'] = 'PooledWeekDayDynamicSchedule'
-                $scalingPlanPooledScheduleParams['ScalingMethod'] = 'CreateDeletePowerManage'
-                $scalingPlanPooledScheduleParams['CreateDeleteRampUpMaximumHostPoolSize'] = '10'
-                $scalingPlanPooledScheduleParams['CreateDeleteRampUpMinimumHostPoolSize'] = '5'
-                $scalingPlanPooledScheduleParams['CreateDeleteRampDownMaximumHostPoolSize'] = '5'
-                $scalingPlanPooledScheduleParams['CreateDeleteRampDownMinimumHostPoolSize'] = '1'
+				$scalingPlanPooledScheduleParams = @{
+					ResourceGroupName                       = $ResourceGroupName
+					ScalingPlanName                         = $ScalingPlanName
+					ScalingPlanScheduleName                 = 'PooledWeekDayDynamicSchedule'
+					DaysOfWeek                              = 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
+					ScalingMethod                           = 'CreateDeletePowerManage'
+					RampUpStartTimeHour                     = '8'
+					RampUpStartTimeMinute                   = '0'
+					RampUpLoadBalancingAlgorithm            = 'BreadthFirst'
+					RampUpMinimumHostsPct                   = '100'
+					RampUpCapacityThresholdPct              = '50'
+					PeakStartTimeHour                       = '8'
+					PeakStartTimeMinute                     = '30'
+					PeakLoadBalancingAlgorithm              = 'DepthFirst'
+					RampDownStartTimeHour                   = '16'
+					RampDownStartTimeMinute                 = '0'
+					RampDownLoadBalancingAlgorithm          = 'BreadthFirst'
+					RampDownMinimumHostsPct                 = '100'
+					RampDownCapacityThresholdPct            = '20'
+					RampDownForceLogoffUser                 = $true
+					RampDownWaitTimeMinute                  = '30'
+					RampDownNotificationMessage             = 'Please log out of your session.'
+					RampDownStopHostsWhen                   = 'ZeroSessions'
+					OffPeakStartTimeHour                    = '19'
+					OffPeakStartTimeMinute                  = '0'
+					OffPeakLoadBalancingAlgorithm           = 'DepthFirst'
+					CreateDeleteRampUpMaximumHostPoolSize   = '10'
+					CreateDeleteRampUpMinimumHostPoolSize   = '5'
+					CreateDeleteRampDownMaximumHostPoolSize = '5'
+					CreateDeleteRampDownMinimumHostPoolSize = '1'
+				}
             }
+            else {
+                $scalingPlanPooledScheduleParams = @{
+                    ResourceGroupName              = $ResourceGroupName
+                    ScalingPlanName                = $ScalingPlanName
+                    ScalingPlanScheduleName        = 'PooledWeekDaySchedule'
+                    DaysOfWeek                     = 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
+                    RampUpStartTimeHour            = '8'
+                    RampUpStartTimeMinute          = '0'
+                    RampUpLoadBalancingAlgorithm   = 'BreadthFirst'
+                    RampUpMinimumHostsPct          = '20'
+                    RampUpCapacityThresholdPct     = '50'
+                    PeakStartTimeHour              = '9'
+                    PeakStartTimeMinute            = '0'
+                    PeakLoadBalancingAlgorithm     = 'DepthFirst'
+                    RampDownStartTimeHour          = '18'
+                    RampDownStartTimeMinute        = '0'
+                    RampDownLoadBalancingAlgorithm = 'BreadthFirst'
+                    RampDownMinimumHostsPct        = '0'
+                    RampDownCapacityThresholdPct   = '20'
+                    RampDownForceLogoffUser        = $false
+                    RampDownWaitTimeMinute         = '30'
+                    RampDownNotificationMessage    = '"Log out now, please."'
+                    RampDownStopHostsWhen          = 'ZeroSessions'
+                    OffPeakStartTimeHour           = '19'
+                    OffPeakStartTimeMinute         = '00'
+                    OffPeakLoadBalancingAlgorithm  = 'DepthFirst'
+                    #Verbose                        = $true
+                }
+            }
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Pooled ScalingPlan Schedule:`r`n$($scalingPlanPooledScheduleParams | Out-String)"
             $scalingPlanPooledSchedule = New-AzWvdScalingPlanPooledSchedule @scalingPlanPooledScheduleParams
         }
         else {
@@ -11146,6 +11174,7 @@ function New-PsAvdScalingPlan {
                 #Verbose                           = $true
             }
 
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Personal ScalingPlan Schedule:`r`n$($scalingPlanPersonalScheduleParams | Out-String)"
             $scalingPlanPersonalSchedule = New-AzWvdScalingPlanPersonalSchedule @scalingPlanPersonalScheduleParams
         }
         #endregion
