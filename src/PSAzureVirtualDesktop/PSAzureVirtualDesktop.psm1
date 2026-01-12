@@ -9213,6 +9213,9 @@ function New-PsAvdPooledHostPoolSetup {
             if ($CurrentHostPool.Watermarking) {
                 $Options += 'Watermarking'
             }
+            if ($CurrentHostPool.SessionHostConfiguration) {
+                $Options += 'SessionHostConfiguration'
+            }
 
             $FriendlyName = "{0} ({1})" -f $CurrentHostPool.GetAzAvdWorkSpaceName(), $($Options -join ', ')
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FriendlyName: $FriendlyName"
