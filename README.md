@@ -13,6 +13,9 @@
 
 ## Release Notes
 
+- [1.0.17]
+  - Code improvements
+  - Adding Code for [Session Host Configuration](https://learn.microsoft.com/en-us/azure/virtual-desktop/deploy-azure-virtual-desktop?tabs=portal-standard%2Cportal-session-host-configuration%2Cportal&pivots=host-pool-session-host-configuration) (Preview)
 - [1.0.16]
   - Adding more scopes when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) 
   - Enabling [PKU2U](https://github.com/Azure/avdaccelerator/blob/main/workload/scripts/Set-SessionHostConfiguration.ps1#L420-L431) when the IDP is EntraID
