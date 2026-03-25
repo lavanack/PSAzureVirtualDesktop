@@ -823,8 +823,12 @@ class PersonalHostPool : HostPool {
         [PersonalHostPool]::IndexHT[$this.Location]++
         $this.Type = [HostPoolType]::Personal
         $this.ImagePublisherName = "microsoftwindowsdesktop"
+        <#
         $this.ImageOffer = "windows-11"
         $this.ImageSku = "win11-25h2-ent"
+        #>
+        $this.ImageOffer = "windows-ent-cpc"
+        $this.ImageSku = "win11-25h2-ent-cpc-m365"
         $this.HibernationEnabled = $false
         $this.LoadBalancerType = "Persistent"
         $this.RefreshNames()
@@ -11058,7 +11062,7 @@ function New-PsAvdScalingPlan {
 					ResourceGroupName                       = $ResourceGroupName
 					ScalingPlanName                         = $ScalingPlanName
 					ScalingPlanScheduleName                 = 'PooledWeekDayDynamicSchedule'
-					DaysOfWeek                              = 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
+					DaysOfWeek                              = [System.DayOfWeek]::Monday..[System.DayOfWeek]::Friday #'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
 					ScalingMethod                           = 'CreateDeletePowerManage'
 					RampUpStartTimeHour                     = '8'
 					RampUpStartTimeMinute                   = '0'
@@ -11091,7 +11095,7 @@ function New-PsAvdScalingPlan {
                     ResourceGroupName              = $ResourceGroupName
                     ScalingPlanName                = $ScalingPlanName
                     ScalingPlanScheduleName        = 'PooledWeekDaySchedule'
-                    DaysOfWeek                     = 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
+                    DaysOfWeek                     = [System.DayOfWeek]::Monday..[System.DayOfWeek]::Friday #'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
                     RampUpStartTimeHour            = '8'
                     RampUpStartTimeMinute          = '0'
                     RampUpLoadBalancingAlgorithm   = 'BreadthFirst'
@@ -11141,7 +11145,7 @@ function New-PsAvdScalingPlan {
                 ResourceGroupName                 = $ResourceGroupName
                 ScalingPlanName                   = $ScalingPlanName
                 ScalingPlanScheduleName           = 'PersonalWeekDaySchedule'
-                DaysOfWeek                        = 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
+                DaysOfWeek                        = [System.DayOfWeek]::Monday..[System.DayOfWeek]::Friday #'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
                 RampUpStartTimeHour               = '8'
                 RampUpStartTimeMinute             = '0'
                 RampUpAutoStartHost               = 'WithAssignedUser'
@@ -11914,12 +11918,12 @@ function Get-PsAvdAzGalleryImageDefinition {
         $RegionDisplayName = (Get-AzLocation | Where-Object { $_.Location -in $Region }).DisplayName
     }
     
-    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    $GalleryImageDefinition = Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Get-AzGallery | Select-Object -Property ResourceGroupName, @{Name = "GalleryName"; Expression = { $_.Name } } | Get-AzGalleryImageDefinition | Where-Object -FilterScript { 
-        [string[]]$TargetRegionNames = (Get-AzGalleryImageVersion -ResourceGroupName $_.ResourceGroupName -GalleryName $($_.Id -replace "^.+/galleries/" -replace "/images/.+$") -GalleryImageDefinitionName $_.Name).PublishingProfile.TargetRegions.Name 
-        $count = $0;
+        [string[]]$TargetRegionNames = (Get-AzGalleryImageVersion -ResourceGroupName $_.ResourceGroupName -GalleryName $($_.Id -replace "^.+/galleries/" -replace "/images/.+$") -GalleryImageDefinitionName $_.Name).PublishingProfile.TargetRegions.Name | Select-Object -Unique
+        $count = $0
         foreach ($TargetRegionName in $TargetRegionNames) { 
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TargetRegionName: $TargetRegionName"
             if ($RegionDisplayName -contains $TargetRegionName) {
@@ -11928,10 +11932,10 @@ function Get-PsAvdAzGalleryImageDefinition {
         }
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$count: $count"
         if ($count -eq $RegionDisplayName.Count) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
             return $true
         }
     }
+    return $GalleryImageDefinition
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
