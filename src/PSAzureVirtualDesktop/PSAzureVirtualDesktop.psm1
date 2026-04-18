@@ -35,6 +35,7 @@ class HostPool {
     [boolean] $Spot
     [boolean] $ScalingPlan
     [boolean] $Watermarking
+    [boolean] $AVDPrivateEndpoint
     [boolean] $SSO
     [string] $PrivateEndpointSubnetId
 
@@ -123,7 +124,7 @@ class HostPool {
         return $([HostPool]::AzEphemeralOsDiskSkuHT[$Location])
     }
 
-    hidden Init([Object] $KeyVault, [string] $SubnetId) {
+    hidden Init([Object] $KeyVault, [string] $SubnetId, [string[]] $PrivateEndpointSubnetId) {
         [HostPool]::BuildAzureLocationShortNameHashtable()
         if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
@@ -138,7 +139,7 @@ class HostPool {
         $this.DisableSpotInstance()
         $this.DisableScalingPlan()
         $this.DisableWatermarking()
-        $this.DisablePrivateEndpoint()
+        $this.DisableAVDPrivateEndpoint()
         $this.KeyVault = $KeyVault
         $this.SetIdentityProvider([IdentityProvider]::ActiveDirectory)
         $this.PreferredAppGroupType = "Desktop"
@@ -148,17 +149,11 @@ class HostPool {
         #>
         $this.ASRFailOverVNetId = $null
         $this.DiffDiskPlacement = [DiffDiskPlacement]::None
+        $this.PrivateEndpointSubnetId = $PrivateEndpointSubnetId
     }
         
-    HostPool([Object] $KeyVault, [string] $SubnetId) {
-        #Write-Host "Calling HostPool Constructor with KeyVault parameter ..."
-        $this.Init($KeyVault, $SubnetId)
-    }
-
-    HostPool([Object] $KeyVault) {
-        #Write-Host "Calling HostPool Constructor with KeyVault parameter ..."
-        $Subnet = Get-AzVMSubnet
-        $this.Init($KeyVault, $Subnet.Id)
+    HostPool([Object] $KeyVault, [string] $SubnetId, [string[]] $PrivateEndpointSubnetId) {
+        $this.Init($KeyVault, $SubnetId, $PrivateEndpointSubnetId)
     }
 
     [object] GetVirtualNetwork() {
@@ -259,13 +254,13 @@ class HostPool {
         return $this
     }
 
-    [HostPool]DisablePrivateEndpoint() {
-        $this.PrivateEndpointSubnetId = $null
+    [HostPool] EnableAVDPrivateEndpoint() {
+        $this.AVDPrivateEndpoint = $true
         return $this
     }
 
-    [HostPool] EnablePrivateEndpoint([string[]] $PrivateEndpointSubnetId) {
-        $this.PrivateEndpointSubnetId = $PrivateEndpointSubnetId
+    [HostPool] DisableAVDPrivateEndpoint() {
+        $this.AVDPrivateEndpoint = $false
         return $this
     }
 
@@ -495,11 +490,7 @@ class PooledHostPool : HostPool {
         $this.RefreshNames()
     }
 
-    PooledHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
-        $this.Init()
-    }
-
-    PooledHostPool([Object] $KeyVault):base($KeyVault) {
+    PooledHostPool([Object] $KeyVault, [string] $SubnetId, [string[]] $PrivateEndpointSubnetId):base($KeyVault, $SubnetId, $PrivateEndpointSubnetId) {
         $this.Init()
     }
 
@@ -830,11 +821,7 @@ class PersonalHostPool : HostPool {
         $this.RefreshNames()
     }
 
-    PersonalHostPool([Object] $KeyVault, [string] $SubnetId):base($KeyVault, $SubnetId) {
-        $this.Init()
-    }
-
-    PersonalHostPool([Object] $KeyVault):base($KeyVault) {
+    PersonalHostPool([Object] $KeyVault, [string] $SubnetId, [string[]] $PrivateEndpointSubnetId):base($KeyVault, $SubnetId, $PrivateEndpointSubnetId) {
         $this.Init()
     }
 
@@ -1403,7 +1390,7 @@ function Get-MgGraphObject {
         else {
             $Result
         }
-    } while ($null -ne $GraphRequestUri)
+    } while (-not([string]::IsNullOrEmpty($GraphRequestUri)))
     
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
     return $MgGraphObject
@@ -3394,7 +3381,7 @@ function Test-DomainController {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-    return $null -ne (Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'")
+    return (-not([string]::IsNullOrEmpty((Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'"))))
 }
 
 function Get-PsAvdLatestOperationalInsightsData {
@@ -4066,7 +4053,9 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
 
 
     #Creating a Private Endpoint for this KeyVault on this Subnet
-    New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $PrivateDNSZoneVirtualNetworkId -KeyVault $KeyVault
+    if (-not([string]::IsNullOrEmpty($PrivateEndpointSubnetId))) {
+        New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $PrivateDNSZoneVirtualNetworkId -KeyVault $KeyVault
+    }
 
     #endregion
 
@@ -4081,11 +4070,9 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
 function New-PsAvdHostPoolCredentialKeyVault {
     [CmdletBinding(PositionalBinding = $false)]
     param(
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $false)]
         [string] $PrivateEndpointSubnetId,
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $false)]
         [string[]] $PrivateDNSZoneVirtualNetworkId,
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -4139,8 +4126,9 @@ function New-PsAvdHostPoolCredentialKeyVault {
     #endregion
 
     #Creating a Private Endpoint for this KeyVault on this Subnet
-    New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $PrivateDNSZoneVirtualNetworkId -KeyVault $HostPoolKeyVault
-
+    if (-not([string]::IsNullOrEmpty($PrivateEndpointSubnetId))) {
+        New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $PrivateDNSZoneVirtualNetworkId -KeyVault $HostPoolKeyVault
+    }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -5479,8 +5467,8 @@ function Enable-SSO {
     $TargetDeviceGroup.Id = $AzADDeviceDynamicGroup.Id
     $TargetDeviceGroup.DisplayName = $AzADDeviceDynamicGroupDisplayName
 
-    $null = New-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $MSRDspId -BodyParameter $TargetDeviceGroup
-    $null = New-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $WCLspId -BodyParameter $TargetDeviceGroup
+    $null = New-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $MSRDspId -BodyParameter $TargetDeviceGroup -ErrorAction Ignore
+    $null = New-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $WCLspId -BodyParameter $TargetDeviceGroup -ErrorAction Ignore
     #endregion
 
 }
@@ -5489,7 +5477,7 @@ function Remove-SSO {
     [CmdletBinding(PositionalBinding = $false)]
     param(
         [ValidateNotNullOrEmpty()]
-        [HostPool[]] $HostPool
+        [object[]] $HostPool
     )
 
     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-single-sign-on
@@ -5506,9 +5494,10 @@ function Remove-SSO {
             $TargetDeviceGroup = New-Object -TypeName Microsoft.Graph.Beta.PowerShell.Models.MicrosoftGraphTargetDeviceGroup
             $TargetDeviceGroup.Id = $AzADDeviceDynamicGroup.Id
             $TargetDeviceGroup.DisplayName = $AzADDeviceDynamicGroupDisplayName
-
-            $null = Remove-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $MSRDspId -TargetDeviceGroupId $TargetDeviceGroup.Id
-            $null = Remove-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $WCLspId -TargetDeviceGroupId $TargetDeviceGroup.Id
+            if (-not([string]::IsNullOrEmpty($TargetDeviceGroup.Id))) {
+                $null = Remove-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $MSRDspId -TargetDeviceGroupId $TargetDeviceGroup.Id -ErrorAction Ignore
+                $null = Remove-MgBetaServicePrincipalRemoteDesktopSecurityConfigurationTargetDeviceGroup -ServicePrincipalId $WCLspId -TargetDeviceGroupId $TargetDeviceGroup.Id -ErrorAction Ignore
+            }
         }
     }
     #endregion
@@ -6323,7 +6312,7 @@ function Remove-PsAvdHostPoolSetup {
     foreach ($CurrentHostPoolName in $HostPools.Name) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Microsoft Entra ID Group : $CurrentHostPoolName"
         #Get-AzADGroup -DisplayNameStartsWith $CurrentHostPoolName | Remove-AzADGroup
-        Get-MgBetaGroup -Filter "startsWith(DisplayName, '$CurrentHostPoolName')" | ForEach-Object -Process { Remove-MgBetaGroup -GroupId $_.Id }
+        Get-MgBetaGroup -Filter "startsWith(DisplayName, '$CurrentHostPoolName')" | ForEach-Object -Process { Remove-MgBetaGroup -GroupId $_.Id -ErrorAction Ignore}
     }
     #endregion
 
@@ -6758,6 +6747,7 @@ function New-PsAvdPersonalHostPoolSetup {
             }
             #endregion 
             
+            #Creating a Private Endpoint for the KeyVault on the HostPool PE Subnet and the Subnet used by this DC
             $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
             $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
             New-PsAvdHostPoolCredentialKeyVault -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -HostPool $CurrentHostPool
@@ -6860,7 +6850,7 @@ function New-PsAvdPersonalHostPoolSetup {
                 }
 
                 while (-not(Get-AzRoleAssignment @Parameters)) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.ObjectId)' ObjectId"
                     $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -7196,7 +7186,7 @@ function New-PsAvdPersonalHostPoolSetup {
             }
             #endregion 
 
-            if ($null -ne $CurrentHostPool.PrivateEndpointSubnetId) {
+            if ($CurrentHostPool.AVDPrivateEndpoint) {
                 $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
                 $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
                 New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -HostPool $CurrentAzWvdHostPool
@@ -8865,6 +8855,7 @@ function New-PsAvdPooledHostPoolSetup {
             }
             #endregion 
 
+            #Creating a Private Endpoint for the KeyVault on the HostPool PE Subnet and the Subnet used by this DC
             $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
             $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
             New-PsAvdHostPoolCredentialKeyVault -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -HostPool $CurrentHostPool
@@ -9309,6 +9300,7 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
             if ($CurrentHostPool.FSLogix) {
+				$ModuleBase = Get-ModuleBase
                 $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixProfileToastNotification.ps1"
                 #In case of Spot Instance VMs that have been evicted
                 $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
@@ -9975,7 +9967,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
             }
             #endregion 
 
-            if ($null -ne $CurrentHostPool.PrivateEndpointSubnetId) {
+            if ($CurrentHostPool.AVDPrivateEndpoint) {
                 $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
                 $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
                 New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -HostPool $CurrentAzWvdHostPool
@@ -11414,7 +11406,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
             Write-Verbose -Message "`$Result:`r`n$($Result | Out-String)"
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
             if ($Result.ProvisioningState -ne "Succeeded") {
-                Write-Verbose -Message "`Deployment Operation:`r`n$(Get-AzDeploymentOperation -DeploymentName $DeploymentName | Out-String)"				
+                Write-Verbose -Message "`Deployment Operation:`r`n$(Get-AzDeploymentOperation -DeploymentName $DeploymentName -ErrorAction Ignore | Out-String)"				
                 Write-Warning -Message "[$Index/$Limit] The Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool failed" 
             }
         } until (($Result.ProvisioningState -eq "Succeeded") -or ($Index -ge $Limit))
