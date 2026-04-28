@@ -4899,7 +4899,7 @@ function New-AzureComputeGallery {
 	Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusMessage: $($getStatusARM.LastRunStatusMessage) "
 	Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusRunSubState: $($getStatusARM.LastRunStatusRunSubState) "
 	if ($getStatusARM.LastRunStatusRunState -eq "Failed") {
-		Write-Error -Message "The Image Builder Template for '$imageTemplateNameARM' has failed:\r\n$($getStatusARM.LastRunStatusMessage)"
+		Write-Error -Message "The Image Builder Template for '$imageTemplateNameARM' has failed:`r`n$($getStatusARM.LastRunStatusMessage)"
 	}
 	Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateNameARM' ..."
 	#$Jobs += $getStatusARM | Remove-AzImageBuilderTemplate -AsJob
@@ -4920,7 +4920,7 @@ function New-AzureComputeGallery {
 	Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusMessage: $($getStatusPowerShell.LastRunStatusMessage) "
 	Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusRunSubState: $($getStatusPowerShell.LastRunStatusRunSubState) "
 	if ($getStatusPowerShell.LastRunStatusRunState -eq "Failed") {
-		Write-Error -Message "The Image Builder Template for '$imageTemplateNamePowerShell' has failed:\r\n$($getStatusPowerShell.LastRunStatusMessage)"
+		Write-Error -Message "The Image Builder Template for '$imageTemplateNamePowerShell' has failed:`r`n$($getStatusPowerShell.LastRunStatusMessage)"
 	}
 	Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateNamePowerShell' ..."
 	#$Jobs += $getStatusPowerShell | Remove-AzImageBuilderTemplate -AsJob
