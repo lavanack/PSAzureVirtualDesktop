@@ -10028,7 +10028,7 @@ function New-PsAvdHostPoolSetup {
 
         #region checking we use an AVD location
         $Location = (Get-AzVMCompute).Location
-        $HostPoolDisplayNameLocations = (Get-AzResourceProvider -ProviderNamespace Microsoft.DesktopVirtualization).ResourceTypes | Where-Object ResourceTypeName -eq "hostpols" | Select-Object -ExpandProperty Locations
+        $HostPoolDisplayNameLocations = (Get-AzResourceProvider -ProviderNamespace Microsoft.DesktopVirtualization).ResourceTypes | Where-Object ResourceTypeName -eq "hostpools" | Select-Object -ExpandProperty Locations
         $HostPoolLocations = Get-AzLocation | Where-Object -FilterScript { $_.DisplayName -in $HostPoolDisplayNameLocations}
         if (-not(($Location -in $HostPoolLocations.Location) -or ($Location -in $HostPoolLocations.DisplayName))) {
             Write-Error -Message "The '$Location' is not a HostPool location" -ErrorAction Stop
@@ -11945,7 +11945,7 @@ function Get-PsAvdAzGalleryImageDefinition {
             }
         }
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$count: $count"
-        if ($count -eq $RegionDisplayName.Count) {
+        if (($count -eq $RegionDisplayName.Count) -or ($count -eq $Region.Count)) {
             return $true
         }
     }
