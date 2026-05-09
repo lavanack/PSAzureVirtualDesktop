@@ -10026,6 +10026,16 @@ function New-PsAvdHostPoolSetup {
         Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
+        #region checking we use an AVD location
+        $Location = (Get-AzVMCompute).Location
+        $HostPoolDisplayNameLocations = (Get-AzResourceProvider -ProviderNamespace Microsoft.DesktopVirtualization).ResourceTypes | Where-Object ResourceTypeName -eq "hostpols" | Select-Object -ExpandProperty Locations
+        $HostPoolLocations = Get-AzLocation | Where-Object -FilterScript { $_.DisplayName -in $HostPoolDisplayNameLocations}
+        if (-not(($Location -in $HostPoolLocations.Location) -or ($Location -in $HostPoolLocations.DisplayName))) {
+            Write-Error -Message "The '$Location' is not a HostPool location" -ErrorAction Stop
+        }
+        #endregion
+
+
         $StartTime = Get-Date
         $AzContext = Get-AzContext
         <#
@@ -10357,8 +10367,6 @@ function New-PsAvdHostPoolSetup {
 			Invoke-Pester -Container $Container -Output Detailed
 		}
         #endregion
-
-        $Location = (Get-AzVMCompute).Location
 
         #Setting up the hostpool scaling plan(s)
         New-PsAvdScalingPlan -HostPool $HostPool -Pester:$Pester
