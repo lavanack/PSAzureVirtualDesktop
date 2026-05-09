@@ -1066,16 +1066,10 @@ function Install-PsAvdFSLogixGpoSettings {
         #From  https://aka.ms/FSLogix-latest
         #Always get the latest version of FSLogix
         #$FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest" -ErrorAction Stop).Links | Where-Object -FilterScript { $_.innerText -eq "Download" }).href
-        try {
-            $FSLogixLatestURI = ((Invoke-WebRequest -Uri "https://aka.ms/FSLogix-latest" -UseBasicParsing -ErrorAction Stop).Links | Where-Object -FilterScript { $_.href -match ".zip$" }).href
-        }
-        catch {
-            Write-Warning -Message "'https://aka.ms/FSLogix-latest' raised an error. We're using an hard-coded version URI (June 2024)"
-            #Version: June 2025
-            $FSLogixLatestURI = "https://download.microsoft.com/download/a7599f72-a0b3-49a1-9ece-2f54f6557ee1/FSLogix_25.06.zip"
-        }
+        $FSLogixLatestURI = "https://aka.ms/FSLogix-latest"
         #$FSLogixLatestURI = "https://aka.ms/fslogix_download"
-        $OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
+        #$OutFile = Join-Path -Path $env:Temp -ChildPath $(Split-Path -Path $FSLogixLatestURI -Leaf)
+        $OutFile = "FSLogix-latest.zip"
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Downloading from '$FSLogixLatestURI' to '$OutFile'"
         Start-BitsTransfer $FSLogixLatestURI -Destination $OutFile
         $DestinationPath = Join-Path -Path $env:Temp -ChildPath "FSLogixLatest"
@@ -4488,6 +4482,9 @@ function New-AzureComputeGallery {
 		[int]$ReplicaCount = 1
 	)
 
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
 	#region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
 	$AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
 	$ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
@@ -4512,12 +4509,26 @@ function New-AzureComputeGallery {
 	$AzureComputeGalleryPrefix = $ResourceTypeShortNameHT["Compute/galleries"].ShortName
 
 	# Location (see possible locations in the main docs)
-	Write-Verbose -Message "`$Location: $Location"
-	$LocationShortName = $shortNameHT[$Location].shortName
-	Write-Verbose -Message "`$LocationShortName: $LocationShortName"
 	if ($Location -notin $TargetRegions) {
 		$TargetRegions += $Location
 	}
+
+	#region Checking the specified region support image templates
+    $ImageTemplateDisplayNameLocations = (Get-AzResourceProvider -ProviderNamespace Microsoft.VirtualMachineImages).ResourceTypes | Where-Object ResourceTypeName -eq "imageTemplates" | Select-Object -ExpandProperty Locations
+    $ImageTemplateLocations = Get-AzLocation | Where-Object -FilterScript { $_.DisplayName -in $ImageTemplateDisplayNameLocations}
+    if (-not(($Location -in $ImageTemplateLocations.Location) -or ($Location -in $ImageTemplateLocations.DisplayName))) {
+        $FallBackLocation = 'CentralUS'
+        Write-Warning "'$Location' is not supported for image templates. We switch to '$FallBackLocation' and use '$Location' for replication."
+        $Location = $FallBackLocation
+	    if ($Location -notin $TargetRegions) {
+		    $TargetRegions += $Location
+	    }
+    }
+	Write-Verbose -Message "`$Location: $Location"
+	$LocationShortName = $shortNameHT[$Location].shortName
+	Write-Verbose -Message "`$LocationShortName: $LocationShortName"
+	#endregion
+
 	Write-Verbose -Message "`$TargetRegions: $($TargetRegions -join ', ')"
 	[array] $TargetRegionSettings = foreach ($CurrentTargetRegion in $TargetRegions) {
 		@{"name" = $CurrentTargetRegion; "replicaCount" = $ReplicaCount; "storageAccountType" = "Premium_LRS" }
@@ -4667,7 +4678,7 @@ function New-AzureComputeGallery {
 	While (-not(Get-AzRoleAssignment @Parameters)) {
 		Write-Verbose -Message "Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' System Assigned Managed Identity on the '$($Parameters.Scope)' scope"
 		try {
-			$RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore -ErrorAction Stop
+			$RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Stop
 		} 
 		catch {
 			$RoleAssignment = $null
@@ -4691,7 +4702,7 @@ function New-AzureComputeGallery {
 		while (-not(Get-AzRoleAssignment @Parameters)) {
 			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
 			try {
-				$RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore -ErrorAction Stop
+				$RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Stop
 			} 
 			catch {
 				$RoleAssignment = $null
@@ -4944,6 +4955,7 @@ function New-AzureComputeGallery {
 
 	#endregion
 
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 	return $Gallery
 }
 
@@ -6399,7 +6411,7 @@ function Remove-PsAvdHostPoolSetup {
         #endregion
 
         #region AD Computer Account Cleanup 
-        $DefaultNamingContext = (Get-ADRootDSE).defaultNamingContext
+        $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
         $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
         $AzureLocation = $AzureAppAttachPooledHostPools.Location | Select-Object -Unique 
         foreach ($CurrentAzureLocation in $AzureLocation) {
@@ -8241,7 +8253,7 @@ function New-PsAvdPooledHostPoolSetup {
                         if ($ADGroupMutex.WaitOne()) { 
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
-                            $DefaultNamingContext = (Get-ADRootDSE).defaultNamingContext
+                            $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
                             $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
 
                             #region AD MSIX groups (for include all dedicated HostPool AD MSIX Groups)
@@ -10053,7 +10065,7 @@ function New-PsAvdHostPoolSetup {
         #endregion
 
         #region AVD OU Management
-        $DefaultNamingContext = (Get-ADRootDSE).defaultNamingContext
+        $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
 
@@ -11911,10 +11923,11 @@ function Get-PsAvdAzGalleryImageDefinition {
         $RegionDisplayName = (Get-AzLocation | Where-Object { $_.Location -in $Region }).DisplayName
     }
     
-    $GalleryImageDefinition = Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
-    Get-AzGallery | Select-Object -Property ResourceGroupName, @{Name = "GalleryName"; Expression = { $_.Name } } | Get-AzGalleryImageDefinition | Where-Object -FilterScript { 
+    $GalleryImageDefinition = Get-AzGallery | Select-Object -Property ResourceGroupName, @{Name = "GalleryName"; Expression = { $_.Name } } | Get-AzGalleryImageDefinition | Where-Object -FilterScript { 
         [string[]]$TargetRegionNames = (Get-AzGalleryImageVersion -ResourceGroupName $_.ResourceGroupName -GalleryName $($_.Id -replace "^.+/galleries/" -replace "/images/.+$") -GalleryImageDefinitionName $_.Name).PublishingProfile.TargetRegions.Name | Select-Object -Unique
         $count = $0
         foreach ($TargetRegionName in $TargetRegionNames) { 
@@ -11928,6 +11941,7 @@ function Get-PsAvdAzGalleryImageDefinition {
             return $true
         }
     }
+    
     return $GalleryImageDefinition
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
