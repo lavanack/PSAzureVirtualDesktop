@@ -6103,6 +6103,9 @@ function Start-MicrosoftEntraIDConnectSync {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Microsoft Entra ID Sync already in progress"
         }
     }
+    else {
+        Write-Warning -Message "The ADSync service is not available ..."
+    }
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
@@ -7947,6 +7950,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #Add Modify for "Users" Group for This folder only
                     #$identity = "Users"
                     $identity = $CurrentHostPoolDAGUsersADGroupName
+                    #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
                     $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
                     $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
                     $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -7974,6 +7978,7 @@ function New-PsAvdPooledHostPoolSetup {
                         #Add Read for "Users" Group for This folder only
                         #$identity = "Users"
                         $identity = $CurrentHostPoolDAGUsersADGroupName
+                        #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
                         $colRights = [System.Security.AccessControl.FileSystemRights]::Read
                         $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
                         $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -8341,6 +8346,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #Add Full Control for MSIXShareAdmins Group for This folder, subfolders and files
                     $identity = $HostPoolMSIXShareAdminsADGroupName
+                    #$identity = (Get-ADGroup -LDAPFilter "(displayName=$HostPoolMSIXShareAdminsADGroupName)").Sid.value
                     $colRights = [System.Security.AccessControl.FileSystemRights]::FullControl
                     $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
                     $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -8352,6 +8358,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #Add "Read And Execute" for MSIXUsers Group for This folder, subfolders and files
                     $identity = $HostPoolMSIXUsersADGroupName
+                    #$identity = (Get-ADGroup -LDAPFilter "(displayName=$HostPoolMSIXUsersADGroupName)").Sid.value
                     $colRights = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
                     $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
                     $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None           
@@ -8363,6 +8370,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #Add "Read And Execute" for MSIXHosts Group for This folder, subfolders and files
                     $identity = $HostPoolMSIXHostsADGroupName
+                    #$identity = (Get-ADGroup -LDAPFilter "(displayName=$HostPoolMSIXHostsADGroupName)").Sid.value
                     $colRights = [System.Security.AccessControl.FileSystemRights]::ReadAndExecute
                     $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
                     $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
