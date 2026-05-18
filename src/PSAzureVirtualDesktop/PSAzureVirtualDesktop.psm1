@@ -1,8 +1,13 @@
 ﻿#region PowerShell HostPool classes
-enum IdentityProvider {
+enum JoinMode {
     ActiveDirectory
     MicrosoftEntraID
-    #Hybrid
+    Hybrid
+}
+
+enum IdentityModel {
+    Hybrid
+    CloudOnly
 }
 
 enum HostPoolType {
@@ -19,7 +24,8 @@ enum DiffDiskPlacement {
 }
 
 class HostPool {
-    [ValidateNotNullOrEmpty()] [IdentityProvider] $IdentityProvider
+    [ValidateNotNullOrEmpty()] [JoinMode] $JoinMode
+    [ValidateNotNullOrEmpty()] [IdentityModel] $IdentityModel
     [ValidateNotNullOrEmpty()] [string] $Name
     [ValidateNotNullOrEmpty()] [HostPoolType] $Type
     [ValidateNotNullOrEmpty()] [string] $Location
@@ -141,7 +147,8 @@ class HostPool {
         $this.DisableWatermarking()
         $this.DisableAVDPrivateEndpoint()
         $this.KeyVault = $KeyVault
-        $this.SetIdentityProvider([IdentityProvider]::ActiveDirectory)
+        $this.SetJoinMode([JoinMode]::ActiveDirectory)
+        #$this.SetIdentityModel([IdentityModel]::Hybrid)
         $this.PreferredAppGroupType = "Desktop"
         <#
         $this.DisableSSO()            
@@ -213,7 +220,7 @@ class HostPool {
     
     [HostPool]EnableSSO() {
         $this.SSO = $true
-        $this.SetIdentityProvider([IdentityProvider]::MicrosoftEntraID)
+        $this.SetJoinMode([JoinMode]::MicrosoftEntraID)
         return $this
     }
 
@@ -224,7 +231,7 @@ class HostPool {
 
     [HostPool]EnableIntune() {
         $this.Intune = $true
-        $this.SetIdentityProvider([IdentityProvider]::MicrosoftEntraID)
+        $this.SetJoinMode([JoinMode]::MicrosoftEntraID)
         return $this
     }
 
@@ -339,18 +346,31 @@ class HostPool {
     }
 
     [bool] IsMicrosoftEntraIdJoined() {
-        return ([IdentityProvider]::MicrosoftEntraID -eq $this.IdentityProvider)
+        return ([JoinMode]::MicrosoftEntraID -eq $this.JoinMode)
     }
 
     [bool] IsActiveDirectoryJoined() {
-        return ([IdentityProvider]::ActiveDirectory -eq $this.IdentityProvider)
+        return ([JoinMode]::ActiveDirectory -eq $this.JoinMode)
     }
 
-    [HostPool] SetIdentityProvider([IdentityProvider] $IdentityProvider) {
-        $this.IdentityProvider = $IdentityProvider
-        if ([IdentityProvider]::ActiveDirectory -eq $IdentityProvider) {
+    [bool] IsHybridJoined() {
+        return ([JoinMode]::Hybrid -eq $this.JoinMode)
+    }
+
+    [HostPool] SetIdentityModel([IdentityModel] $IdentityModel) {
+        $this.IdentityModel = $IdentityModel
+        if ([IdentityModel]::CloudOnly -eq $IdentityModel) {
+            $this.SetJoinMode([JoinMode]::MicrosoftEntraID)
+        }
+        return $this
+    }
+
+    [HostPool] SetJoinMode([JoinMode] $JoinMode) {
+        $this.JoinMode = $JoinMode
+        if ([JoinMode]::ActiveDirectory -eq $JoinMode) {
             $this.DisableIntune()
             $this.DisableSSO()
+            $this.SetIdentityModel([IdentityModel]::Hybrid)
         }
         $this.RefreshNames()
         return $this
@@ -676,8 +696,8 @@ class PooledHostPool : HostPool {
         return $this
     }
 
-    [PooledHostPool] SetIdentityProvider([IdentityProvider] $IdentityProvider) {
-        $this.IdentityProvider = $IdentityProvider
+    [PooledHostPool] SetJoinMode([JoinMode] $JoinMode) {
+        $this.JoinMode = $JoinMode
         if ($this.IsMicrosoftEntraIdJoined()) {
             #No MSIX with EntraID: https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
             $this.MSIX = $false
@@ -915,7 +935,7 @@ class PersonalHostPool : HostPool {
 # Note: Unlike the `using module` approach, this approach allows
 #       you to *selectively* export `class`es and `enum`s.
 $ExportableTypes = @(
-    [IdentityProvider]
+    [JoinMode]
     [HostPoolType]
     [DiffDiskPlacement]
     [HostPool]
@@ -6314,7 +6334,7 @@ function Remove-PsAvdHostPoolSetup {
     #endregion
 
     #region Azure AD/Microsoft Entra ID cleanup
-    $MicrosoftEntraIDHostPools = $HostPools | Where-Object -FilterScript { $_.IdentityProvider -eq [IdentityProvider]::MicrosoftEntraID }
+    $MicrosoftEntraIDHostPools = $HostPools | Where-Object -FilterScript { $_.JoinMode -eq [JoinMode]::MicrosoftEntraID }
     #Getting all session hosts starting with the Name Prefixes
     $RegExp = ($MicrosoftEntraIDHostPools.NamePrefix -replace '(^[^\n]*$)', '^$1-') -join '|'
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RegExp : $RegExp"
@@ -6725,10 +6745,10 @@ function New-PsAvdPersonalHostPoolSetup {
                 $AdJoinCredential = Get-AdjoinCredential -KeyVault $CurrentHostPool.KeyVault
 
                 Grant-PsAvdADJoinPermission -Credential $AdJoinCredential -OrganizationalUnit $CurrentHostPoolOU.DistinguishedName
-                $Tag['IdentityProvider'] = "Active Directory Directory Services"
+                $Tag['JoinMode'] = "Active Directory Directory Services"
             }
             else {
-                $Tag['IdentityProvider'] = "Microsoft Entra ID"
+                $Tag['JoinMode'] = "Microsoft Entra ID"
                 #region Assign Virtual Machine Administrator Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
                 do {
@@ -6880,7 +6900,7 @@ function New-PsAvdPersonalHostPoolSetup {
             }
 
             #region Workspace Setup
-            $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.IdentityProvider
+            $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.JoinMode
             if ($CurrentHostPool.ScalingPlan) {
                 $Options += 'ScalingPlan'
             }
@@ -8837,10 +8857,10 @@ function New-PsAvdPooledHostPoolSetup {
                 #>
                 $AdJoinCredential = Get-AdjoinCredential -KeyVault $CurrentHostPool.KeyVault
                 Grant-PsAvdADJoinPermission -Credential $AdJoinCredential -OrganizationalUnit $CurrentHostPoolOU.DistinguishedName
-                $Tag['IdentityProvider'] = "Active Directory Directory Services"
+                $Tag['JoinMode'] = "Active Directory Directory Services"
             }
             else {
-                $Tag['IdentityProvider'] = "Microsoft Entra ID"
+                $Tag['JoinMode'] = "Microsoft Entra ID"
                 #region Assign Virtual Machine User Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
                 do {
@@ -9181,7 +9201,7 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
             #region Workspace Setup
-            $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.IdentityProvider
+            $Options = $CurrentHostPool.Location, $CurrentHostPool.Type, $CurrentHostPool.JoinMode
             if ($CurrentHostPool.VMSourceImageId) {
                 $Options += 'Azure Compte Gallery'
             }
