@@ -688,7 +688,7 @@ class PooledHostPool : HostPool {
 
     hidden [PooledHostPool]EnableMSIX() {
         #if (-not($this.IsMicrosoftEntraIdJoined())) {
-        if ($this.IsActiveDirectoryJoined()) {
+        if ($this.IsActiveDirectoryJoined() -or $this.IsHybridJoined()) {
             $this.MSIX = $true
             $this.DisableAppAttach()
             $this.RefreshNames()        
@@ -717,9 +717,13 @@ class PooledHostPool : HostPool {
             $TempName += "-ei"
             $TempNamePrefix += "e"
         }
-        else {
+        elseif ($this.IsActiveDirectoryJoined()) {
             $TempName += "-ad"
             $TempNamePrefix += "a"
+        }
+        else {
+            $TempName += "-hy"
+            $TempNamePrefix += "h"
         }
         
         $TempName += "-poc"
@@ -893,9 +897,13 @@ class PersonalHostPool : HostPool {
             $TempName += "-ei"
             $TempNamePrefix += "e"
         }
-        else {
+        elseif ($this.IsActiveDirectoryJoined()) {
             $TempName += "-ad"
             $TempNamePrefix += "a"
+        }
+        else {
+            $TempName += "-hy"
+            $TempNamePrefix += "h"
         }
         
         $TempName += "-poc"
@@ -6736,7 +6744,7 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             #region Identity Provider Management
-            if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinUserNameSecretName) -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinPasswordSecretName)).SecretValue
@@ -6745,7 +6753,12 @@ function New-PsAvdPersonalHostPoolSetup {
                 $AdJoinCredential = Get-AdjoinCredential -KeyVault $CurrentHostPool.KeyVault
 
                 Grant-PsAvdADJoinPermission -Credential $AdJoinCredential -OrganizationalUnit $CurrentHostPoolOU.DistinguishedName
-                $Tag['JoinMode'] = "Active Directory Directory Services"
+                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                    $Tag['JoinMode'] = "Active Directory Directory Services"
+                }
+                else {
+                    $Tag['JoinMode'] = "Hybrid"
+                }
             }
             else {
                 $Tag['JoinMode'] = "Microsoft Entra ID"
@@ -7425,7 +7438,7 @@ function New-PsAvdPooledHostPoolSetup {
             #region OneDrive
             if ($CurrentHostPool.OneDriveForKnownFolders) {
                 #region Dedicated Host Pool AD GPO Management (1 OneDrive GPO per Host Pool)
-                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region OneDrive GPO
                     $CurrentHostPoolOneDriveGPO = Get-GPO -Name "$($CurrentHostPool.Name) - OneDrive Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolOneDriveGPO)) {
@@ -7511,7 +7524,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion 
 
                 #region Dedicated Host Pool AD GPO Management (1 FSLogix per Host Pool)
-                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region FSLogix GPO
                     $CurrentHostPoolFSLogixGPO = Get-GPO -Name "$($CurrentHostPool.Name) - FSLogix Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolFSLogixGPO)) {
@@ -7580,6 +7593,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #From https://blog.piservices.fr/post/2017/12/21/active-directory-debug-avance-de-l-application-des-gpos
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Diagnostics' -ValueName "GPSvcDebugLevel" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0x30002
                     #endregion
+
                     #region Microsoft Defender Endpoint A/V General Exclusions (the *.VHD and *.VHDX exclusions applies to FSLogix and MSIX) 
                     #From https://learn.microsoft.com/en-us/FSLogix/overview-prerequisites#configure-antivirus-file-and-folder-exclusions
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Microsoft Defender Endpoint A/V Exclusions for this HostPool' related registry values for '$($CurrentHostPoolFSLogixGPO.DisplayName)' GPO (linked to '$($CurrentHostPoolOU.DistinguishedName)' OU)"
@@ -7703,7 +7717,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion 
                 
                 #region Registering the Storage Account with your active directory environment under the target
-                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
                         if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
                             $AzFilesHybridZipName = 'AzFilesHybrid.zip'
@@ -8041,7 +8055,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #region FSLogix AD Management
 
                 #region Dedicated Host Pool AD GPO Management (1 AVD GPO per Host Pool)
-                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region AVD GPO
                     $CurrentHostPoolAVDGPO = Get-GPO -Name "$($CurrentHostPool.Name) - AVD Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolAVDGPO)) {
@@ -8061,15 +8075,6 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "WatermarkingQrScale" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 4
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "WatermarkingWidthFactor" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 320
 
-                    #region Disconnect remote session on lock for Microsoft identity platform authentication
-                    #From https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy
-
-                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16973&lang=en-US
-                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockMicrosoftIdentity" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
-
-                    #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US
-                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockLegacy" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
-                    #endregion
                     #region GPO Debug log file
                     #From https://blog.piservices.fr/post/2017/12/21/active-directory-debug-avance-de-l-application-des-gpos
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolAVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Diagnostics' -ValueName "GPSvcDebugLevel" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0x30002
@@ -8077,18 +8082,21 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
                     #endregion
                 }
+                else {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Watermarking NOT configured for '$($CurrentHostPool.Name)' HostPool"
+                }
                 #endregion 
 
 
                 #endregion
             }
             else {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Watermarking NOT enabled for '$($CurrentHostPool.Name)' HostPool"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Watermarking NOT enabled for '$($CurrentHostPool.Name)' HostPool with Intune"
             }
             #endregion 
 
             #region MSIX AppAttach / Azure AppAttach
-            if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
@@ -8849,7 +8857,7 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
             #region Identity Provider Management
-            if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinUserNameSecretName) -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinPasswordSecretName)).SecretValue
@@ -9394,7 +9402,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
             }
             #>
             <#
-            if (($CurrentHostPool.IsActiveDirectoryJoined()) -and ($CurrentHostPool.FSLogix)) {
+            if (($CurrentHostPool.IsActiveDirectoryJoined() or $CurrentHostPool.IsHybridJoined() ) -and ($CurrentHostPool.FSLogix)) {
                 #region Copying The Logon Script on Session Host(s)
                 #$result = Wait-PSSession -ComputerName $SessionHostNames
                 #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$result: $result"
@@ -9562,7 +9570,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
             #endregion 
 
             #region MSIX AppAttach / Azure AppAttach
-            if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
@@ -10175,6 +10183,16 @@ function New-PsAvdHostPoolSetup {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Performance Counters' related registry values for '$($AVDGPO.DisplayName)' GPO (linked to '$($AVDRootOU.DistinguishedName)' OU)"
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\System\CurrentControlSet\Control\Terminal Server' -ValueName "EnableLagCounter" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 1
         #endregion 
+
+        #region Disconnect remote session on lock for Microsoft identity platform authentication
+        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy
+
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16973&lang=en-US
+        $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockMicrosoftIdentity" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
+
+        #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US
+        $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "fDisconnectOnLockLegacy" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
+        #endregion
 
         #region Starter GPOs Management
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Starter GPOs Management"
