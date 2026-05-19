@@ -219,8 +219,12 @@ class HostPool {
     }
     
     [HostPool]EnableSSO() {
-        $this.SSO = $true
-        $this.SetJoinMode([JoinMode]::MicrosoftEntraID)
+        if ($this.JoinMode -in [JoinMode]::MicrosoftEntraID, [JoinMode]::Hybrid) {
+            $this.SSO = $true
+        }
+        else {
+            $this.SSO = $false
+        }
         return $this
     }
 
@@ -230,8 +234,12 @@ class HostPool {
     }
 
     [HostPool]EnableIntune() {
-        $this.Intune = $true
-        $this.SetJoinMode([JoinMode]::MicrosoftEntraID)
+        if ($this.JoinMode -in [JoinMode]::MicrosoftEntraID, [JoinMode]::Hybrid) {
+            $this.Intune = $true
+        }
+        else {
+            $this.Intune = $false
+        }
         return $this
     }
 
@@ -1076,6 +1084,38 @@ function Register-PsAvdRequiredResourceProvider {
         }
 
     }
+    #endregion
+    #endregion
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+}
+
+function Set-BlockAADWorkplaceJoinOnDC {
+    [CmdletBinding(PositionalBinding = $false)]
+    param(
+    )
+
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
+    #region Block Hydrid Join GPO on Domain Controllers OU
+    $GPOName = "Domain Controllers - Hydrid Join Settings"
+    $DomainControllersHybridJoinGPO = Get-GPO -Name $GPOName -ErrorAction Ignore
+    if (-not($DomainControllersHybridJoinGPO)) {
+        $DomainControllersHybridJoinGPO = New-GPO -Name $GPOName
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($DomainControllersHybridJoinGPO.DisplayName)' GPO (linked to '($($CurrentHostPoolOU.DistinguishedName))'"
+    }
+    $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
+    $DomainControllersOU = Get-ADOrganizationalUnit -Filter 'Name -eq "Domain Controllers"' -SearchBase $DefaultNamingContext
+    $null = $DomainControllersHybridJoinGPO | New-GPLink -Target $DomainControllersOU.DistinguishedName -LinkEnabled Yes -ErrorAction Ignore
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
+    Start-Sleep -Seconds 10
+    #region Hydrid Join GPO Management: Dedicated GPO settings for Blocking on Domain Controllers
+    #From https://techcommunity.microsoft.com/blog/exchange/troubleshooting-auth-issues-in-outlook-if-you-are-azure-joining-non-persistent-v/1789359
+    #From https://learn.microsoft.com/en-us/entra/identity/devices/hybrid-join-plan#handling-devices-with-microsoft-entra-registered-state
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Hydrid Join' related registry values for '$($DomainControllersHybridJoinGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
+    $null = Set-PsAvdGPRegistryValue -Name $DomainControllersHybridJoinGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\WorkplaceJoin' -ValueName "autoWorkplaceJoin" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 0
+    $null = Set-PsAvdGPRegistryValue -Name $DomainControllersHybridJoinGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\WorkplaceJoin' -ValueName "BlockAADWorkplaceJoin" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
     #endregion
     #endregion
 
@@ -6671,6 +6711,8 @@ function New-PsAvdPersonalHostPoolSetup {
 
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
+        
+        Set-BlockAADWorkplaceJoinOnDC
     }
     process {
         foreach ($CurrentHostPool in $HostPool) {
@@ -6727,6 +6769,16 @@ function New-PsAvdPersonalHostPoolSetup {
             }
             #endregion
 
+            #region AD Session Hosts groups
+            $SessionHosts = "SessionHosts"
+            $CurrentHostPoolSessionHostsADGroupName = "$($CurrentHostPool.Name) - $SessionHosts"
+            $CurrentHostPoolSessionHostsADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolSessionHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+            if (-not($CurrentHostPoolSessionHostsADGroup)) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolSessionHostsADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                $CurrentHostPoolSessionHostsADGroup = New-ADGroup -Name $CurrentHostPoolSessionHostsADGroupName -SamAccountName $CurrentHostPoolSessionHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolSessionHostsADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+            }
+            #endregion 
+
             #region Run a sync with Azure AD
             Start-MicrosoftEntraIDConnectSync
             #endregion 
@@ -6742,6 +6794,34 @@ function New-PsAvdPersonalHostPoolSetup {
                 $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
             }
             #endregion
+
+            #region Hybrid Join GPO
+            if ($CurrentHostPool.IsHybridJoined()) {
+                #region Hydrid Join GPO
+                $CurrentHostPoolHybridJoinGPO = Get-GPO -Name "$($CurrentHostPool.Name) - Hydrid Join Settings" -ErrorAction Ignore
+                if (-not($CurrentHostPoolHybridJoinGPO)) {
+                    $CurrentHostPoolHybridJoinGPO = New-GPO -Name "$($CurrentHostPool.Name) - Hydrid Join Settings"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolHybridJoinGPO.DisplayName)' GPO (linked to '($($CurrentHostPoolOU.DistinguishedName))'"
+                }
+                $null = $CurrentHostPoolHybridJoinGPO | New-GPLink -Target $CurrentHostPoolOU.DistinguishedName -LinkEnabled Yes -ErrorAction Ignore
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
+                Start-Sleep -Seconds 10
+                #region Hydrid Join GPO Management: Dedicated GPO settings for Hydrid Join VMs for this HostPool 
+                #From https://learn.microsoft.com/en-us/windows/client-management/enroll-a-windows-10-device-automatically-using-group-policy
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Hydrid Join' related registry values for '$($CurrentHostPoolHybridJoinGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
+                $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\WorkplaceJoin' -ValueName "autoWorkplaceJoin" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
+                $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CDJ\AAD' -ValueName "TenantId" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $((Get-AzContext).Tenant.Id)
+                $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CDJ\AAD' -ValueName "TenantName" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $($((Get-AzContext).Tenant).Domains[0])
+                
+                                
+                # Apply GPO only to your SessionHosts AD Group
+                #$null = Set-GPPermission -Name $CurrentHostPoolHybridJoinGPO.DisplayName -TargetName $CurrentHostPoolSessionHostsADGroupName -TargetType Group -PermissionLevel GpoApply
+                #endregion 
+
+                #endregion
+            }
+            #endregion 
+
 
             #region Identity Provider Management
             if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
@@ -6980,10 +7060,9 @@ function New-PsAvdPersonalHostPoolSetup {
                 if ($CurrentHostPool.Intune) {
                     Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy -GroupId $AzADDeviceDynamicGroup.Id
                 }
-
-                if ($CurrentHostPool.SSO) {
-                    Enable-SSO -HostPoolName $CurrentHostPool.Name
-                }
+            }
+            if ($CurrentHostPool.SSO) {
+                Enable-SSO -HostPoolName $CurrentHostPool.Name
             }
 
             #region Adding Session Hosts to the Host Pool
@@ -7014,6 +7093,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
+            $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
             #endregion 
 
             #region Restarting the Session Hosts
@@ -7343,6 +7423,7 @@ function New-PsAvdPooledHostPoolSetup {
         }
         #endregion 
 
+        Set-BlockAADWorkplaceJoinOnDC
     }
     process {
         foreach ($CurrentHostPool in $HostPool) {
@@ -7417,6 +7498,17 @@ function New-PsAvdPooledHostPoolSetup {
                 $CurrentHostPoolRAGUsersADGroup = New-ADGroup -Name $CurrentHostPoolRAGUsersADGroupName -SamAccountName $CurrentHostPoolRAGUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolRAGUsersADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
             }
             #endregion
+
+            #region AD Session Hosts groups
+            $SessionHosts = "SessionHosts"
+            $CurrentHostPoolSessionHostsADGroupName = "$($CurrentHostPool.Name) - $SessionHosts"
+            $CurrentHostPoolSessionHostsADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolSessionHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+            if (-not($CurrentHostPoolSessionHostsADGroup)) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolSessionHostsADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                $CurrentHostPoolSessionHostsADGroup = New-ADGroup -Name $CurrentHostPoolSessionHostsADGroupName -SamAccountName $CurrentHostPoolSessionHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolSessionHostsADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+            }
+            #endregion 
+
             #region Run a sync with Azure AD
             Start-MicrosoftEntraIDConnectSync
             #endregion 
@@ -7429,11 +7521,36 @@ function New-PsAvdPooledHostPoolSetup {
 
             $CurrentHostPoolResourceGroup = Get-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -ErrorAction Ignore
             if (-not($CurrentHostPoolResourceGroup)) {
-                $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolResourceGroup.ResourceGroupName)' Resource Group"
+                $CurrentHostPoolResourceGroup = New-AzResourceGroup -Name $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -Force
             }
             #endregion
 
+            #region Hybrid Join GPO
+            if ($CurrentHostPool.IsHybridJoined()) {
+                #region Hydrid Join GPO
+                $CurrentHostPoolHybridJoinGPO = Get-GPO -Name "$($CurrentHostPool.Name) - Hydrid Join Settings" -ErrorAction Ignore
+                if (-not($CurrentHostPoolHybridJoinGPO)) {
+                    $CurrentHostPoolHybridJoinGPO = New-GPO -Name "$($CurrentHostPool.Name) - Hydrid Join Settings"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolHybridJoinGPO.DisplayName)' GPO (linked to '($($CurrentHostPoolOU.DistinguishedName))'"
+                }
+                $null = $CurrentHostPoolHybridJoinGPO | New-GPLink -Target $CurrentHostPoolOU.DistinguishedName -LinkEnabled Yes -ErrorAction Ignore
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
+                Start-Sleep -Seconds 10
+                #region Hydrid Join GPO Management: Dedicated GPO settings for Hydrid Join VMs for this HostPool 
+                #From https://learn.microsoft.com/en-us/windows/client-management/enroll-a-windows-10-device-automatically-using-group-policy
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Hydrid Join' related registry values for '$($CurrentHostPoolHybridJoinGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
+                $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\WorkplaceJoin' -ValueName "autoWorkplaceJoin" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
+                $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CDJ\AAD' -ValueName "TenantId" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $((Get-AzContext).Tenant.Id)
+                $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CDJ\AAD' -ValueName "TenantName" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $($((Get-AzContext).Tenant).Domains[0])                
+                                
+                # Apply GPO only to your SessionHosts AD Group
+                #$null = Set-GPPermission -Name $CurrentHostPoolHybridJoinGPO.DisplayName -TargetName $CurrentHostPoolSessionHostsADGroupName -TargetType Group -PermissionLevel GpoApply
+                #endregion 
+
+                #endregion
+            }
+            #endregion 
 
             #region OneDrive
             if ($CurrentHostPool.OneDriveForKnownFolders) {
@@ -8865,7 +8982,12 @@ function New-PsAvdPooledHostPoolSetup {
                 #>
                 $AdJoinCredential = Get-AdjoinCredential -KeyVault $CurrentHostPool.KeyVault
                 Grant-PsAvdADJoinPermission -Credential $AdJoinCredential -OrganizationalUnit $CurrentHostPoolOU.DistinguishedName
-                $Tag['JoinMode'] = "Active Directory Directory Services"
+                if ($CurrentHostPool.IsActiveDirectoryJoined()) {
+                    $Tag['JoinMode'] = "Active Directory Directory Services"
+                }
+                else {
+                    $Tag['JoinMode'] = "Hybrid"
+                }
             }
             else {
                 $Tag['JoinMode'] = "Microsoft Entra ID"
@@ -9297,9 +9419,9 @@ function New-PsAvdPooledHostPoolSetup {
                 if ($CurrentHostPool.Intune) {
                     Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy -GroupId $AzADDeviceDynamicGroup.Id
                 }
-                if ($CurrentHostPool.SSO) {
-                    Enable-SSO -HostPoolName $CurrentHostPool.Name
-                }
+            }
+            if ($CurrentHostPool.SSO) {
+                Enable-SSO -HostPoolName $CurrentHostPool.Name
             }
 
             if (-not($CurrentHostPool.SessionHostConfiguration)) {
@@ -9341,10 +9463,12 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
             #endregion
 
-            #region Get Session Host Names
+            #region Get Session Host Names and Add them to the dedicated security Group
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
+            $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
             #endregion
 
             if ($CurrentHostPool.FSLogix) {
@@ -9569,6 +9693,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
             Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
             #endregion 
 
+
             #region MSIX AppAttach / Azure AppAttach
             if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
@@ -9587,7 +9712,8 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                     #$SessionHostNames = $SessionHosts.ResourceId -replace ".*/"
                     #Adding Session Hosts to the dedicated AD MSIX Host group
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the Session Hosts Session Hosts to the '$($CurrentHostPoolMSIXHostsADGroup.Name)' AD Group"
-                    $CurrentHostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
+                    #$CurrentHostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
+                    $CurrentHostPoolMSIXHostsADGroup | Add-ADGroupMember -Members $CurrentHostPoolSessionHostsADGroupName
                     Start-MicrosoftEntraIDConnectSync
                     #endregion
 
@@ -10272,6 +10398,7 @@ function New-PsAvdHostPoolSetup {
                 Set-Variable -Name MaximumFunctionCount -Value 32768 -Scope Global -Force
                 New-Variable -Name ModuleBase -Value "$((Get-Module -Name $MyInvocation.MyCommand.ModuleName).ModuleBase)" -Scope Global -Force
                 New-Variable -Name PSDefaultParameterValues -Value @{ "Import-Module:DisableNameChecking" = `$true } -Scope Global -Force
+                Function Set-BlockAADWorkplaceJoinOnDC { ${Function:Set-BlockAADWorkplaceJoinOnDC} }
                 Function Enable-SSO { ${Function:Enable-SSO} }
                 Function Get-AdjoinCredential { ${Function:Get-AdjoinCredential} }
                 Function Get-LocalAdminCredential { ${Function:Get-LocalAdminCredential} }
