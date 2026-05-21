@@ -65,8 +65,8 @@ class HostPool {
     [DiffDiskPlacement] $DiffDiskPlacement
     static [string] $LocalAdminUserNameSecretName = "LocalAdminUserName"
     static [string] $LocalAdminPasswordSecretName = "LocalAdminPassword"
-    static [string] $AdJoinUserNameSecretName     = "AdJoinUserName"
-    static [string] $AdJoinPasswordSecretName     = "AdJoinPassword"
+    static [string] $AdJoinUserNameSecretName = "AdJoinUserName"
+    static [string] $AdJoinPasswordSecretName = "AdJoinPassword"
 
 
     hidden static [hashtable] $AzLocationShortNameHT = $null     
@@ -1111,7 +1111,9 @@ function Set-BlockAADWorkplaceJoinOnDC {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
     Start-Sleep -Seconds 10
     #region Hydrid Join GPO Management: Dedicated GPO settings for Blocking on Domain Controllers
+    #From https://techcommunity.microsoft.com/blog/azurearchitectureblog/setup-hybrid-joined-avd-single-sign-on/3643845
     #From https://techcommunity.microsoft.com/blog/exchange/troubleshooting-auth-issues-in-outlook-if-you-are-azure-joining-non-persistent-v/1789359
+    #From https://learn.microsoft.com/en-us/entra/identity/devices/how-to-hybrid-join#managed-domains
     #From https://learn.microsoft.com/en-us/entra/identity/devices/hybrid-join-plan#handling-devices-with-microsoft-entra-registered-state
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Hydrid Join' related registry values for '$($DomainControllersHybridJoinGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
     $null = Set-PsAvdGPRegistryValue -Name $DomainControllersHybridJoinGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\WorkplaceJoin' -ValueName "autoWorkplaceJoin" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 0
@@ -1284,15 +1286,15 @@ function New-PsAvdNoMFAUserEntraIDGroup {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
     #region Pester Tests for Azure MFA - Azure Instantiation
     if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$MFAAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MFA.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MFAAzurePesterTests: $MFAAzurePesterTests"
-		$Container = New-PesterContainer -Path $MFAAzurePesterTests
-		Invoke-Pester -Container $Container -Output Detailed		
-	}
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $MFAAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'MFA.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$MFAAzurePesterTests: $MFAAzurePesterTests"
+        $Container = New-PesterContainer -Path $MFAAzurePesterTests
+        Invoke-Pester -Container $Container -Output Detailed		
+    }
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -1411,16 +1413,16 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
     }
 
     #region Pester Tests for Conditional Access Policy - Azure Instantiation
-	if($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$ConditionalAccessPolicyAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ConditionalAccessPolicy.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ConditionalAccessPolicyAzurePesterTests: $ConditionalAccessPolicyAzurePesterTests"
-		$Container = New-PesterContainer -Path $ConditionalAccessPolicyAzurePesterTests
-		Invoke-Pester -Container $Container -Output Detailed
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $ConditionalAccessPolicyAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ConditionalAccessPolicy.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ConditionalAccessPolicyAzurePesterTests: $ConditionalAccessPolicyAzurePesterTests"
+        $Container = New-PesterContainer -Path $ConditionalAccessPolicyAzurePesterTests
+        Invoke-Pester -Container $Container -Output Detailed
+    }
     #endregion
 
     $MFAForAllUsersConditionalAccessPolicy
@@ -3519,16 +3521,16 @@ function Test-PsAvdStorageAccountNameAvailability {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Pester Tests for Host Pool - Class Instantiation
-	if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
-		$Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
-		Invoke-Pester -Container $Container -Output Detailed
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
+        $Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
+        Invoke-Pester -Container $Container -Output Detailed
+    }
     #endregion
 
     $result = $true
@@ -3770,49 +3772,49 @@ function New-PsAvdPrivateEndpointSetup {
 
     #region Private Endpoint Target Resource Setup
     if ($null -ne $KeyVault) {
-            $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
-            $AzResource = $KeyVault | Get-AzResource
-            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.ResourceId).GroupId
-        }
+        $PrivateDnsZoneName = 'privatelink.vaultcore.azure.net'
+        $AzResource = $KeyVault | Get-AzResource
+        $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.ResourceId).GroupId
+    }
     if ($null -ne $StorageAccount) {
-            $PrivateDnsZoneName = 'privatelink.file.core.windows.net' 
-            $AzResource = $StorageAccount | Get-AzResource
-            $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
-        }
+        $PrivateDnsZoneName = 'privatelink.file.core.windows.net' 
+        $AzResource = $StorageAccount | Get-AzResource
+        $GroupId = (Get-AzPrivateLinkResource -PrivateLinkResourceId $AzResource.Id).GroupId | Where-Object -FilterScript { $_ -match "file" }
+    }
     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/private-link-setup?tabs=azure%2Cpowershell%2Cportal-2#connections-to-host-pools
     if ($null -ne $HostPool) {
-            $PrivateDnsZoneName = 'privatelink.wvd.microsoft.com' 
-            $AzResource = $HostPool | Get-AzResource
-            $GroupId = 'connection'
-        }
+        $PrivateDnsZoneName = 'privatelink.wvd.microsoft.com' 
+        $AzResource = $HostPool | Get-AzResource
+        $GroupId = 'connection'
+    }
     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/private-link-setup?tabs=azure%2Cpowershell%2Cportal-2#feed-download
     if ($null -ne $Workspace) {
-            $PrivateDnsZoneName = 'privatelink.wvd.microsoft.com' 
-            $AzResource = $Workspace | Get-AzResource
-            $GroupId = 'feed'
-        }
+        $PrivateDnsZoneName = 'privatelink.wvd.microsoft.com' 
+        $AzResource = $Workspace | Get-AzResource
+        $GroupId = 'feed'
+    }
     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/private-link-setup?tabs=azure%2Cpowershell%2Cportal-2#initial-feed-discovery
     if ($GlobalWorkspace) {
-            $PrivateDnsZoneName = 'privatelink-global.wvd.microsoft.com' 
-            $PrivateDnsResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -PrivateDnsZoneName $PrivateDnsZoneName
-            $Location = (Get-AzResourceGroup -Name $PrivateDnsResourceGroupName).Location
-            $Index = 1
-            $GlobalAvdWorkSpaceName = "ws-avd-global-{0}-{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
-            $Parameters = @{
-                Name              = $GlobalAvdWorkSpaceName
-                ResourceGroupName = $PrivateDnsResourceGroupName
-                #Verbose                   = $true
-            }
-            $GlobalAvdWorkSpace = Get-AzWvdWorkspace @parameters -ErrorAction Ignore
-            if ($null -eq $GlobalAvdWorkSpace) {
-                $Parameters['Location'] = $Location
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the the '$($Parameters.Name)' WorkSpace Host Pool (in the '$($Parameters.ResourceGroupName)' Resource Group)"
-                $GlobalAvdWorkSpace = New-AzWvdWorkspace @parameters
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$($Parameters.Name)' WorkSpace  Host Pool (in the $($Parameters.ResourceGroupName)' Resource Group) is created"
-            }
-            $AzResource = $GlobalAvdWorkSpace | Get-AzResource
-            $GroupId = 'global'
+        $PrivateDnsZoneName = 'privatelink-global.wvd.microsoft.com' 
+        $PrivateDnsResourceGroupName = Get-PsAvdPrivateDnsResourceGroupName -PrivateDnsZoneName $PrivateDnsZoneName
+        $Location = (Get-AzResourceGroup -Name $PrivateDnsResourceGroupName).Location
+        $Index = 1
+        $GlobalAvdWorkSpaceName = "ws-avd-global-{0}-{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
+        $Parameters = @{
+            Name              = $GlobalAvdWorkSpaceName
+            ResourceGroupName = $PrivateDnsResourceGroupName
+            #Verbose                   = $true
         }
+        $GlobalAvdWorkSpace = Get-AzWvdWorkspace @parameters -ErrorAction Ignore
+        if ($null -eq $GlobalAvdWorkSpace) {
+            $Parameters['Location'] = $Location
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the the '$($Parameters.Name)' WorkSpace Host Pool (in the '$($Parameters.ResourceGroupName)' Resource Group)"
+            $GlobalAvdWorkSpace = New-AzWvdWorkspace @parameters
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The '$($Parameters.Name)' WorkSpace  Host Pool (in the $($Parameters.ResourceGroupName)' Resource Group) is created"
+        }
+        $AzResource = $GlobalAvdWorkSpace | Get-AzResource
+        $GroupId = 'global'
+    }
     $ResourceGroupName = $AzResource.ResourceGroupName
     #endregion
     	
@@ -4540,195 +4542,195 @@ function Grant-PsAvdADJoinPermission {
 
 #From https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
 function New-AzureComputeGallery {
-	[CmdletBinding()]
-	Param(
-		[Parameter(Mandatory = $false)]
-		[string]$Location = "EastUS2",
-		[Parameter(Mandatory = $false)]
-		[string[]]$TargetRegions = @($Location),
-		[Parameter(Mandatory = $false)]
-		[int]$ReplicaCount = 1
-	)
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory = $false)]
+        [string]$Location = "EastUS2",
+        [Parameter(Mandatory = $false)]
+        [string[]]$TargetRegions = @($Location),
+        [Parameter(Mandatory = $false)]
+        [int]$ReplicaCount = 1
+    )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
-	#region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
-	$AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
-	$ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
-	$shortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
-	#endregion
+    #region Building an Hashtable to get the shortname of every Azure location based on a JSON file on the Github repository of the Azure Naming Tool
+    $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
+    $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
+    $shortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+    #endregion
 
-	#region Building an Hashtable to get the shortname of every Azure resource based on a JSON file on the Github repository of the Azure Naming Tool
-	$Result = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/refs/heads/main/src/repository/resourcetypes.json 
-	$ResourceTypeShortNameHT = $Result | Where-Object -FilterScript { $_.property -in @('', 'Windows') } | Select-Object -Property resource, shortName, lengthMax | Group-Object -Property resource -AsHashTable -AsString
-	#endregion
+    #region Building an Hashtable to get the shortname of every Azure resource based on a JSON file on the Github repository of the Azure Naming Tool
+    $Result = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/refs/heads/main/src/repository/resourcetypes.json 
+    $ResourceTypeShortNameHT = $Result | Where-Object -FilterScript { $_.property -in @('', 'Windows') } | Select-Object -Property resource, shortName, lengthMax | Group-Object -Property resource -AsHashTable -AsString
+    #endregion
 
-	#region Set up the environment and variables
-	# get existing context
-	$AzContext = Get-AzContext
-	# Your subscription. This command gets your current subscription
-	$subscriptionID = $AzContext.Subscription.Id
+    #region Set up the environment and variables
+    # get existing context
+    $AzContext = Get-AzContext
+    # Your subscription. This command gets your current subscription
+    $subscriptionID = $AzContext.Subscription.Id
 
-	#Naming convention based on https://github.com/microsoft/CloudAdoptionFramework/tree/master/ready/AzNamingTool
-	#$AzureComputeGalleryPrefix = "acg"
-	#$ResourceGroupPrefix = "rg"
-	$ResourceGroupPrefix = $ResourceTypeShortNameHT["Resources/resourcegroups"].ShortName
-	$AzureComputeGalleryPrefix = $ResourceTypeShortNameHT["Compute/galleries"].ShortName
+    #Naming convention based on https://github.com/microsoft/CloudAdoptionFramework/tree/master/ready/AzNamingTool
+    #$AzureComputeGalleryPrefix = "acg"
+    #$ResourceGroupPrefix = "rg"
+    $ResourceGroupPrefix = $ResourceTypeShortNameHT["Resources/resourcegroups"].ShortName
+    $AzureComputeGalleryPrefix = $ResourceTypeShortNameHT["Compute/galleries"].ShortName
 
-	# Location (see possible locations in the main docs)
-	if ($Location -notin $TargetRegions) {
-		$TargetRegions += $Location
-	}
+    # Location (see possible locations in the main docs)
+    if ($Location -notin $TargetRegions) {
+        $TargetRegions += $Location
+    }
 
-	#region Checking the specified region support image templates
+    #region Checking the specified region support image templates
     $ImageTemplateDisplayNameLocations = (Get-AzResourceProvider -ProviderNamespace Microsoft.VirtualMachineImages).ResourceTypes | Where-Object ResourceTypeName -eq "imageTemplates" | Select-Object -ExpandProperty Locations
-    $ImageTemplateLocations = Get-AzLocation | Where-Object -FilterScript { $_.DisplayName -in $ImageTemplateDisplayNameLocations}
+    $ImageTemplateLocations = Get-AzLocation | Where-Object -FilterScript { $_.DisplayName -in $ImageTemplateDisplayNameLocations }
     if (-not(($Location -in $ImageTemplateLocations.Location) -or ($Location -in $ImageTemplateLocations.DisplayName))) {
         $FallBackLocation = 'CentralUS'
         Write-Warning "'$Location' is not supported for image templates. We switch to '$FallBackLocation' and use '$Location' for replication."
         $Location = $FallBackLocation
-	    if ($Location -notin $TargetRegions) {
-		    $TargetRegions += $Location
-	    }
+        if ($Location -notin $TargetRegions) {
+            $TargetRegions += $Location
+        }
     }
-	Write-Verbose -Message "`$Location: $Location"
-	$LocationShortName = $shortNameHT[$Location].shortName
-	Write-Verbose -Message "`$LocationShortName: $LocationShortName"
-	#endregion
+    Write-Verbose -Message "`$Location: $Location"
+    $LocationShortName = $shortNameHT[$Location].shortName
+    Write-Verbose -Message "`$LocationShortName: $LocationShortName"
+    #endregion
 
-	Write-Verbose -Message "`$TargetRegions: $($TargetRegions -join ', ')"
-	[array] $TargetRegionSettings = foreach ($CurrentTargetRegion in $TargetRegions) {
-		@{"name" = $CurrentTargetRegion; "replicaCount" = $ReplicaCount; "storageAccountType" = "Premium_LRS" }
-	}
+    Write-Verbose -Message "`$TargetRegions: $($TargetRegions -join ', ')"
+    [array] $TargetRegionSettings = foreach ($CurrentTargetRegion in $TargetRegions) {
+        @{"name" = $CurrentTargetRegion; "replicaCount" = $ReplicaCount; "storageAccountType" = "Premium_LRS" }
+    }
 
-	$Project = "avd"
-	$Role = "aib"
-	#Timestamp
-	$timeInt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
-	$ResourceGroupName = "{0}-{1}-{2}-{3}-{4}" -f $ResourceGroupPrefix, $Project, $Role, $LocationShortName, $TimeInt 
-	$ResourceGroupName = $ResourceGroupName.ToLower()
-	Write-Verbose -Message "`$ResourceGroupName: $ResourceGroupName"
+    $Project = "avd"
+    $Role = "aib"
+    #Timestamp
+    $timeInt = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+    $ResourceGroupName = "{0}-{1}-{2}-{3}-{4}" -f $ResourceGroupPrefix, $Project, $Role, $LocationShortName, $TimeInt 
+    $ResourceGroupName = $ResourceGroupName.ToLower()
+    Write-Verbose -Message "`$ResourceGroupName: $ResourceGroupName"
 
-	#region Source Image 
-	$SrcObjParamsARM = @{
-		Publisher = 'MicrosoftWindowsDesktop'
-		Offer     = 'Windows-11'    
-		Sku       = 'win11-25h2-avd'  
-		Version   = 'latest'
-	}
+    #region Source Image 
+    $SrcObjParamsARM = @{
+        Publisher = 'MicrosoftWindowsDesktop'
+        Offer     = 'Windows-11'    
+        Sku       = 'win11-25h2-avd'  
+        Version   = 'latest'
+    }
 
-	$SrcObjParamsPowerShell = @{
-		Publisher = 'MicrosoftWindowsDesktop'
-		Offer     = 'Office-365'    
-		Sku       = 'win11-25h2-avd-m365'  
-		Version   = 'latest'
-	}
-	#endregion
+    $SrcObjParamsPowerShell = @{
+        Publisher = 'MicrosoftWindowsDesktop'
+        Offer     = 'Office-365'    
+        Sku       = 'win11-25h2-avd-m365'  
+        Version   = 'latest'
+    }
+    #endregion
 
-	#region Image template and definition names
-	#Image Market Place Image + customizations: VSCode
-	$imageDefinitionNameARM = "{0}-arm-vscode" -f $SrcObjParamsARM.Sku
-	$imageTemplateNameARM = "{0}-template-{1}" -f $imageDefinitionNameARM, $timeInt
-	Write-Verbose -Message "`$imageDefinitionNameARM: $imageDefinitionNameARM"
-	Write-Verbose -Message "`$imageTemplateNameARM: $imageTemplateNameARM"
-	$StagingResourceGroupNameARM = "IT_{0}_{1}_{2}" -f $ResourceGroupName, $imageTemplateNameARM.Substring(0, 13), (New-Guid).Guid
+    #region Image template and definition names
+    #Image Market Place Image + customizations: VSCode
+    $imageDefinitionNameARM = "{0}-arm-vscode" -f $SrcObjParamsARM.Sku
+    $imageTemplateNameARM = "{0}-template-{1}" -f $imageDefinitionNameARM, $timeInt
+    Write-Verbose -Message "`$imageDefinitionNameARM: $imageDefinitionNameARM"
+    Write-Verbose -Message "`$imageTemplateNameARM: $imageTemplateNameARM"
+    $StagingResourceGroupNameARM = "IT_{0}_{1}_{2}" -f $ResourceGroupName, $imageTemplateNameARM.Substring(0, 13), (New-Guid).Guid
 
 
-	#Image Market Place Image + customizations: VSCode
-	$imageDefinitionNamePowerShell = "{0}-posh-vscode" -f $SrcObjParamsPowerShell.Sku
-	$imageTemplateNamePowerShell = "{0}-template-{1}" -f $imageDefinitionNamePowerShell, $timeInt
-	Write-Verbose -Message "`$imageDefinitionNamePowerShell: $imageDefinitionNamePowerShell"
-	Write-Verbose -Message "`$imageTemplateNamePowerShell: $imageTemplateNamePowerShell"
-	$StagingResourceGroupNamePowerShell = "IT_{0}_{1}_{2}" -f $ResourceGroupName, $imageTemplateNamePowerShell.Substring(0, 13), (New-Guid).Guid
-	#endregion
+    #Image Market Place Image + customizations: VSCode
+    $imageDefinitionNamePowerShell = "{0}-posh-vscode" -f $SrcObjParamsPowerShell.Sku
+    $imageTemplateNamePowerShell = "{0}-template-{1}" -f $imageDefinitionNamePowerShell, $timeInt
+    Write-Verbose -Message "`$imageDefinitionNamePowerShell: $imageDefinitionNamePowerShell"
+    Write-Verbose -Message "`$imageTemplateNamePowerShell: $imageTemplateNamePowerShell"
+    $StagingResourceGroupNamePowerShell = "IT_{0}_{1}_{2}" -f $ResourceGroupName, $imageTemplateNamePowerShell.Substring(0, 13), (New-Guid).Guid
+    #endregion
 
-	# Distribution properties object name (runOutput). Gives you the properties of the managed image on completion
-	$runOutputNameARM = "cgOutputARM"
-	$runOutputNamePowerShell = "cgOutputPowerShell"
+    # Distribution properties object name (runOutput). Gives you the properties of the managed image on completion
+    $runOutputNameARM = "cgOutputARM"
+    $runOutputNamePowerShell = "cgOutputPowerShell"
 
-	#$Version = "1.0.0"
-	$Version = Get-Date -UFormat "%Y.%m.%d"
+    #$Version = "1.0.0"
+    $Version = Get-Date -UFormat "%Y.%m.%d"
     if ($MyInvocation.MyCommand.ModuleName) {
         $Module = (Get-Module -Name $MyInvocation.MyCommand.ModuleName).Name
         $Tags = @{
             "SecurityControl" = "Ignore"
-            "Module" = $Module
+            "Module"          = $Module
         }
     } 
     else {
         $Script = $(Split-Path -Path $MyInvocation.ScriptName -Leaf)
         $Tags = @{
             "SecurityControl" = "Ignore"
-            "Script" = $Script
+            "Script"          = $Script
         }
     }
-	$Jobs = @()
-	#endregion
+    $Jobs = @()
+    #endregion
 
-	#region Create resource group
-	if (Get-AzResourceGroup -Name $ResourceGroupName -Location $location -ErrorAction Ignore) {
-		Write-Verbose -Message "Removing '$ResourceGroupName' Resource Group Name ..."
-		Remove-AzResourceGroup -Name $ResourceGroupName -Force
-	}
-	Write-Verbose -Message "Creating '$ResourceGroupName' Resource Group Name ..."
-	$ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $location -Tag $Tags -Force
+    #region Create resource group
+    if (Get-AzResourceGroup -Name $ResourceGroupName -Location $location -ErrorAction Ignore) {
+        Write-Verbose -Message "Removing '$ResourceGroupName' Resource Group Name ..."
+        Remove-AzResourceGroup -Name $ResourceGroupName -Force
+    }
+    Write-Verbose -Message "Creating '$ResourceGroupName' Resource Group Name ..."
+    $ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName -Location $location -Tag $Tags -Force
 
-	if (Get-AzResourceGroup -Name $StagingResourceGroupNameARM -Location $location -ErrorAction Ignore) {
-		Write-Verbose -Message "Removing '$StagingResourceGroupNameARM' Resource Group Name ..."
-		Remove-AzResource -Name $StagingResourceGroupNameARM -Force
-	}
-	Write-Verbose -Message "Creating '$StagingResourceGroupNameARM' Resource Group Name ..."
-	$StagingResourceGroupARM = New-AzResourceGroup -Name $StagingResourceGroupNameARM -Tag $Tags -Location $location -Force
+    if (Get-AzResourceGroup -Name $StagingResourceGroupNameARM -Location $location -ErrorAction Ignore) {
+        Write-Verbose -Message "Removing '$StagingResourceGroupNameARM' Resource Group Name ..."
+        Remove-AzResource -Name $StagingResourceGroupNameARM -Force
+    }
+    Write-Verbose -Message "Creating '$StagingResourceGroupNameARM' Resource Group Name ..."
+    $StagingResourceGroupARM = New-AzResourceGroup -Name $StagingResourceGroupNameARM -Tag $Tags -Location $location -Force
 
-	if (Get-AzResourceGroup -Name $StagingResourceGroupNamePowerShell -Location $location -ErrorAction Ignore) {
-		Write-Verbose -Message "Removing '$StagingResourceGroupNamePowerShell' Resource Group Name ..."
-		Remove-AzResource -Name $StagingResourceGroupNamePowerShell -Force
-	}
-	Write-Verbose -Message "Creating '$StagingResourceGroupNamePowerShell' Resource Group Name ..."
-	$StagingResourceGroupPowerShell = New-AzResourceGroup -Name $StagingResourceGroupNamePowerShell -Location $location -Tag $Tags -Force
-	#endregion
+    if (Get-AzResourceGroup -Name $StagingResourceGroupNamePowerShell -Location $location -ErrorAction Ignore) {
+        Write-Verbose -Message "Removing '$StagingResourceGroupNamePowerShell' Resource Group Name ..."
+        Remove-AzResource -Name $StagingResourceGroupNamePowerShell -Force
+    }
+    Write-Verbose -Message "Creating '$StagingResourceGroupNamePowerShell' Resource Group Name ..."
+    $StagingResourceGroupPowerShell = New-AzResourceGroup -Name $StagingResourceGroupNamePowerShell -Location $location -Tag $Tags -Force
+    #endregion
     
-	#region Permissions, user identity, and role
-	#region setup role def names, these need to be unique
-	$imageRoleDefName = "Azure Image Builder Image Def - $timeInt"
-	$identityName = "aibIdentity-$timeInt"
-	Write-Verbose -Message "`$imageRoleDefName: $imageRoleDefName"
-	Write-Verbose -Message "`$identityName: $identityName"
-	#endregion
+    #region Permissions, user identity, and role
+    #region setup role def names, these need to be unique
+    $imageRoleDefName = "Azure Image Builder Image Def - $timeInt"
+    $identityName = "aibIdentity-$timeInt"
+    Write-Verbose -Message "`$imageRoleDefName: $imageRoleDefName"
+    Write-Verbose -Message "`$identityName: $identityName"
+    #endregion
 
-	#region Create the identity
-	Write-Verbose -Message "Creating User Assigned Identity '$identityName' ..."
-	$AssignedIdentity = New-AzUserAssignedIdentity -ResourceGroupName $ResourceGroupName -Name $identityName -Location $location
-	#endregion
+    #region Create the identity
+    Write-Verbose -Message "Creating User Assigned Identity '$identityName' ..."
+    $AssignedIdentity = New-AzUserAssignedIdentity -ResourceGroupName $ResourceGroupName -Name $identityName -Location $location
+    #endregion
 
-	#region RBAC Assignment(s)
-	#region aibRoleImageCreation.json creation and RBAC Assignment
-	#$aibRoleImageCreationUrl="https://raw.githubusercontent.com/PeterR-msft/M365AVDWS/master/Azure%20Image%20Builder/aibRoleImageCreation.json"
-	#$aibRoleImageCreationUrl="https://raw.githubusercontent.com/azure/azvmimagebuilder/main/solutions/12_Creating_AIB_Security_Roles/aibRoleImageCreation.json"
-	#$aibRoleImageCreationUrl="https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/aibRoleImageCreation.json"
-	$aibRoleImageCreationUrl = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/aibRoleImageCreation.json"
-	#$aibRoleImageCreationPath = "aibRoleImageCreation.json"
-	$aibRoleImageCreationPath = Join-Path -Path $env:TEMP -ChildPath $(Split-Path $aibRoleImageCreationUrl -Leaf)
-	#Generate a unique file name 
-	$aibRoleImageCreationPath = $aibRoleImageCreationPath -replace ".json$", "_$timeInt.json"
-	Write-Verbose -Message "`$aibRoleImageCreationPath: $aibRoleImageCreationPath"
+    #region RBAC Assignment(s)
+    #region aibRoleImageCreation.json creation and RBAC Assignment
+    #$aibRoleImageCreationUrl="https://raw.githubusercontent.com/PeterR-msft/M365AVDWS/master/Azure%20Image%20Builder/aibRoleImageCreation.json"
+    #$aibRoleImageCreationUrl="https://raw.githubusercontent.com/azure/azvmimagebuilder/main/solutions/12_Creating_AIB_Security_Roles/aibRoleImageCreation.json"
+    #$aibRoleImageCreationUrl="https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/aibRoleImageCreation.json"
+    $aibRoleImageCreationUrl = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/aibRoleImageCreation.json"
+    #$aibRoleImageCreationPath = "aibRoleImageCreation.json"
+    $aibRoleImageCreationPath = Join-Path -Path $env:TEMP -ChildPath $(Split-Path $aibRoleImageCreationUrl -Leaf)
+    #Generate a unique file name 
+    $aibRoleImageCreationPath = $aibRoleImageCreationPath -replace ".json$", "_$timeInt.json"
+    Write-Verbose -Message "`$aibRoleImageCreationPath: $aibRoleImageCreationPath"
 
-	# Download the config
-	Invoke-WebRequest -Uri $aibRoleImageCreationUrl -OutFile $aibRoleImageCreationPath -UseBasicParsing
+    # Download the config
+    Invoke-WebRequest -Uri $aibRoleImageCreationUrl -OutFile $aibRoleImageCreationPath -UseBasicParsing
 
-	((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $aibRoleImageCreationPath
-	((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $aibRoleImageCreationPath
-	((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace 'Azure Image Builder Service Image Creation Role', $imageRoleDefName) | Set-Content -Path $aibRoleImageCreationPath
+    ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $aibRoleImageCreationPath
+    ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $aibRoleImageCreationPath
+    ((Get-Content -Path $aibRoleImageCreationPath -Raw) -replace 'Azure Image Builder Service Image Creation Role', $imageRoleDefName) | Set-Content -Path $aibRoleImageCreationPath
 
-	#region Create a role definition
-	Write-Verbose -Message "Creating '$imageRoleDefName' Role Definition ..."
-	$RoleDefinition = New-AzRoleDefinition -InputFile $aibRoleImageCreationPath
-	#endregion
+    #region Create a role definition
+    Write-Verbose -Message "Creating '$imageRoleDefName' Role Definition ..."
+    $RoleDefinition = New-AzRoleDefinition -InputFile $aibRoleImageCreationPath
+    #endregion
 
-	# Grant the role definition to the VM Image Builder service principal
-	$Scope = $ResourceGroup.ResourceId
-	<#
+    # Grant the role definition to the VM Image Builder service principal
+    $Scope = $ResourceGroup.ResourceId
+    <#
     if (-not(Get-AzRoleAssignment -ObjectId $AssignedIdentity.PrincipalId -RoleDefinitionName $RoleDefinition.Name -Scope $Scope)) {
         Write-Verbose -Message "Assigning the '$($RoleDefinition.Name)' RBAC role to the '$($AssignedIdentity.PrincipalId)' System Assigned Managed Identity"
         $RoleAssignment = New-AzRoleAssignment -ObjectId $AssignedIdentity.PrincipalId -RoleDefinitionName $RoleDefinition.Name -Scope $Scope
@@ -4737,142 +4739,142 @@ function New-AzureComputeGallery {
         Write-Verbose -Message "The '$($RoleDefinition.Name)' RBAC role is already assigned to the '$($AssignedIdentity.PrincipalId)' System Assigned Managed Identity"
     } 
     #> 
-	$Parameters = @{
-		ObjectId           = $AssignedIdentity.PrincipalId
-		RoleDefinitionName = $RoleDefinition.Name
-		Scope              = $Scope
-	}
+    $Parameters = @{
+        ObjectId           = $AssignedIdentity.PrincipalId
+        RoleDefinitionName = $RoleDefinition.Name
+        Scope              = $Scope
+    }
 
-	While (-not(Get-AzRoleAssignment @Parameters)) {
-		Write-Verbose -Message "Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' System Assigned Managed Identity on the '$($Parameters.Scope)' scope"
-		try {
-			$RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Stop
-		} 
-		catch {
-			$RoleAssignment = $null
-		}
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-		if ($null -eq $RoleAssignment) {
-			Write-Verbose -Message "Sleeping 30 seconds"
-			Start-Sleep -Seconds 30
-		}
-	}
-	#endregion
+    While (-not(Get-AzRoleAssignment @Parameters)) {
+        Write-Verbose -Message "Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' System Assigned Managed Identity on the '$($Parameters.Scope)' scope"
+        try {
+            $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Stop
+        } 
+        catch {
+            $RoleAssignment = $null
+        }
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+        if ($null -eq $RoleAssignment) {
+            Write-Verbose -Message "Sleeping 30 seconds"
+            Start-Sleep -Seconds 30
+        }
+    }
+    #endregion
 
-	#region RBAC Owner Role on both Staging Resource Groups
-	foreach ($CurrentStagingResourceGroup in $StagingResourceGroupARM, $StagingResourceGroupPowerShell) {
-		$RoleDefinition = Get-AzRoleDefinition -Name "Contributor"
-		$Parameters = @{
-			ObjectId           = $AssignedIdentity.PrincipalId
-			RoleDefinitionName = $RoleDefinition.Name
-			Scope              = $CurrentStagingResourceGroup.ResourceId
-		}
-		while (-not(Get-AzRoleAssignment @Parameters)) {
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
-			try {
-				$RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Stop
-			} 
-			catch {
-				$RoleAssignment = $null
-			}
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-			Start-Sleep -Seconds 30
-		}
-	}
-	#endregion
-	#endregion
-	#endregion
+    #region RBAC Owner Role on both Staging Resource Groups
+    foreach ($CurrentStagingResourceGroup in $StagingResourceGroupARM, $StagingResourceGroupPowerShell) {
+        $RoleDefinition = Get-AzRoleDefinition -Name "Contributor"
+        $Parameters = @{
+            ObjectId           = $AssignedIdentity.PrincipalId
+            RoleDefinitionName = $RoleDefinition.Name
+            Scope              = $CurrentStagingResourceGroup.ResourceId
+        }
+        while (-not(Get-AzRoleAssignment @Parameters)) {
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
+            try {
+                $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Stop
+            } 
+            catch {
+                $RoleAssignment = $null
+            }
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+            Start-Sleep -Seconds 30
+        }
+    }
+    #endregion
+    #endregion
+    #endregion
 
-	#region Create an Azure Compute Gallery
-	$GalleryName = "{0}_{1}_{2}_{3}" -f $AzureComputeGalleryPrefix, $Project, $LocationShortName, $timeInt
-	Write-Verbose -Message "`$GalleryName: $GalleryName"
+    #region Create an Azure Compute Gallery
+    $GalleryName = "{0}_{1}_{2}_{3}" -f $AzureComputeGalleryPrefix, $Project, $LocationShortName, $timeInt
+    Write-Verbose -Message "`$GalleryName: $GalleryName"
 
-	# Create the gallery
-	Write-Verbose -Message "Creating Azure Compute Gallery '$GalleryName' ..."
-	$Gallery = New-AzGallery -GalleryName $GalleryName -ResourceGroupName $ResourceGroupName -Location $location
-	#endregion
+    # Create the gallery
+    Write-Verbose -Message "Creating Azure Compute Gallery '$GalleryName' ..."
+    $Gallery = New-AzGallery -GalleryName $GalleryName -ResourceGroupName $ResourceGroupName -Location $location
+    #endregion
 
-	#region Template #1 via a customized JSON file
-	#Based on https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
+    #region Template #1 via a customized JSON file
+    #Based on https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
 
-	#region Download and configure the template
-	#$templateUrl="https://raw.githubusercontent.com/azure/azvmimagebuilder/main/solutions/14_Building_Images_WVD/armTemplateWVD.json"
-	#$templateFilePath = "armTemplateWVD.json"
-	$templateUrl = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/armTemplateAVD.json"
-	$templateFilePath = Join-Path -Path $env:TEMP -ChildPath $(Split-Path $templateUrl -Leaf)
-	#Generate a unique file name 
-	$templateFilePath = $templateFilePath -replace ".json$", "_$timeInt.json"
-	Write-Verbose -Message "`$templateFilePath: $templateFilePath  ..."
+    #region Download and configure the template
+    #$templateUrl="https://raw.githubusercontent.com/azure/azvmimagebuilder/main/solutions/14_Building_Images_WVD/armTemplateWVD.json"
+    #$templateFilePath = "armTemplateWVD.json"
+    $templateUrl = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/armTemplateAVD.json"
+    $templateFilePath = Join-Path -Path $env:TEMP -ChildPath $(Split-Path $templateUrl -Leaf)
+    #Generate a unique file name 
+    $templateFilePath = $templateFilePath -replace ".json$", "_$timeInt.json"
+    Write-Verbose -Message "`$templateFilePath: $templateFilePath  ..."
 
-	Invoke-WebRequest -Uri $templateUrl -OutFile $templateFilePath -UseBasicParsing
+    Invoke-WebRequest -Uri $templateUrl -OutFile $templateFilePath -UseBasicParsing
 
-	((Get-Content -Path $templateFilePath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $templateFilePath
-	#((Get-Content -Path $templateFilePath -Raw) -replace '<region>',$location) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<runOutputName>', $runOutputNameARM) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<subscriptionID>', $subscriptionID) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<rgName>', $ResourceGroupName) | Set-Content -Path $templateFilePath
+    #((Get-Content -Path $templateFilePath -Raw) -replace '<region>',$location) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<runOutputName>', $runOutputNameARM) | Set-Content -Path $templateFilePath
 
-	((Get-Content -Path $templateFilePath -Raw) -replace '<imageDefName>', $imageDefinitionNameARM) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<sharedImageGalName>', $GalleryName) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<TargetRegions>', $(ConvertTo-Json -InputObject $TargetRegionSettings)) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<imgBuilderId>', $AssignedIdentity.Id) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<version>', $version) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<stagingResourceGroupName>', $StagingResourceGroupNameARM) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<imageDefName>', $imageDefinitionNameARM) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<sharedImageGalName>', $GalleryName) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<TargetRegions>', $(ConvertTo-Json -InputObject $TargetRegionSettings)) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<imgBuilderId>', $AssignedIdentity.Id) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<version>', $version) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<stagingResourceGroupName>', $StagingResourceGroupNameARM) | Set-Content -Path $templateFilePath
 
-	((Get-Content -Path $templateFilePath -Raw) -replace '<publisher>', $SrcObjParamsARM.Publisher) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<offer>', $SrcObjParamsARM.Offer) | Set-Content -Path $templateFilePath
-	((Get-Content -Path $templateFilePath -Raw) -replace '<sku>', $SrcObjParamsARM.sku) | Set-Content -Path $templateFilePath
-	#endregion
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<publisher>', $SrcObjParamsARM.Publisher) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<offer>', $SrcObjParamsARM.Offer) | Set-Content -Path $templateFilePath
+    ((Get-Content -Path $templateFilePath -Raw) -replace '<sku>', $SrcObjParamsARM.sku) | Set-Content -Path $templateFilePath
+    #endregion
 
-	#region Create the gallery definition
-	$GalleryParams = @{
-		GalleryName       = $GalleryName
-		ResourceGroupName = $ResourceGroupName
-		Location          = $location
-		Name              = $imageDefinitionNameARM
-		OsState           = 'generalized'
-		OsType            = 'Windows'
-		Publisher         = "{0}-arm" -f $SrcObjParamsARM.Publisher
-		Offer             = "{0}-arm" -f $SrcObjParamsARM.Offer
-		Sku               = "{0}-arm" -f $SrcObjParamsARM.Sku
-		HyperVGeneration  = 'V2'
-	}
-	Write-Verbose -Message "Creating Azure Compute Gallery Image Definition '$imageDefinitionNameARM' (From ARM)..."
-	$GalleryImageDefinitionARM = New-AzGalleryImageDefinition @GalleryParams
-	#endregion
+    #region Create the gallery definition
+    $GalleryParams = @{
+        GalleryName       = $GalleryName
+        ResourceGroupName = $ResourceGroupName
+        Location          = $location
+        Name              = $imageDefinitionNameARM
+        OsState           = 'generalized'
+        OsType            = 'Windows'
+        Publisher         = "{0}-arm" -f $SrcObjParamsARM.Publisher
+        Offer             = "{0}-arm" -f $SrcObjParamsARM.Offer
+        Sku               = "{0}-arm" -f $SrcObjParamsARM.Sku
+        HyperVGeneration  = 'V2'
+    }
+    Write-Verbose -Message "Creating Azure Compute Gallery Image Definition '$imageDefinitionNameARM' (From ARM)..."
+    $GalleryImageDefinitionARM = New-AzGalleryImageDefinition @GalleryParams
+    #endregion
 
-	#region Submit the template
-	Write-Verbose -Message "Starting Resource Group Deployment from '$templateFilePath' ..."
-	$ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $templateFilePath -TemplateParameterObject @{"api-Version" = "2022-07-01"; "imageTemplateName" = $imageTemplateNameARM; "svclocation" = $location }  #-Tag $Tags
+    #region Submit the template
+    Write-Verbose -Message "Starting Resource Group Deployment from '$templateFilePath' ..."
+    $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateFile $templateFilePath -TemplateParameterObject @{"api-Version" = "2022-07-01"; "imageTemplateName" = $imageTemplateNameARM; "svclocation" = $location }  #-Tag $Tags
 	
-	#region Build the image
-	Write-Verbose -Message "Starting Image Builder Template from '$imageTemplateNameARM' (As Job) ..."
-	$Jobs += Start-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNameARM -AsJob
-	#endregion
-	#endregion
-	#endregion
+    #region Build the image
+    Write-Verbose -Message "Starting Image Builder Template from '$imageTemplateNameARM' (As Job) ..."
+    $Jobs += Start-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNameARM -AsJob
+    #endregion
+    #endregion
+    #endregion
 
-	#region Template #2 via a image from the market place + customizations
-	# create gallery definition
-	$GalleryParams = @{
-		GalleryName       = $GalleryName
-		ResourceGroupName = $ResourceGroupName
-		Location          = $location
-		Name              = $imageDefinitionNamePowerShell
-		OsState           = 'generalized'
-		OsType            = 'Windows'
-		Publisher         = "{0}-posh" -f $SrcObjParamsPowerShell.Publisher
-		Offer             = "{0}-posh" -f $SrcObjParamsPowerShell.Offer
-		Sku               = "{0}-posh" -f $SrcObjParamsPowerShell.Sku
-		HyperVGeneration  = 'V2'
-	}
-	Write-Verbose -Message "Creating Azure Compute Gallery Image Definition '$imageDefinitionNamePowerShell' (From Powershell)..."
-	$GalleryImageDefinitionPowerShell = New-AzGalleryImageDefinition @GalleryParams
+    #region Template #2 via a image from the market place + customizations
+    # create gallery definition
+    $GalleryParams = @{
+        GalleryName       = $GalleryName
+        ResourceGroupName = $ResourceGroupName
+        Location          = $location
+        Name              = $imageDefinitionNamePowerShell
+        OsState           = 'generalized'
+        OsType            = 'Windows'
+        Publisher         = "{0}-posh" -f $SrcObjParamsPowerShell.Publisher
+        Offer             = "{0}-posh" -f $SrcObjParamsPowerShell.Offer
+        Sku               = "{0}-posh" -f $SrcObjParamsPowerShell.Sku
+        HyperVGeneration  = 'V2'
+    }
+    Write-Verbose -Message "Creating Azure Compute Gallery Image Definition '$imageDefinitionNamePowerShell' (From Powershell)..."
+    $GalleryImageDefinitionPowerShell = New-AzGalleryImageDefinition @GalleryParams
 
-	Write-Verbose -Message "Creating Azure Image Builder Template Source Object  ..."
-	$srcPlatform = New-AzImageBuilderTemplateSourceObject @SrcObjParamsPowerShell -PlatformImageSource
+    Write-Verbose -Message "Creating Azure Image Builder Template Source Object  ..."
+    $srcPlatform = New-AzImageBuilderTemplateSourceObject @SrcObjParamsPowerShell -PlatformImageSource
 
-	<# 
+    <# 
     #Optional : Get Virtual Machine publisher, Image Offer, Sku and Image
     $ImagePublisherName = Get-AzVMImagePublisher -Location $Location | Where-Object -FilterScript { $_.PublisherName -eq $SrcObjParamsPowerShell.Publisher}
     $ImageOffer = Get-AzVMImageOffer -Location $Location -publisher $ImagePublisherName.PublisherName | Where-Object -FilterScript { $_.Offer  -eq $SrcObjParamsPowerShell.Offer}
@@ -4882,149 +4884,149 @@ function New-AzureComputeGallery {
     #>
 
 
-	$disObjParams = @{
-		SharedImageDistributor = $true
-		GalleryImageId         = "$($GalleryImageDefinitionPowerShell.Id)/versions/$version"
-		ArtifactTag            = @{Publisher = $SrcObjParamsPowerShell.Publisher; Offer = $SrcObjParamsPowerShell.Publisher; Sku = $SrcObjParamsPowerShell.Publisher }
+    $disObjParams = @{
+        SharedImageDistributor = $true
+        GalleryImageId         = "$($GalleryImageDefinitionPowerShell.Id)/versions/$version"
+        ArtifactTag            = @{Publisher = $SrcObjParamsPowerShell.Publisher; Offer = $SrcObjParamsPowerShell.Publisher; Sku = $SrcObjParamsPowerShell.Publisher }
 
-		# 1. Uncomment following line for a single region deployment.
-		#ReplicationRegion = $location
+        # 1. Uncomment following line for a single region deployment.
+        #ReplicationRegion = $location
 
-		# 2. Uncomment following line if the custom image should be replicated to another region(s).
-		TargetRegion           = $TargetRegionSettings
+        # 2. Uncomment following line if the custom image should be replicated to another region(s).
+        TargetRegion           = $TargetRegionSettings
 
-		RunOutputName          = $runOutputNamePowerShell
-		ExcludeFromLatest      = $false
-	}
-	Write-Verbose -Message "Creating Azure Image Builder Template Distributor Object  ..."
-	$disSharedImg = New-AzImageBuilderTemplateDistributorObject @disObjParams
+        RunOutputName          = $runOutputNamePowerShell
+        ExcludeFromLatest      = $false
+    }
+    Write-Verbose -Message "Creating Azure Image Builder Template Distributor Object  ..."
+    $disSharedImg = New-AzImageBuilderTemplateDistributorObject @disObjParams
 
-	$ImgTimeZoneRedirectionPowerShellCustomizerParams = @{  
-		PowerShellCustomizer = $true  
-		Name                 = 'Timezone Redirection'  
-		RunElevated          = $true  
-		runAsSystem          = $true  
-		ScriptUri            = 'https://raw.githubusercontent.com/Azure/RDS-Templates/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2023-07-31/TimezoneRedirection.ps1'
-	}
+    $ImgTimeZoneRedirectionPowerShellCustomizerParams = @{  
+        PowerShellCustomizer = $true  
+        Name                 = 'Timezone Redirection'  
+        RunElevated          = $true  
+        runAsSystem          = $true  
+        ScriptUri            = 'https://raw.githubusercontent.com/Azure/RDS-Templates/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2023-07-31/TimezoneRedirection.ps1'
+    }
 
-	Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgTimeZoneRedirectionPowerShellCustomizerParams.Name)' ..."
-	$TimeZoneRedirectionCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgTimeZoneRedirectionPowerShellCustomizerParams 
+    Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgTimeZoneRedirectionPowerShellCustomizerParams.Name)' ..."
+    $TimeZoneRedirectionCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgTimeZoneRedirectionPowerShellCustomizerParams 
 
-	$ImgVSCodePowerShellCustomizerParams = @{  
-		PowerShellCustomizer = $true  
-		Name                 = 'Install Visual Studio Code'  
-		RunElevated          = $true  
-		runAsSystem          = $true  
-		ScriptUri            = 'https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/Install-VSCode.ps1'
-	}
+    $ImgVSCodePowerShellCustomizerParams = @{  
+        PowerShellCustomizer = $true  
+        Name                 = 'Install Visual Studio Code'  
+        RunElevated          = $true  
+        runAsSystem          = $true  
+        ScriptUri            = 'https://raw.githubusercontent.com/lavanack/laurentvanacker.com/master/Azure/Azure%20VM%20Image%20Builder/Install-VSCode.ps1'
+    }
 
-	Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgVSCodePowerShellCustomizerParams.Name)' ..."
-	$VSCodeCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgVSCodePowerShellCustomizerParams 
+    Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgVSCodePowerShellCustomizerParams.Name)' ..."
+    $VSCodeCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgVSCodePowerShellCustomizerParams 
 
-	Write-Verbose -Message "Creating Azure Image Builder Template WindowsUpdate Customizer Object ..."
-	$WindowsUpdateCustomizer = New-AzImageBuilderTemplateCustomizerObject -WindowsUpdateCustomizer -Name 'WindowsUpdate' -Filter @('exclude:$_.Title -like ''*Preview*''', 'include:$true') -SearchCriterion "IsInstalled=0" -UpdateLimit 40
+    Write-Verbose -Message "Creating Azure Image Builder Template WindowsUpdate Customizer Object ..."
+    $WindowsUpdateCustomizer = New-AzImageBuilderTemplateCustomizerObject -WindowsUpdateCustomizer -Name 'WindowsUpdate' -Filter @('exclude:$_.Title -like ''*Preview*''', 'include:$true') -SearchCriterion "IsInstalled=0" -UpdateLimit 40
 
-	$ImgDisableAutoUpdatesPowerShellCustomizerParams = @{  
-		PowerShellCustomizer = $true  
-		Name                 = 'Disable AutoUpdates'  
-		RunElevated          = $true  
-		runAsSystem          = $true  
-		ScriptUri            = 'https://raw.githubusercontent.com/Azure/RDS-Templates/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2023-07-31/TimezoneRedirection.ps1'
-	}
+    $ImgDisableAutoUpdatesPowerShellCustomizerParams = @{  
+        PowerShellCustomizer = $true  
+        Name                 = 'Disable AutoUpdates'  
+        RunElevated          = $true  
+        runAsSystem          = $true  
+        ScriptUri            = 'https://raw.githubusercontent.com/Azure/RDS-Templates/master/CustomImageTemplateScripts/CustomImageTemplateScripts_2023-07-31/TimezoneRedirection.ps1'
+    }
 
-	Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgDisableAutoUpdatesPowerShellCustomizerParams.Name)' ..."
-	$DisableAutoUpdatesCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgDisableAutoUpdatesPowerShellCustomizerParams 
+    Write-Verbose -Message "Creating Azure Image Builder Template PowerShell Customizer Object for '$($ImgDisableAutoUpdatesPowerShellCustomizerParams.Name)' ..."
+    $DisableAutoUpdatesCustomizer = New-AzImageBuilderTemplateCustomizerObject @ImgDisableAutoUpdatesPowerShellCustomizerParams 
 
-	#Create an Azure Image Builder template and submit the image configuration to the Azure VM Image Builder service:
-	$Customize = $TimeZoneRedirectionCustomizer, $VSCodeCustomizer, $WindowsUpdateCustomizer, $DisableAutoUpdatesCustomizer
-	$ImgTemplateParams = @{
-		ImageTemplateName      = $imageTemplateNamePowerShell
-		ResourceGroupName      = $ResourceGroupName
-		Source                 = $srcPlatform
-		Distribute             = $disSharedImg
-		Customize              = $Customize
-		Location               = $location
-		UserAssignedIdentityId = $AssignedIdentity.Id
-		VMProfileVmsize        = "Standard_D4s_v5"
-		VMProfileOsdiskSizeGb  = 127
-		BuildTimeoutInMinute   = 240
-		StagingResourceGroup   = $StagingResourceGroupPowerShell.ResourceId
-		#Tag                    = @{"SecurityControl"="Ignore"}
-	}
-	Write-Verbose -Message "Creating Azure Image Builder Template from '$imageTemplateNamePowerShell' Image Template Name ..."
-	$ImageBuilderTemplate = New-AzImageBuilderTemplate @ImgTemplateParams
+    #Create an Azure Image Builder template and submit the image configuration to the Azure VM Image Builder service:
+    $Customize = $TimeZoneRedirectionCustomizer, $VSCodeCustomizer, $WindowsUpdateCustomizer, $DisableAutoUpdatesCustomizer
+    $ImgTemplateParams = @{
+        ImageTemplateName      = $imageTemplateNamePowerShell
+        ResourceGroupName      = $ResourceGroupName
+        Source                 = $srcPlatform
+        Distribute             = $disSharedImg
+        Customize              = $Customize
+        Location               = $location
+        UserAssignedIdentityId = $AssignedIdentity.Id
+        VMProfileVmsize        = "Standard_D4s_v5"
+        VMProfileOsdiskSizeGb  = 127
+        BuildTimeoutInMinute   = 240
+        StagingResourceGroup   = $StagingResourceGroupPowerShell.ResourceId
+        #Tag                    = @{"SecurityControl"="Ignore"}
+    }
+    Write-Verbose -Message "Creating Azure Image Builder Template from '$imageTemplateNamePowerShell' Image Template Name ..."
+    $ImageBuilderTemplate = New-AzImageBuilderTemplate @ImgTemplateParams
 
-	#region Build the image
-	#Start the image building process using Start-AzImageBuilderTemplate cmdlet:
-	Write-Verbose -Message "Starting Image Builder Template from '$imageTemplateNamePowerShell' (As Job) ..."
-	$Jobs += Start-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNamePowerShell -AsJob
-	#endregion
-	#endregion
+    #region Build the image
+    #Start the image building process using Start-AzImageBuilderTemplate cmdlet:
+    Write-Verbose -Message "Starting Image Builder Template from '$imageTemplateNamePowerShell' (As Job) ..."
+    $Jobs += Start-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNamePowerShell -AsJob
+    #endregion
+    #endregion
 	
-	#region Waiting for jobs to complete
-	Write-Verbose -Message "Waiting for jobs to complete ..."
-	#$Jobs | Wait-Job | Out-Null
-	$null = $Jobs | Receive-Job -Wait -AutoRemoveJob
-	#endregion
+    #region Waiting for jobs to complete
+    Write-Verbose -Message "Waiting for jobs to complete ..."
+    #$Jobs | Wait-Job | Out-Null
+    $null = $Jobs | Receive-Job -Wait -AutoRemoveJob
+    #endregion
 
-	#region imageTemplateNameARM status 
-	#To determine whenever or not the template upload process was successful, run the following command.
-	$getStatusARM = Get-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNameARM
-	# Optional - if you have any errors running the preceding command, run:
-	Write-Verbose -Message "'$imageTemplateNameARM' ProvisioningErrorCode: $($getStatusARM.ProvisioningErrorCode) "
-	Write-Verbose -Message "'$imageTemplateNameARM' ProvisioningErrorMessage: $($getStatusARM.ProvisioningErrorMessage) "
-	# Shows the status of the build
-	Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusRunState: $($getStatusARM.LastRunStatusRunState) "
-	Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusMessage: $($getStatusARM.LastRunStatusMessage) "
-	Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusRunSubState: $($getStatusARM.LastRunStatusRunSubState) "
-	if ($getStatusARM.LastRunStatusRunState -eq "Failed") {
-		Write-Error -Message "The Image Builder Template for '$imageTemplateNameARM' has failed:`r`n$($getStatusARM.LastRunStatusMessage)"
-	}
-	Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateNameARM' ..."
-	#$Jobs += $getStatusARM | Remove-AzImageBuilderTemplate -AsJob
-	$getStatusARM | Remove-AzImageBuilderTemplate #-NoWait
-	Write-Verbose -Message "Removing '$aibRoleImageCreationPath' ..."
-	Write-Verbose -Message "Removing '$templateFilePath' ..."
-	Remove-Item -Path $aibRoleImageCreationPath, $templateFilePath -Force
-	#endregion
+    #region imageTemplateNameARM status 
+    #To determine whenever or not the template upload process was successful, run the following command.
+    $getStatusARM = Get-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNameARM
+    # Optional - if you have any errors running the preceding command, run:
+    Write-Verbose -Message "'$imageTemplateNameARM' ProvisioningErrorCode: $($getStatusARM.ProvisioningErrorCode) "
+    Write-Verbose -Message "'$imageTemplateNameARM' ProvisioningErrorMessage: $($getStatusARM.ProvisioningErrorMessage) "
+    # Shows the status of the build
+    Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusRunState: $($getStatusARM.LastRunStatusRunState) "
+    Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusMessage: $($getStatusARM.LastRunStatusMessage) "
+    Write-Verbose -Message "'$imageTemplateNameARM' LastRunStatusRunSubState: $($getStatusARM.LastRunStatusRunSubState) "
+    if ($getStatusARM.LastRunStatusRunState -eq "Failed") {
+        Write-Error -Message "The Image Builder Template for '$imageTemplateNameARM' has failed:`r`n$($getStatusARM.LastRunStatusMessage)"
+    }
+    Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateNameARM' ..."
+    #$Jobs += $getStatusARM | Remove-AzImageBuilderTemplate -AsJob
+    $getStatusARM | Remove-AzImageBuilderTemplate #-NoWait
+    Write-Verbose -Message "Removing '$aibRoleImageCreationPath' ..."
+    Write-Verbose -Message "Removing '$templateFilePath' ..."
+    Remove-Item -Path $aibRoleImageCreationPath, $templateFilePath -Force
+    #endregion
 
-	#region imageTemplateNamePowerShell status
-	#To determine whenever or not the template upload process was successful, run the following command.
-	$getStatusPowerShell = Get-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNamePowerShell
-	# Optional - if you have any errors running the preceding command, run:
-	Write-Verbose -Message "'$imageTemplateNamePowerShell' ProvisioningErrorCode: $($getStatusPowerShell.ProvisioningErrorCode) "
-	Write-Verbose -Message "'$imageTemplateNamePowerShell' ProvisioningErrorMessage: $($getStatusPowerShell.ProvisioningErrorMessage) "
-	# Shows the status of the build
-	Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusRunState: $($getStatusPowerShell.LastRunStatusRunState) "
-	Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusMessage: $($getStatusPowerShell.LastRunStatusMessage) "
-	Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusRunSubState: $($getStatusPowerShell.LastRunStatusRunSubState) "
-	if ($getStatusPowerShell.LastRunStatusRunState -eq "Failed") {
-		Write-Error -Message "The Image Builder Template for '$imageTemplateNamePowerShell' has failed:`r`n$($getStatusPowerShell.LastRunStatusMessage)"
-	}
-	Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateNamePowerShell' ..."
-	#$Jobs += $getStatusPowerShell | Remove-AzImageBuilderTemplate -AsJob
-	$getStatusPowerShell | Remove-AzImageBuilderTemplate #-NoWait
-	#endregion
+    #region imageTemplateNamePowerShell status
+    #To determine whenever or not the template upload process was successful, run the following command.
+    $getStatusPowerShell = Get-AzImageBuilderTemplate -ResourceGroupName $ResourceGroupName -Name $imageTemplateNamePowerShell
+    # Optional - if you have any errors running the preceding command, run:
+    Write-Verbose -Message "'$imageTemplateNamePowerShell' ProvisioningErrorCode: $($getStatusPowerShell.ProvisioningErrorCode) "
+    Write-Verbose -Message "'$imageTemplateNamePowerShell' ProvisioningErrorMessage: $($getStatusPowerShell.ProvisioningErrorMessage) "
+    # Shows the status of the build
+    Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusRunState: $($getStatusPowerShell.LastRunStatusRunState) "
+    Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusMessage: $($getStatusPowerShell.LastRunStatusMessage) "
+    Write-Verbose -Message "'$imageTemplateNamePowerShell' LastRunStatusRunSubState: $($getStatusPowerShell.LastRunStatusRunSubState) "
+    if ($getStatusPowerShell.LastRunStatusRunState -eq "Failed") {
+        Write-Error -Message "The Image Builder Template for '$imageTemplateNamePowerShell' has failed:`r`n$($getStatusPowerShell.LastRunStatusMessage)"
+    }
+    Write-Verbose -Message "Removing Azure Image Builder Template for '$imageTemplateNamePowerShell' ..."
+    #$Jobs += $getStatusPowerShell | Remove-AzImageBuilderTemplate -AsJob
+    $getStatusPowerShell | Remove-AzImageBuilderTemplate #-NoWait
+    #endregion
 
-	#Adding a delete lock (for preventing accidental deletion)
-	#New-AzResourceLock -LockLevel CanNotDelete -LockNotes "$ResourceGroupName - CanNotDelete" -LockName "$ResourceGroupName - CanNotDelete" -ResourceGroupName $ResourceGroupName -Force
-	#region Clean up your resources
-	<#
+    #Adding a delete lock (for preventing accidental deletion)
+    #New-AzResourceLock -LockLevel CanNotDelete -LockNotes "$ResourceGroupName - CanNotDelete" -LockName "$ResourceGroupName - CanNotDelete" -ResourceGroupName $ResourceGroupName -Force
+    #region Clean up your resources
+    <#
     ## Remove the Resource Group
     Remove-AzResourceGroup $ResourceGroupName -Force -AsJob
     ## Remove the definitions
     Remove-AzRoleDefinition -Name $RoleDefinition.Name -Force
     #>
-	#endregion
+    #endregion
   
-	#region Removing Staging ResourceGroups
-	$null = Remove-AzResourceGroup -ResourceGroupName $StagingResourceGroupNameARM -Force -AsJob
-	$null = Remove-AzResourceGroup -ResourceGroupName $StagingResourceGroupNamePowerShell -Force -AsJob
+    #region Removing Staging ResourceGroups
+    $null = Remove-AzResourceGroup -ResourceGroupName $StagingResourceGroupNameARM -Force -AsJob
+    $null = Remove-AzResourceGroup -ResourceGroupName $StagingResourceGroupNamePowerShell -Force -AsJob
 
-	#endregion
+    #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
-	return $Gallery
+    return $Gallery
 }
 
 function Update-PsAvdSystemAssignedAzVM {
@@ -5699,7 +5701,7 @@ function Add-PsAvdSessionHost {
                 Location                     = $HostPool.Location
                 CustomConfigurationScriptUrl = $CustomConfigurationScriptUrl
                 SubnetId                     = $SubnetId
-                SessionHostConfiguration = $SessionHostConfiguration.IsPresent
+                SessionHostConfiguration     = $SessionHostConfiguration.IsPresent
                 #Verbose                  = $true
             }
         }
@@ -6395,7 +6397,7 @@ function Remove-PsAvdHostPoolSetup {
     foreach ($CurrentHostPoolName in $HostPools.Name) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing Microsoft Entra ID Group : $CurrentHostPoolName"
         #Get-AzADGroup -DisplayNameStartsWith $CurrentHostPoolName | Remove-AzADGroup
-        Get-MgBetaGroup -Filter "startsWith(DisplayName, '$CurrentHostPoolName')" | ForEach-Object -Process { Remove-MgBetaGroup -GroupId $_.Id -ErrorAction Ignore}
+        Get-MgBetaGroup -Filter "startsWith(DisplayName, '$CurrentHostPoolName')" | ForEach-Object -Process { Remove-MgBetaGroup -GroupId $_.Id -ErrorAction Ignore }
     }
     #endregion
 
@@ -6807,7 +6809,10 @@ function New-PsAvdPersonalHostPoolSetup {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
                 Start-Sleep -Seconds 10
                 #region Hydrid Join GPO Management: Dedicated GPO settings for Hydrid Join VMs for this HostPool 
-                #From https://learn.microsoft.com/en-us/windows/client-management/enroll-a-windows-10-device-automatically-using-group-policy
+                #From https://techcommunity.microsoft.com/blog/azurearchitectureblog/setup-hybrid-joined-avd-single-sign-on/3643845
+                #From https://techcommunity.microsoft.com/blog/exchange/troubleshooting-auth-issues-in-outlook-if-you-are-azure-joining-non-persistent-v/1789359
+                #From https://learn.microsoft.com/en-us/entra/identity/devices/how-to-hybrid-join#managed-domains
+                #From https://learn.microsoft.com/en-us/entra/identity/devices/hybrid-join-plan#handling-devices-with-microsoft-entra-registered-state
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Hydrid Join' related registry values for '$($CurrentHostPoolHybridJoinGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
                 $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\WorkplaceJoin' -ValueName "autoWorkplaceJoin" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
                 $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CDJ\AAD' -ValueName "TenantId" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $((Get-AzContext).Tenant.Id)
@@ -7078,15 +7083,15 @@ function New-PsAvdPersonalHostPoolSetup {
 
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
             if ($Pester) {
-				$ModuleBase = Get-ModuleBase
-				$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-				#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-				$HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
-				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
-				$Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
-				Invoke-Pester -Container $Container -Output Detailed
-			}
+                $ModuleBase = Get-ModuleBase
+                $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+                #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+                $HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
+                $Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
+                Invoke-Pester -Container $Container -Output Detailed
+            }
             #endregion
 
             $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
@@ -7538,7 +7543,10 @@ function New-PsAvdPooledHostPoolSetup {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
                 Start-Sleep -Seconds 10
                 #region Hydrid Join GPO Management: Dedicated GPO settings for Hydrid Join VMs for this HostPool 
-                #From https://learn.microsoft.com/en-us/windows/client-management/enroll-a-windows-10-device-automatically-using-group-policy
+                #From https://techcommunity.microsoft.com/blog/azurearchitectureblog/setup-hybrid-joined-avd-single-sign-on/3643845
+                #From https://techcommunity.microsoft.com/blog/exchange/troubleshooting-auth-issues-in-outlook-if-you-are-azure-joining-non-persistent-v/1789359
+                #From https://learn.microsoft.com/en-us/entra/identity/devices/how-to-hybrid-join#managed-domains
+                #From https://learn.microsoft.com/en-us/entra/identity/devices/hybrid-join-plan#handling-devices-with-microsoft-entra-registered-state
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'Hydrid Join' related registry values for '$($CurrentHostPoolHybridJoinGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
                 $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\Windows\WorkplaceJoin' -ValueName "autoWorkplaceJoin" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
                 $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolHybridJoinGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\CDJ\AAD' -ValueName "TenantId" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value $((Get-AzContext).Tenant.Id)
@@ -9123,51 +9131,51 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion
     
                 $parameters = @{
-                        FriendlyName = $CurrentHostPool.GetSessionHostConfigurationName()
-                        HostPoolName = $CurrentHostPool.Name
-                        ResourceGroupName = $CurrentHostPool.ResourceGroupName
-                        VMNamePrefix = $CurrentHostPool.NamePrefix#.Substring(0,[math]::Min(10, $CurrentHostPool.Length))
-                        VMLocation = $CurrentHostPool.Location
-                        VMSizeId = $CurrentHostPool.VMSize
-                        NetworkInfoSubnetId = $CurrentHostPool.SubnetId
-                        SecurityInfoType = 'TrustedLaunch'
-                        VMAdminCredentialsUsernameKeyVaultSecretUri = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::LocalAdminUserNameSecretName)).Id
-                        VMAdminCredentialsPasswordKeyVaultSecretUri = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::LocalAdminPasswordSecretName)).Id
+                    FriendlyName                                = $CurrentHostPool.GetSessionHostConfigurationName()
+                    HostPoolName                                = $CurrentHostPool.Name
+                    ResourceGroupName                           = $CurrentHostPool.ResourceGroupName
+                    VMNamePrefix                                = $CurrentHostPool.NamePrefix#.Substring(0,[math]::Min(10, $CurrentHostPool.Length))
+                    VMLocation                                  = $CurrentHostPool.Location
+                    VMSizeId                                    = $CurrentHostPool.VMSize
+                    NetworkInfoSubnetId                         = $CurrentHostPool.SubnetId
+                    SecurityInfoType                            = 'TrustedLaunch'
+                    VMAdminCredentialsUsernameKeyVaultSecretUri = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::LocalAdminUserNameSecretName)).Id
+                    VMAdminCredentialsPasswordKeyVaultSecretUri = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::LocalAdminPasswordSecretName)).Id
                 }
 
                 if ($CurrentHostPool.DiffDiskPlacement -eq [DiffDiskPlacement]::CacheDisk) {
-                    $parameters['DiffDiskSettingOption']  = 'Local'
+                    $parameters['DiffDiskSettingOption'] = 'Local'
                     $parameters['DiffDiskSettingPlacement'] = 'CacheDisk'
                 }
                 elseif ($CurrentHostPool.DiffDiskPlacement -eq [DiffDiskPlacement]::ResourceDisk) {
-                    $parameters['DiffDiskSettingOption']  = 'Local'
+                    $parameters['DiffDiskSettingOption'] = 'Local'
                     $parameters['DiffDiskSettingPlacement'] = 'ResourceDisk'
                 }
                 else {
-                    $parameters['ManagedDiskType']   = [HostPool]::VMProfileOsdiskType
+                    $parameters['ManagedDiskType'] = [HostPool]::VMProfileOsdiskType
                 }
                 
                 if (-not([String]::IsNullOrEmpty($CurrentHostPool.VMSourceImageId))) {
-                    $parameters['ImageInfoImageType']  = 'Custom'
+                    $parameters['ImageInfoImageType'] = 'Custom'
                     $parameters['CustomInfoResourceID'] = $CurrentHostPool.VMSourceImageId
                 }
                 else {
-                        $ImagePublisherName = Get-AzVMImagePublisher -Location $CurrentHostPool.Location | Where-Object -FilterScript { $_.PublisherName -eq $CurrentHostPool.ImagePublisherName}
-                        $ImageOffer = Get-AzVMImageOffer -Location $CurrentHostPool.Location -publisher $ImagePublisherName.PublisherName | Where-Object -FilterScript { $_.Offer  -eq $CurrentHostPool.ImageOffer}
-                        $ImageSku = Get-AzVMImageSku -Location  $CurrentHostPool.Location -publisher $ImagePublisherName.PublisherName -offer $ImageOffer.Offer | Where-Object -FilterScript { $_.Skus  -eq $CurrentHostPool.ImageSku}
-                        $LatestImage = Get-AzVMImage -Location  $CurrentHostPool.Location -publisher $ImagePublisherName.PublisherName -offer $ImageOffer.Offer -sku $ImageSku.Skus | Sort-Object -Property Version -Descending | Select-Object -First 1
+                    $ImagePublisherName = Get-AzVMImagePublisher -Location $CurrentHostPool.Location | Where-Object -FilterScript { $_.PublisherName -eq $CurrentHostPool.ImagePublisherName }
+                    $ImageOffer = Get-AzVMImageOffer -Location $CurrentHostPool.Location -publisher $ImagePublisherName.PublisherName | Where-Object -FilterScript { $_.Offer -eq $CurrentHostPool.ImageOffer }
+                    $ImageSku = Get-AzVMImageSku -Location  $CurrentHostPool.Location -publisher $ImagePublisherName.PublisherName -offer $ImageOffer.Offer | Where-Object -FilterScript { $_.Skus -eq $CurrentHostPool.ImageSku }
+                    $LatestImage = Get-AzVMImage -Location  $CurrentHostPool.Location -publisher $ImagePublisherName.PublisherName -offer $ImageOffer.Offer -sku $ImageSku.Skus | Sort-Object -Property Version -Descending | Select-Object -First 1
 
-                        $parameters['ImageInfoImageType']  = 'Marketplace'
-                        $parameters['MarketplaceInfoPublisher'] = $CurrentHostPool.ImagePublisherName
-                        $parameters['MarketplaceInfoOffer'] = $CurrentHostPool.ImageOffer 
-                        $parameters['MarketplaceInfoSku'] = $CurrentHostPool.ImageSku
-                        $parameters['MarketplaceInfoExactVersion'] = $LatestImage.Version
-                    }
+                    $parameters['ImageInfoImageType'] = 'Marketplace'
+                    $parameters['MarketplaceInfoPublisher'] = $CurrentHostPool.ImagePublisherName
+                    $parameters['MarketplaceInfoOffer'] = $CurrentHostPool.ImageOffer 
+                    $parameters['MarketplaceInfoSku'] = $CurrentHostPool.ImageSku
+                    $parameters['MarketplaceInfoExactVersion'] = $LatestImage.Version
+                }
 
                 if ($CurrentHostPool.IsMicrosoftEntraIdJoined()) {
                     $parameters['DomainInfoJoinType'] = 'AzureActiveDirectory'
                 }
-                else{
+                else {
                     $parameters['DomainInfoJoinType'] = 'ActiveDirectory'
                     $parameters['ActiveDirectoryInfoOuPath'] = $CurrentHostPoolOU.DistinguishedName
                     $parameters['ActiveDirectoryInfoDomainName'] = $DomainName
@@ -9176,11 +9184,11 @@ function New-PsAvdPooledHostPoolSetup {
                 }
 
                 if ($CurrentHostPool.Intune) {
-                        $parameters['AzureActiveDirectoryInfoMdmProviderGuid'] = "0000000a-0000-0000-c000-000000000000"
+                    $parameters['AzureActiveDirectoryInfoMdmProviderGuid'] = "0000000a-0000-0000-c000-000000000000"
                 }
 
                 if (-not([string]::IsNullOrEmpty($CurrentHostPool.CustomConfigurationScriptUrl))) {
-                        $parameters['CustomConfigurationScriptUrl'] = $CurrentHostPool.CustomConfigurationScriptUrl
+                    $parameters['CustomConfigurationScriptUrl'] = $CurrentHostPool.CustomConfigurationScriptUrl
                 }
                 #From https://learn.microsoft.com/en-us/azure/virtual-desktop/deploy-azure-virtual-desktop?tabs=portal-standard%2Cpowershell-session-host-configuration%2Cportal&pivots=host-pool-session-host-configuration#create-a-host-pool-with-a-session-host-configuration
                 #$CurrentHostPool.KeyVault | Update-AzKeyVault -PublicNetworkAccess "Enabled"
@@ -9188,14 +9196,14 @@ function New-PsAvdPooledHostPoolSetup {
                 #$CurrentHostPool.KeyVault | Update-AzKeyVault -PublicNetworkAccess "Disabled"
 
                 $parameters = @{
-                    HostPoolName = $CurrentHostPool.Name
-                    ResourceGroupName = $CurrentHostPool.ResourceGroupName
-                    ScheduledDateTimeZone = $(Get-TimeZone)
-                    UpdateLogOffDelayMinute = 5
-                    UpdateMaxVmsRemoved = 1
+                    HostPoolName              = $CurrentHostPool.Name
+                    ResourceGroupName         = $CurrentHostPool.ResourceGroupName
+                    ScheduledDateTimeZone     = $(Get-TimeZone)
+                    UpdateLogOffDelayMinute   = 5
+                    UpdateMaxVmsRemoved       = 1
                     ProvisioningInstanceCount = $CurrentHostPool.VMNumberOfInstances
-                    UpdateDeleteOriginalVM = $False
-                    UpdateLogOffMessage = 'Update LogOff Message: You will be logged off in 5 minutes'
+                    UpdateDeleteOriginalVM    = $False
+                    UpdateLogOffMessage       = 'Update LogOff Message: You will be logged off in 5 minutes'
                 }
 
                 New-AzWvdSessionHostManagement @parameters
@@ -9450,16 +9458,16 @@ function New-PsAvdPooledHostPoolSetup {
             }
 
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
-			if ($Pester) {
-				$ModuleBase = Get-ModuleBase
-				$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-				#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-				$HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
-				Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
-				$Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
-				Invoke-Pester -Container $Container -Output Detailed
-			}
+            if ($Pester) {
+                $ModuleBase = Get-ModuleBase
+                $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+                #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+                $HostPoolSessionHostAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.SessionHost.Azure.Tests.ps1'
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolSessionHostAzurePesterTests: $HostPoolSessionHostAzurePesterTests"
+                $Container = New-PesterContainer -Path $HostPoolSessionHostAzurePesterTests -Data @{ HostPool = $CurrentHostPool; SessionHostName = $NextSessionHostNames }
+                Invoke-Pester -Container $Container -Output Detailed
+            }
             #endregion
             #endregion
 
@@ -9472,7 +9480,7 @@ function New-PsAvdPooledHostPoolSetup {
             #endregion
 
             if ($CurrentHostPool.FSLogix) {
-				$ModuleBase = Get-ModuleBase
+                $ModuleBase = Get-ModuleBase
                 $ScriptPath = Join-Path -Path $ModuleBase -ChildPath "HelperScripts\Set-FSLogixProfileToastNotification.ps1"
                 #In case of Spot Instance VMs that have been evicted
                 $null = $SessionHostVMs | Start-AzVM -AsJob | Receive-Job -Wait -AutoRemoveJob
@@ -10191,7 +10199,7 @@ function New-PsAvdHostPoolSetup {
         #region checking we use an AVD location
         $Location = (Get-AzVMCompute).Location
         $HostPoolDisplayNameLocations = (Get-AzResourceProvider -ProviderNamespace Microsoft.DesktopVirtualization).ResourceTypes | Where-Object ResourceTypeName -eq "hostpools" | Select-Object -ExpandProperty Locations
-        $HostPoolLocations = Get-AzLocation | Where-Object -FilterScript { $_.DisplayName -in $HostPoolDisplayNameLocations}
+        $HostPoolLocations = Get-AzLocation | Where-Object -FilterScript { $_.DisplayName -in $HostPoolDisplayNameLocations }
         if (-not(($Location -in $HostPoolLocations.Location) -or ($Location -in $HostPoolLocations.DisplayName))) {
             Write-Error -Message "The '$Location' is not a HostPool location" -ErrorAction Stop
         }
@@ -10210,16 +10218,16 @@ function New-PsAvdHostPoolSetup {
         #Update-PsAvdSystemAssignedAzVM
 
         #region Pester Tests for Host Pool - Class Instantiation
-		if ($Pester) {
-			$ModuleBase = Get-ModuleBase
-			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-			$HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
-			$Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
-			Invoke-Pester -Container $Container -Output Detailed			
-		}
+        if ($Pester) {
+            $ModuleBase = Get-ModuleBase
+            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+            $HostPoolClassPesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Class.Tests.ps1'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolClassPesterTests: $HostPoolClassPesterTests"
+            $Container = New-PesterContainer -Path $HostPoolClassPesterTests -Data @{ HostPool = $HostPool }
+            Invoke-Pester -Container $Container -Output Detailed			
+        }
         #endregion
 
         #From https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-dns
@@ -10503,42 +10511,42 @@ function New-PsAvdHostPoolSetup {
         }
 
         #region Pester Tests for Host Pool - Azure Instantiation
-		if ($Pester) {
-			$ModuleBase = Get-ModuleBase
-			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-			$HostPoolAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Azure.Tests.ps1'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolAzurePesterTests: $HostPoolAzurePesterTests"
-			$Container = New-PesterContainer -Path $HostPoolAzurePesterTests -Data @{ HostPool = $HostPool }
-			Invoke-Pester -Container $Container -Output Detailed
-		}
+        if ($Pester) {
+            $ModuleBase = Get-ModuleBase
+            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+            $HostPoolAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'HostPool.Azure.Tests.ps1'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$HostPoolAzurePesterTests: $HostPoolAzurePesterTests"
+            $Container = New-PesterContainer -Path $HostPoolAzurePesterTests -Data @{ HostPool = $HostPool }
+            Invoke-Pester -Container $Container -Output Detailed
+        }
         #endregion
 
         #region Pester Tests for Azure Host Pool Session Host - OS Ephemeral Disk
-		if ($Pester) {
-			$ModuleBase = Get-ModuleBase
-			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-			$OSEphemeralDiskAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OSEphemeralDisk.Azure.Tests.ps1'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OSEphemeralDiskAzurePesterTests: $OSEphemeralDiskAzurePesterTests"
-			$Container = New-PesterContainer -Path $OSEphemeralDiskAzurePesterTests -Data @{ HostPool = $HostPool }
-			Invoke-Pester -Container $Container -Output Detailed
-		}
+        if ($Pester) {
+            $ModuleBase = Get-ModuleBase
+            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+            $OSEphemeralDiskAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OSEphemeralDisk.Azure.Tests.ps1'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OSEphemeralDiskAzurePesterTests: $OSEphemeralDiskAzurePesterTests"
+            $Container = New-PesterContainer -Path $OSEphemeralDiskAzurePesterTests -Data @{ HostPool = $HostPool }
+            Invoke-Pester -Container $Container -Output Detailed
+        }
         #endregion
 
         #region Pester Tests for Azure Host Pool Session Host - Operational Insights
-		if ($Pester) {
-			$ModuleBase = Get-ModuleBase
-			$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-			#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-			$OperationalInsightsQueryAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OperationalInsightsQuery.Azure.Tests.ps1'
-			Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OperationalInsightsQueryAzurePesterTests: $OperationalInsightsQueryAzurePesterTests"
-			$Container = New-PesterContainer -Path $OperationalInsightsQueryAzurePesterTests -Data @{ HostPool = $HostPool }
-			Invoke-Pester -Container $Container -Output Detailed
-		}
+        if ($Pester) {
+            $ModuleBase = Get-ModuleBase
+            $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+            #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+            $OperationalInsightsQueryAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'OperationalInsightsQuery.Azure.Tests.ps1'
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$OperationalInsightsQueryAzurePesterTests: $OperationalInsightsQueryAzurePesterTests"
+            $Container = New-PesterContainer -Path $OperationalInsightsQueryAzurePesterTests -Data @{ HostPool = $HostPool }
+            Invoke-Pester -Container $Container -Output Detailed
+        }
         #endregion
 
         #Setting up the hostpool scaling plan(s)
@@ -10592,13 +10600,13 @@ function Invoke-PsAvdErrorLogFilePester {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     #region Pester Tests Errors - Log Files
-	$ModuleBase = Get-ModuleBase
-	$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-	Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-	#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-	$ErrorLogFilePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'Error.LogFile.Tests.ps1'
-	$Container = New-PesterContainer -Path $ErrorLogFilePesterTests -Data @{ LogDir = $LogDir }
-	Invoke-Pester -Container $Container -Output Detailed
+    $ModuleBase = Get-ModuleBase
+    $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+    #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+    $ErrorLogFilePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'Error.LogFile.Tests.ps1'
+    $Container = New-PesterContainer -Path $ErrorLogFilePesterTests -Data @{ LogDir = $LogDir }
+    Invoke-Pester -Container $Container -Output Detailed
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -11144,16 +11152,16 @@ function Get-PsAvdFSLogixProfileShare {
         }
     }
     #region Pester Tests for Azure Host Pool - FSLogix File Share - Azure Instantiation
-	if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$FSLogixAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'FSLogix.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FSLogixAzurePesterTests: $FSLogixAzurePesterTests"
-		$Container = New-PesterContainer -Path $FSLogixAzurePesterTests -Data @{ HostPool = $HostPool }
-		Invoke-Pester -Container $Container -Output Detailed
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $FSLogixAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'FSLogix.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FSLogixAzurePesterTests: $FSLogixAzurePesterTests"
+        $Container = New-PesterContainer -Path $FSLogixAzurePesterTests -Data @{ HostPool = $HostPool }
+        Invoke-Pester -Container $Container -Output Detailed
+    }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -11192,16 +11200,16 @@ function Get-PsAvdAppAttachProfileShare {
         }
     }
     #region Pester Tests for Azure Host Pool - MSIX File Share - Azure Instantiation
-	if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$AppAttachAzurePesterTest = Join-Path -Path $PesterDirectory -ChildPath 'AppAttach.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachAzurePesterTest: $AppAttachAzurePesterTest"
-		$Container = New-PesterContainer -Path $AppAttachAzurePesterTest -Data @{ HostPool = $HostPool }
-		Invoke-Pester -Container $Container -Output Detailed
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $AppAttachAzurePesterTest = Join-Path -Path $PesterDirectory -ChildPath 'AppAttach.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachAzurePesterTest: $AppAttachAzurePesterTest"
+        $Container = New-PesterContainer -Path $AppAttachAzurePesterTest -Data @{ HostPool = $HostPool }
+        Invoke-Pester -Container $Container -Output Detailed
+    }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -11243,37 +11251,37 @@ function New-PsAvdScalingPlan {
         if ($CurrentHostPoolWithScalingPlan.Type -eq [HostPoolType]::Pooled) {
             if ($CurrentHostPool.SessionHostConfiguration) {
                 #From https://learn.microsoft.com/en-us/azure/virtual-desktop/autoscale-create-assign-scaling-plan?tabs=powershell%2Cintune&pivots=dynamic#create-a-scaling-plan
-				$scalingPlanPooledScheduleParams = @{
-					ResourceGroupName                       = $ResourceGroupName
-					ScalingPlanName                         = $ScalingPlanName
-					ScalingPlanScheduleName                 = 'PooledWeekDayDynamicSchedule'
-					DaysOfWeek                              = [System.DayOfWeek]::Monday..[System.DayOfWeek]::Friday #'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
-					ScalingMethod                           = 'CreateDeletePowerManage'
-					RampUpStartTimeHour                     = '8'
-					RampUpStartTimeMinute                   = '0'
-					RampUpLoadBalancingAlgorithm            = 'BreadthFirst'
-					RampUpMinimumHostsPct                   = '100'
-					RampUpCapacityThresholdPct              = '50'
-					PeakStartTimeHour                       = '8'
-					PeakStartTimeMinute                     = '30'
-					PeakLoadBalancingAlgorithm              = 'DepthFirst'
-					RampDownStartTimeHour                   = '16'
-					RampDownStartTimeMinute                 = '0'
-					RampDownLoadBalancingAlgorithm          = 'BreadthFirst'
-					RampDownMinimumHostsPct                 = '100'
-					RampDownCapacityThresholdPct            = '20'
-					RampDownForceLogoffUser                 = $true
-					RampDownWaitTimeMinute                  = '30'
-					RampDownNotificationMessage             = 'Please log out of your session.'
-					RampDownStopHostsWhen                   = 'ZeroSessions'
-					OffPeakStartTimeHour                    = '19'
-					OffPeakStartTimeMinute                  = '0'
-					OffPeakLoadBalancingAlgorithm           = 'DepthFirst'
-					CreateDeleteRampUpMaximumHostPoolSize   = '10'
-					CreateDeleteRampUpMinimumHostPoolSize   = '5'
-					CreateDeleteRampDownMaximumHostPoolSize = '5'
-					CreateDeleteRampDownMinimumHostPoolSize = '1'
-				}
+                $scalingPlanPooledScheduleParams = @{
+                    ResourceGroupName                       = $ResourceGroupName
+                    ScalingPlanName                         = $ScalingPlanName
+                    ScalingPlanScheduleName                 = 'PooledWeekDayDynamicSchedule'
+                    DaysOfWeek                              = [System.DayOfWeek]::Monday..[System.DayOfWeek]::Friday #'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'
+                    ScalingMethod                           = 'CreateDeletePowerManage'
+                    RampUpStartTimeHour                     = '8'
+                    RampUpStartTimeMinute                   = '0'
+                    RampUpLoadBalancingAlgorithm            = 'BreadthFirst'
+                    RampUpMinimumHostsPct                   = '100'
+                    RampUpCapacityThresholdPct              = '50'
+                    PeakStartTimeHour                       = '8'
+                    PeakStartTimeMinute                     = '30'
+                    PeakLoadBalancingAlgorithm              = 'DepthFirst'
+                    RampDownStartTimeHour                   = '16'
+                    RampDownStartTimeMinute                 = '0'
+                    RampDownLoadBalancingAlgorithm          = 'BreadthFirst'
+                    RampDownMinimumHostsPct                 = '100'
+                    RampDownCapacityThresholdPct            = '20'
+                    RampDownForceLogoffUser                 = $true
+                    RampDownWaitTimeMinute                  = '30'
+                    RampDownNotificationMessage             = 'Please log out of your session.'
+                    RampDownStopHostsWhen                   = 'ZeroSessions'
+                    OffPeakStartTimeHour                    = '19'
+                    OffPeakStartTimeMinute                  = '0'
+                    OffPeakLoadBalancingAlgorithm           = 'DepthFirst'
+                    CreateDeleteRampUpMaximumHostPoolSize   = '10'
+                    CreateDeleteRampUpMinimumHostPoolSize   = '5'
+                    CreateDeleteRampDownMaximumHostPoolSize = '5'
+                    CreateDeleteRampDownMinimumHostPoolSize = '1'
+                }
             }
             else {
                 $scalingPlanPooledScheduleParams = @{
@@ -11369,16 +11377,16 @@ function New-PsAvdScalingPlan {
         #endregion
     }
     #region Pester Tests for Azure Host Pool - Scaling Plan - Azure Instantiation
-	if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$ScalingPlanAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ScalingPlan.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScalingPlanAzurePesterTests: $ScalingPlanAzurePesterTests"
-		$Container = New-PesterContainer -Path $ScalingPlanAzurePesterTests -Data @{ HostPool = $HostPool }
-		Invoke-Pester -Container $Container -Output Detailed
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $ScalingPlanAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'ScalingPlan.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScalingPlanAzurePesterTests: $ScalingPlanAzurePesterTests"
+        $Container = New-PesterContainer -Path $ScalingPlanAzurePesterTests -Data @{ HostPool = $HostPool }
+        Invoke-Pester -Container $Container -Output Detailed
+    }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
@@ -11681,16 +11689,16 @@ function Import-PsAvdWorkbook {
     #endregion
 
     #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
-	if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
-		$Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $WorkBooks.Keys }
-		Invoke-Pester -Container $Container -Output Detailed		
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
+        $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $WorkBooks.Keys }
+        Invoke-Pester -Container $Container -Output Detailed		
+    }
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -11768,29 +11776,29 @@ function Import-PsAvdWorkbookTemplate {
     #endregion
 
     #region Pester Tests for Azure Host Pool - Workbook Template - Azure Instantiation
-	if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
-		$Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplateName = $WorkBookTemplates.Keys; ResourceGroupName = $ResourceGroupName }
-		Invoke-Pester -Container $Container -Output Detailed
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $WorkbookTemplateAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBookTemplate.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookTemplateAzurePesterTests: $WorkbookTemplateAzurePesterTests"
+        $Container = New-PesterContainer -Path $WorkbookTemplateAzurePesterTests -Data @{ WorkBookTemplateName = $WorkBookTemplates.Keys; ResourceGroupName = $ResourceGroupName }
+        Invoke-Pester -Container $Container -Output Detailed
+    }
     #endregion
 
     #region Pester Tests for Azure Host Pool - Workbook - Azure Instantiation
-	if ($Pester) {
-		$ModuleBase = Get-ModuleBase
-		$PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
-		#$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
-		$WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
-		Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
-		$Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $AzApplicationInsightsWorkbook.DisplayName }
-		Invoke-Pester -Container $Container -Output Detailed
-	}
+    if ($Pester) {
+        $ModuleBase = Get-ModuleBase
+        $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ModuleBase: $ModuleBase"
+        #$PesterDirectory = Join-Path -Path $PSScriptRoot -ChildPath 'Pester'
+        $WorkbookAzurePesterTests = Join-Path -Path $PesterDirectory -ChildPath 'WorkBook.Azure.Tests.ps1'
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkbookAzurePesterTests: $WorkbookAzurePesterTests"
+        $Container = New-PesterContainer -Path $WorkbookAzurePesterTests -Data @{ WorkBookName = $AzApplicationInsightsWorkbook.DisplayName }
+        Invoke-Pester -Container $Container -Output Detailed
+    }
     #endregion
 
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -12227,12 +12235,12 @@ function Get-PsAvdHostPoolDirectLaunchUrl {
     process {
         foreach ($CurrentHostPool in $HostPool) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)' HostPool ..."
-            $ApplicationGroups  = $CurrentHostPool.ApplicationGroupReference | Get-AzWvdApplicationGroup
+            $ApplicationGroups = $CurrentHostPool.ApplicationGroupReference | Get-AzWvdApplicationGroup
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] HostPool PreferredAppGroupType: $($CurrentHostPool.PreferredAppGroupType)"
             $ApplicationGroupHT = $ApplicationGroups | Group-Object -Property Kind -AsHashTable -AsString
             $Parameters = @{
-                    ResourceGroupName      = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].ResourceGroupName
-                    ApplicationGroupName   = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].Name
+                ResourceGroupName    = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].ResourceGroupName
+                ApplicationGroupName = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].Name
             }
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Parameters:`r`n$($Parameters | Out-string)"
             $WorkspaceArmPath = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].WorkspaceArmPath
@@ -12248,7 +12256,7 @@ function Get-PsAvdHostPoolDirectLaunchUrl {
             $Url = $("https://windows.cloud.microsoft/webclient/avd/{0}/{1}" -f $Workspace.ObjectId, $ApplicationGroup.ObjectId)
             $HostPoolDirectLaunchUrls += [PSCustomObject] @{
                 HostPoolName = $CurrentHostPool.Name
-                URI = $Url
+                URI          = $Url
             }
             if ($Browse) {
 
