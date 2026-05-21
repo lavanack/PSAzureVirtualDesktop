@@ -11601,9 +11601,15 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         do {
             $Index++
             Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
-            #Don't know why but sometimes the first deployment fails
             $DeploymentName = (Get-Item -Path $TemplateFilePath).BaseName
-            $Result = New-AzDeployment -Name $DeploymentName -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Ignore
+            try {
+                #https://github.com/Azure/azure-monitor-baseline-alerts/issues/812
+                $Result = New-AzDeployment -Name $DeploymentName -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Stop
+            }
+            catch {
+                Write-Warning -Message "Result: $Result"
+                Write-Warning -Message "Message: $($_.Exception.Message)"
+            }
             Write-Verbose -Message "`$Result:`r`n$($Result | Out-String)"
             Write-Verbose -Message "ProvisioningState: $($Result.ProvisioningState)"
             if ($Result.ProvisioningState -ne "Succeeded") {
