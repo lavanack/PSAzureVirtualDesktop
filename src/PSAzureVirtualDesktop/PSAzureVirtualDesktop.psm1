@@ -11547,6 +11547,9 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
 
     #region AMBA Template Download
     $AMBAAVDURI = "https://raw.githubusercontent.com/Azure/azure-monitor-baseline-alerts/main/patterns/avd/avdArm.json"
+    #https://github.com/Azure/azure-monitor-baseline-alerts/issues/812
+    #$AMBAAVDURI = "https://raw.githubusercontent.com/Azure/azure-monitor-baseline-alerts/0cd73726172ae99069e8ac0cf5136e9081da0958/patterns/avd/avdArm.json"
+    $AMBAAVDURI = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/AMBA/avdarm.json"
     $TemplateFileName = Split-Path -Path $AMBAAVDURI -Leaf
     $TemplateFilePath = Join-Path -Path $env:Temp -ChildPath $TemplateFileName
     Invoke-RestMethod -Uri $AMBAAVDURI -OutFile $TemplateFilePath
