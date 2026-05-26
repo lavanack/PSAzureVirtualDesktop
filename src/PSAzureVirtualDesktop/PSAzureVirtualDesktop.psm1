@@ -952,6 +952,7 @@ class PersonalHostPool : HostPool {
 #       you to *selectively* export `class`es and `enum`s.
 $ExportableTypes = @(
     [JoinMode]
+    [IdentityModel]
     [HostPoolType]
     [DiffDiskPlacement]
     [HostPool]
@@ -1021,7 +1022,7 @@ function Connect-PsAvdAzure {
     }
     catch {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Connecting to Microsoft Graph with all required Scopes"
-        Connect-MgGraph -NoWelcome -Scopes Application.Read.All, Application-RemoteDesktopConfig.ReadWrite.All, Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, DeviceManagementScripts.Read.All, DeviceManagementScripts.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Group.Read.All, Group.ReadWrite.All, GroupMember.Read.All, Policy.ReadWrite.MobilityManagement
+        Connect-MgGraph -NoWelcome -Scopes Application.ReadWrite.All, Application-RemoteDesktopConfig.ReadWrite.All, Device.Read.All, Device.ReadWrite.All, DeviceManagementConfiguration.Read.All, DeviceManagementConfiguration.ReadWrite.All, DeviceManagementManagedDevices.PrivilegedOperations.All, DeviceManagementManagedDevices.Read.All, DeviceManagementManagedDevices.ReadWrite.All, DeviceManagementScripts.Read.All, DeviceManagementScripts.ReadWrite.All, Directory.AccessAsUser.All, Directory.Read.All, Directory.ReadWrite.All, Group.Read.All, Group.ReadWrite.All, GroupMember.Read.All, Policy.ReadWrite.MobilityManagement
     }
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
@@ -1074,7 +1075,7 @@ function Register-PsAvdRequiredResourceProvider {
             Register-AzProviderFeature -ProviderNamespace $ProviderNamespace -FeatureName $FeatureName
             do {
                 $FeatureStatus = (Get-AzProviderFeature -ProviderNamespace $ProviderNamespace -FeatureName $FeatureName).RegistrationState
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for '$CurrentRequiredPreviewResourceProvider' Resource Providers to be registered ... Waiting 10 seconds"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for '$CurrentRequiredPreviewResourceProvider' Resource Provider to be registered ... Waiting 10 seconds"
                 Start-Sleep -Seconds 10
             } until ($FeatureStatus -eq "Registered")
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Wait is over for registration of the '$CurrentRequiredPreviewResourceProvider' Resource Provider"
@@ -3488,7 +3489,7 @@ function Set-AdminConsent {
         [string]$applicationId,
         # The Azure Context]
         [Parameter(Mandatory)]
-        [object]$context
+        [object]$Context
     )
 
     Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
@@ -6345,6 +6346,12 @@ function Remove-PsAvdHostPoolSetup {
     Remove-SSO -HostPool $HostPools
     #endregion
     
+    #region Removing Service Principal
+    foreach ($CurrentHostPool in $HostPools) {
+        Get-MgBetaServicePrincipal -Filter "endsWith(DisplayName, '$($CurrentHostPool.Name).file.core.windows.net')" -ConsistencyLevel eventual | Remove-MgBetaServicePrincipal
+    }
+    #endregion
+
     #region Revoke-Active SAS Disk Access in the HostPool ResourceGroups
     Revoke-ActiveSASDiskAccess -ResourceGroupName $HostPools.ResourceGroupName
     #endregion
@@ -7875,7 +7882,13 @@ function New-PsAvdPooledHostPoolSetup {
                     #region Enable Kerberos authentication
                     #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-powershell#enable-microsoft-entra-kerberos-authentication-for-hybrid-user-accounts
                     #From https://smbtothecloud.com/azure-ad-joined-avd-with-FSLogix-aad-kerberos-authentication/
-                    $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -StorageAccountName $CurrentHostPoolStorageAccountName -EnableAzureActiveDirectoryKerberosForFile $true -ActiveDirectoryDomainName $domainName -ActiveDirectoryDomainGuid $domainGuid
+                    #From https://www.ciraltos.com/avd-fslogix-without-domain-controllers-a-complete-cloud-native-setup/
+                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                        $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -StorageAccountName $CurrentHostPoolStorageAccountName -EnableAzureActiveDirectoryKerberosForFile $true -DefaultSharePermission "StorageFileDataSmbShareContributor"
+                    }
+                    else {
+                        $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -StorageAccountName $CurrentHostPoolStorageAccountName -EnableAzureActiveDirectoryKerberosForFile $true -ActiveDirectoryDomainName $domainName -ActiveDirectoryDomainGuid $domainGuid
+                    }
                     #endregion
 
                     #region Grant admin consent to the new service principal
@@ -7888,8 +7901,29 @@ function New-PsAvdPooledHostPoolSetup {
                     } while ($null -eq $ServicePrincipal)
 
                     # Grant admin consent to the service principal for the app role
-                    Set-AdminConsent -context $AzContext -applicationId $ServicePrincipal.AppId
+                    Set-AdminConsent -Context $AzContext -applicationId $ServicePrincipal.AppId
                     #endregion
+
+                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                        #From https://www.ciraltos.com/avd-fslogix-without-domain-controllers-a-complete-cloud-native-setup/
+                        #region Enable Cloud-Only Group Support
+                        $requiredTag = "kdc_enable_cloud_group_sids"
+                        # --- merge tags (preserve existing)
+                        $currentTags = @()
+                        if ($ServicePrincipal.Tags) { 
+                            $currentTags = @($ServicePrincipal.Tags) 
+                        }
+
+                        if ($currentTags -contains $requiredTag) {
+                          Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Tag already present: $requiredTag"
+                        }
+                        else {
+                            $newTags = $currentTags + $requiredTag
+                            Update-MgBetaServicePrincipal -ServicePrincipalId $ServicePrincipal.Id -Tags $newTags
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Tag added: $requiredTag"
+                        }
+                        #endregion
+                    }
 
                     #region Disable multi-factor authentication on the storage account
                     #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-portal#disable-multi-factor-authentication-on-the-storage-account
@@ -8060,7 +8094,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #endregion
 
-                    #region NTFS permissions for FSLogix
+                    #region ACE/NTFS permissions for FSLogix
                     #Temporary Allowing storage account key access (disabled due to SFI)
                     do {
                         $Result = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
@@ -8069,76 +8103,49 @@ function New-PsAvdPooledHostPoolSetup {
                         Start-Sleep -Seconds 30
                     } while (-not((Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).AllowSharedKeyAccess))
 
-                    Remove-PSDrive -Name Z -ErrorAction Ignore
-                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
+                        Remove-PSDrive -Name Z -ErrorAction Ignore
+                        $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
-                    #From https://blue42.net/windows/changing-ntfs-security-permissions-using-powershell/
-                    #From https://learn.microsoft.com/en-us/FSLogix/how-to-configure-storage-permissions#recommended-acls
-                    #region Sample NTFS permissions for FSLogix
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting the ACL for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
-                    $existingAcl = Get-Acl Z:
+                        #From https://blue42.net/windows/changing-ntfs-security-permissions-using-powershell/
+                        #From https://learn.microsoft.com/en-us/FSLogix/how-to-configure-storage-permissions#recommended-acls
+                        #region Sample NTFS permissions for FSLogix
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting the ACL for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) "
+                        $existingAcl = Get-Acl Z:
 
-                    #Disabling inheritance
-                    $existingAcl.SetAccessRuleProtection($true, $false)
+                        #Disabling inheritance
+                        $existingAcl.SetAccessRuleProtection($true, $false)
 
-                    #Remove all inherited permissions from this object.
-                    $existingAcl.Access | ForEach-Object -Process { $null = $existingAcl.RemoveAccessRule($_) }
+                        #Remove all inherited permissions from this object.
+                        $existingAcl.Access | ForEach-Object -Process { $null = $existingAcl.RemoveAccessRule($_) }
 
-                    #Add Modify for CREATOR OWNER Group for Subfolders and files only
-                    $identity = "CREATOR OWNER"
-                    $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
-                    $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-                    $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::InheritOnly           
-                    $objType = [System.Security.AccessControl.AccessControlType]::Allow
-                    # Create a new FileSystemAccessRule object
-                    $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
-                    # Modify the existing ACL to include the new rule
-                    $existingAcl.SetAccessRule($AccessRule)
+                        #Add Modify for CREATOR OWNER Group for Subfolders and files only
+                        $identity = "CREATOR OWNER"
+                        $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
+                        $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+                        $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::InheritOnly           
+                        $objType = [System.Security.AccessControl.AccessControlType]::Allow
+                        # Create a new FileSystemAccessRule object
+                        $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
+                        # Modify the existing ACL to include the new rule
+                        $existingAcl.SetAccessRule($AccessRule)
 
-                    #Add Full Control for "Administrators" Group for This folder, subfolders and files
-                    $identity = "Administrators"
-                    $colRights = [System.Security.AccessControl.FileSystemRights]::FullControl
-                    $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
-                    $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
-                    $objType = [System.Security.AccessControl.AccessControlType]::Allow
-                    # Create a new FileSystemAccessRule object
-                    $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
-                    # Modify the existing ACL to include the new rule
-                    $existingAcl.SetAccessRule($AccessRule)
+                        #Add Full Control for "Administrators" Group for This folder, subfolders and files
+                        $identity = "Administrators"
+                        $colRights = [System.Security.AccessControl.FileSystemRights]::FullControl
+                        $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+                        $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
+                        $objType = [System.Security.AccessControl.AccessControlType]::Allow
+                        # Create a new FileSystemAccessRule object
+                        $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
+                        # Modify the existing ACL to include the new rule
+                        $existingAcl.SetAccessRule($AccessRule)
 
-                    #Add Modify for "Users" Group for This folder only
-                    #$identity = "Users"
-                    $identity = $CurrentHostPoolDAGUsersADGroupName
-                    #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
-                    $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
-                    $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
-                    $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
-                    $objType = [System.Security.AccessControl.AccessControlType]::Allow
-                    # Create a new FileSystemAccessRule object
-                    $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
-                    # Modify the existing ACL to include the new rule
-                    $existingAcl.SetAccessRule($AccessRule)
-
-                    #Enabling inheritance
-                    $existingAcl.SetAccessRuleProtection($false, $true)
-
-                    # Apply the modified access rule to the folder
-                    $existingAcl | Set-Acl -Path Z:
-                    #endregion
-
-                    #region redirection.xml file management
-                    #Creating the redirection.xml file
-                    if ($CurrentHostPoolShareName -eq "profiles") {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                        $null = New-Item -Path Z: -Name "redirections.xml" -ItemType "file" -Value $RedirectionsXMLFileContent -Force
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting the ACL for the 'redirections.xml' file in the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                        $existingAcl = Get-Acl Z:\redirections.xml
-                        #Add Read for "Users" Group for This folder only
+                        #Add Modify for "Users" Group for This folder only
                         #$identity = "Users"
                         $identity = $CurrentHostPoolDAGUsersADGroupName
                         #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
-                        $colRights = [System.Security.AccessControl.FileSystemRights]::Read
+                        $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
                         $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
                         $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
                         $objType = [System.Security.AccessControl.AccessControlType]::Allow
@@ -8146,16 +8153,108 @@ function New-PsAvdPooledHostPoolSetup {
                         $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
                         # Modify the existing ACL to include the new rule
                         $existingAcl.SetAccessRule($AccessRule)
-                        $existingAcl | Set-Acl -Path Z:\redirections.xml
-                    }
-                    #endregion
 
-                    # Unmount the share
-                    Remove-PSDrive -Name Z
-                    #Not Allowing storage account key access (SFI compliant)
-                    #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
-                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
-                    #endregion
+                        #Add Modify for "Users" Group for This folder only
+                        #$identity = "Users"
+                        $identity = $CurrentHostPoolRAGUsersADGroupName
+                        #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
+                        $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
+                        $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
+                        $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
+                        $objType = [System.Security.AccessControl.AccessControlType]::Allow
+                        # Create a new FileSystemAccessRule object
+                        $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
+                        # Modify the existing ACL to include the new rule
+                        $existingAcl.SetAccessRule($AccessRule)
+
+                        #Enabling inheritance
+                        $existingAcl.SetAccessRuleProtection($false, $true)
+
+                        # Apply the modified access rule to the folder
+                        $existingAcl | Set-Acl -Path Z:
+                        #endregion
+
+                        #region redirection.xml file management
+                        #Creating the redirection.xml file
+                        if ($CurrentHostPoolShareName -eq "profiles") {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                            $null = New-Item -Path Z: -Name "redirections.xml" -ItemType "file" -Value $RedirectionsXMLFileContent -Force
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting the ACL for the 'redirections.xml' file in the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                            $existingAcl = Get-Acl Z:\redirections.xml
+                            #Add Read for "Users" Group for This folder only
+                            #$identity = "Users"
+                            $identity = $CurrentHostPoolDAGUsersADGroupName
+                            #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
+                            $colRights = [System.Security.AccessControl.FileSystemRights]::Read
+                            $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
+                            $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
+                            $objType = [System.Security.AccessControl.AccessControlType]::Allow
+                            # Create a new FileSystemAccessRule object
+                            $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
+                            # Modify the existing ACL to include the new rule
+                            $existingAcl.SetAccessRule($AccessRule)
+
+                            #$identity = "Users"
+                            $identity = $CurrentHostPoolRAGUsersADGroupName
+                            #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
+                            $colRights = [System.Security.AccessControl.FileSystemRights]::Read
+                            $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
+                            $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
+                            $objType = [System.Security.AccessControl.AccessControlType]::Allow
+                            # Create a new FileSystemAccessRule object
+                            $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
+                            # Modify the existing ACL to include the new rule
+                            $existingAcl.SetAccessRule($AccessRule)
+                            $existingAcl | Set-Acl -Path Z:\redirections.xml
+                        }
+                        #endregion
+
+                        # Unmount the share
+                        Remove-PSDrive -Name Z
+                        #Not Allowing storage account key access (SFI compliant)
+                        #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
+                        #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
+                        #endregion
+                    }
+                    elseif ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                        #region Configure Windows ACLs for cloud-only identities by using PowerShell
+                        #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell
+                        # To use the -EncodedCommand parameter:
+                        $ScriptBlockContent = @"
+param()
+Connect-MgGraph -NoWelcome -UseDeviceCode
+#region Login to your Azure subscription.
+While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
+	Connect-AzAccount -UseDeviceAuthentication
+}
+
+Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
+
+
+`$CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName "$CurrentHostPoolResourceGroupName" -AccountName "$CurrentHostPoolStorageAccountName") | Where-Object -FilterScript { `$_.KeyName -eq "key1" }).Value
+`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -StorageAccountKey `$CurrentHostPoolStorageAccountKey
+#`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -UseConnectedAccount
+`$Root = Get-AzStorageFile -Context `$Context -ShareName "$CurrentHostPoolShareName" -Path "/"
+
+foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPoolRAGUsersADGroupName") {
+    Add-AzFileAce -File `$Root -Type Allow -Principal `$Principal -AccessRights Read,Synchronize -InheritanceFlags ObjectInherit,ContainerInherit
+}
+"@
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
+                        $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
+                        if (pwsh -?) {
+                            pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
+                            <#
+                            $AzFileAce = pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AzFileAce: $($AzFileAce | Out-String)"
+                            #>
+                        }
+                        else {
+                            Write-Warning -Message "Powershell 7+ not installed. Install it (Invoke-Expression -Command ""& { $(Invoke-RestMethod https://aka.ms/install-powershell.ps1) } -UseMSI -Quiet"") and proceed with https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell or run the following script (from pwsh):`r`n$ScriptBlockContent"
+                        }
+                    }
+
                 }
                 #endregion
 
