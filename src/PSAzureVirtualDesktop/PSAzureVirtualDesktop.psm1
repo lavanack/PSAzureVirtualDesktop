@@ -634,8 +634,13 @@ class PooledHostPool : HostPool {
     }
 
     [PooledHostPool]EnableOneDriveForKnownFolders() {
-        $this.OneDriveForKnownFolders = $true
-        $this.FSLogix = $false
+        if ($this.IsActiveDirectoryJoined() -or $this.IsHybridJoined()) {
+            $this.OneDriveForKnownFolders = $true
+            $this.FSLogix = $false
+        }
+        else {
+            $this.OneDriveForKnownFolders = $true
+        }
         return $this
     }
 
@@ -5139,11 +5144,9 @@ function New-PsAvdSessionHost {
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [String]$RegistrationInfoToken,
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $false)]
         [String]$OUPath,
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $false)]
         [String]$DomainName,
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -5605,11 +5608,9 @@ function Add-PsAvdSessionHost {
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
         [String]$RegistrationInfoToken,
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $false)]
         [String]$OUPath,
-        [Parameter(Mandatory = $true)]
-        [ValidateNotNullOrEmpty()]
+        [Parameter(Mandatory = $false)]
         [String]$DomainName,
         [Parameter(Mandatory = $true)]
         [ValidateNotNullOrEmpty()]
@@ -5663,8 +5664,6 @@ function Add-PsAvdSessionHost {
                 ResourceGroupName            = $HostPool.ResourceGroupName 
                 KeyVault                     = $KeyVault
                 RegistrationInfoToken        = $RegistrationInfoToken
-                OUPath                       = $OUPath
-                DomainName                   = $DomainName
                 VMSize                       = $VMSize 
                 VMSourceImageId              = $VMSourceImageId
                 DiffDiskPlacement            = $DiffDiskPlacement
@@ -5687,8 +5686,6 @@ function Add-PsAvdSessionHost {
                 ResourceGroupName            = $HostPool.ResourceGroupName 
                 KeyVault                     = $KeyVault
                 RegistrationInfoToken        = $RegistrationInfoToken
-                OUPath                       = $OUPath
-                DomainName                   = $DomainName
                 VMSize                       = $VMSize 
                 DiffDiskPlacement            = $DiffDiskPlacement
                 ImagePublisherName           = $ImagePublisherName
@@ -5705,6 +5702,11 @@ function Add-PsAvdSessionHost {
                 SessionHostConfiguration     = $SessionHostConfiguration.IsPresent
                 #Verbose                  = $true
             }
+        }
+
+        if ((-not([string]::IsNullOrEmpty($OUPath))) -and (-not([string]::IsNullOrEmpty($DomainName)))) {
+                $Params["OUPath"] = $OUPath
+                $Params["DomainName"] = $DomainName
         }
         #Uncomment the line below for a serial processing (instead of a parallel one)
         #$AsJob = $false
@@ -6647,10 +6649,10 @@ function Add-PsAvdAzureAppAttach {
             #region HostPool configuration
             foreach ($CurrentHostPool in $HostPool) {
                 #region Groups and users
-                $CurrentHostPoolDAGUsersADGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
-                $CurrentHostPoolRAGUsersADGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
-                $CurrentHostPoolAGUsersADGroupName = $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName
-                foreach ($CurrentHostPoolAGUsersADGroupName in $CurrentHostPoolDAGUsersADGroupName, $CurrentHostPoolRAGUsersADGroupName) {
+                $CurrentHostPoolDAGUsersGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
+                $CurrentHostPoolRAGUsersGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
+                $CurrentHostPoolAGUsersADGroupName = $CurrentHostPoolDAGUsersGroupName, $CurrentHostPoolRAGUsersGroupName
+                foreach ($CurrentHostPoolAGUsersADGroupName in $CurrentHostPoolDAGUsersGroupName, $CurrentHostPoolRAGUsersGroupName) {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AppAttachPackage: $($AppAttachPackage | Out-String)"
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the Application to Group '$CurrentHostPoolAGUsersADGroupName' to the '$($AppAttachPackage.Name)' AppAttach Application"
                     $CurrentHostPoolDAGUsersAzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolAGUsersADGroupName'"
@@ -6770,11 +6772,11 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             #region Host Pool Management: Dedicated AD users group
-            $CurrentHostPoolDAGUsersADGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
-            $CurrentHostPoolDAGUsersADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolDAGUsersADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-            if (-not($CurrentHostPoolDAGUsersADGroup)) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolDAGUsersADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                $CurrentHostPoolDAGUsersADGroup = New-ADGroup -Name $CurrentHostPoolDAGUsersADGroupName -SamAccountName $CurrentHostPoolDAGUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolDAGUsersADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+            $CurrentHostPoolDAGUsersGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
+            $CurrentHostPoolDAGUsersGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolDAGUsersGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+            if (-not($CurrentHostPoolDAGUsersGroup)) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolDAGUsersGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                $CurrentHostPoolDAGUsersGroup = New-ADGroup -Name $CurrentHostPoolDAGUsersGroupName -SamAccountName $CurrentHostPoolDAGUsersGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolDAGUsersGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
             }
             #endregion
 
@@ -6847,9 +6849,16 @@ function New-PsAvdPersonalHostPoolSetup {
                 Grant-PsAvdADJoinPermission -Credential $AdJoinCredential -OrganizationalUnit $CurrentHostPoolOU.DistinguishedName
                 if ($CurrentHostPool.IsActiveDirectoryJoined()) {
                     $Tag['JoinMode'] = "Active Directory Directory Services"
+                    $Tag['IdentityModel'] = "Hybrid"
                 }
                 else {
                     $Tag['JoinMode'] = "Hybrid"
+                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                        $Tag['IdentityModel'] = "CloudOnly"
+                    }
+                    else {
+                        $Tag['IdentityModel'] = "Hybrid"
+                    }
                 }
             }
             else {
@@ -6861,8 +6870,8 @@ function New-PsAvdPersonalHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                     $AzADGroup = $null
-                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersADGroupName
-                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersADGroupName'"
+                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
+                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
                 } while (-not($AzADGroup.Id))
 
                 # Assign users to the application group
@@ -6973,8 +6982,8 @@ function New-PsAvdPersonalHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                     $AzADGroup = $null
-                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersADGroupName
-                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersADGroupName'"
+                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
+                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
                 } while (-not($AzADGroup.Id))
 
                 # Assign users to the application group
@@ -7039,6 +7048,12 @@ function New-PsAvdPersonalHostPoolSetup {
             if ($CurrentHostPool.Watermarking) {
                 $Options += 'Watermarking'
             }
+            if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                $Options += "CloudOnly"
+            }
+            else {
+                $Options += "Hybrid"
+            }
 
             $FriendlyName = "{0} ({1})" -f $CurrentHostPool.GetAzAvdWorkSpaceName(), $($Options -join ', ')
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FriendlyName: $FriendlyName"
@@ -7081,13 +7096,56 @@ function New-PsAvdPersonalHostPoolSetup {
             $NextSessionHostNames = Get-PsAvdNextSessionHostName -HostPoolId $CurrentAzWvdHostPool.Id -NamePrefix $CurrentHostPool.NamePrefix -VMNumberOfInstances $CurrentHostPool.VMNumberOfInstances
             if (-not([String]::IsNullOrEmpty($CurrentHostPool.VMSourceImageId))) {
                 #We propagate the AsJob context to the child function
-                Add-PsAvdSessionHost -HostPoolId $CurrentAzWvdHostPool.Id -NamePrefix $CurrentHostPool.NamePrefix -VMNumberOfInstances $CurrentHostPool.VMNumberOfInstances -KeyVault $CurrentHostPool.KeyVault -RegistrationInfoToken $RegistrationInfoToken.Token -SubnetId $CurrentHostPool.SubnetId -DomainName $DomainName -OUPath $CurrentHostPoolOU.DistinguishedName -VMSize $CurrentHostPool.VMSize -VMSourceImageId $CurrentHostPool.VMSourceImageId -DiffDiskPlacement $CurrentHostPool.DiffDiskPlacement -CustomConfigurationScriptUrl $CurrentHostPool.CustomConfigurationScriptUrl -Tag $Tag -IsMicrosoftEntraIdJoined:$CurrentHostPool.IsMicrosoftEntraIdJoined() -Spot:$CurrentHostPool.Spot -HibernationEnabled:$CurrentHostPool.HibernationEnabled -Intune:$CurrentHostPool.Intune -LogDir $LogDir -AsJob #:$AsJob
+                $Params = @{
+                    HostPoolId                    = $CurrentAzWvdHostPool.Id
+                    NamePrefix                    = $CurrentHostPool.NamePrefix
+                    VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
+                    KeyVault                      = $CurrentHostPool.KeyVault
+                    RegistrationInfoToken         = $RegistrationInfoToken.Token
+                    SubnetId                      = $CurrentHostPool.SubnetId
+                    VMSize                        = $CurrentHostPool.VMSize
+                    VMSourceImageId               = $CurrentHostPool.VMSourceImageId
+                    DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
+                    CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
+                    Tag                           = $Tag
+                    IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                    Spot                          = $CurrentHostPool.Spot
+                    HibernationEnabled            = $CurrentHostPool.HibernationEnabled
+                    Intune                        = $CurrentHostPool.Intune
+                    LogDir                        = $LogDir
+                    AsJob                         = $true
+                }
             }
             else {
                 #We propagate the AsJob context to the child function
-                Add-PsAvdSessionHost -HostPoolId $CurrentAzWvdHostPool.Id -NamePrefix $CurrentHostPool.NamePrefix -VMNumberOfInstances $CurrentHostPool.VMNumberOfInstances -KeyVault $CurrentHostPool.KeyVault -RegistrationInfoToken $RegistrationInfoToken.Token -SubnetId $CurrentHostPool.SubnetId -DomainName $DomainName -OUPath $CurrentHostPoolOU.DistinguishedName -VMSize $CurrentHostPool.VMSize -DiffDiskPlacement $CurrentHostPool.DiffDiskPlacement -ImagePublisherName $CurrentHostPool.ImagePublisherName -ImageOffer $CurrentHostPool.ImageOffer -ImageSku $CurrentHostPool.ImageSku -CustomConfigurationScriptUrl $CurrentHostPool.CustomConfigurationScriptUrl -Tag $Tag -IsMicrosoftEntraIdJoined:$CurrentHostPool.IsMicrosoftEntraIdJoined() -Spot:$CurrentHostPool.Spot -HibernationEnabled:$CurrentHostPool.HibernationEnabled -Intune:$CurrentHostPool.Intune -LogDir $LogDir -AsJob #:$AsJob
+                $Params = @{
+                    HostPoolId                    = $CurrentAzWvdHostPool.Id
+                    NamePrefix                    = $CurrentHostPool.NamePrefix
+                    VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
+                    KeyVault                      = $CurrentHostPool.KeyVault
+                    RegistrationInfoToken         = $RegistrationInfoToken.Token
+                    SubnetId                      = $CurrentHostPool.SubnetId
+                    VMSize                        = $CurrentHostPool.VMSize
+                    DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
+                    ImagePublisherName            = $CurrentHostPool.ImagePublisherName
+                    ImageOffer                    = $CurrentHostPool.ImageOffer
+                    ImageSku                      = $CurrentHostPool.ImageSku
+                    CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
+                    Tag                           = $Tag
+                    IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                    Spot                          = $CurrentHostPool.Spot
+                    HibernationEnabled            = $CurrentHostPool.HibernationEnabled
+                    Intune                        = $CurrentHostPool.Intune
+                    LogDir                        = $LogDir
+                    AsJob                         = $true
+                }
             }
 
+            if ((-not([string]::IsNullOrEmpty($DomainName))) -and ((-not([string]::IsNullOrEmpty($CurrentHostPoolOU.DistinguishedName))))) {
+                    $Params["DomainName"] = $DomainName
+                    $Params["OUPath"] = $CurrentHostPoolOU.DistinguishedName
+            }
+            Add-PsAvdSessionHost @Params
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
             if ($Pester) {
                 $ModuleBase = Get-ModuleBase
@@ -7105,7 +7163,9 @@ function New-PsAvdPersonalHostPoolSetup {
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
-            $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
+            }
             #endregion 
 
             #region Restarting the Session Hosts
@@ -7470,61 +7530,83 @@ function New-PsAvdPooledHostPoolSetup {
                 $Tag['ASRFailOverVNetId'] = $CurrentHostPool.ASRFailOverVNetId
             }
 
-            #region Creating an <Azure Location> OU 
-            $LocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$($CurrentHostPool.Location)'" -SearchBase $ADOrganizationalUnit.DistinguishedName
-            if (-not($LocationOU)) {
-                $LocationOU = New-ADOrganizationalUnit -Name $CurrentHostPool.Location -Path $ADOrganizationalUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($LocationOU.DistinguishedName)' OU (under '$($ADOrganizationalUnit.DistinguishedName)')"
-            }
-            #endregion
 
-            #region Creating a PooledDesktops OU 
-            $PooledDesktopsOU = Get-ADOrganizationalUnit -Filter 'Name -eq "PooledDesktops"' -SearchBase $LocationOU.DistinguishedName
-            if (-not($PooledDesktopsOU)) {
-                $PooledDesktopsOU = New-ADOrganizationalUnit -Name "PooledDesktops" -Path $LocationOU.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($PooledDesktopsOU.DistinguishedName)' OU (under '$($LocationOU.DistinguishedName)')"
-            }
-            #endregion
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                #region Creating an <Azure Location> OU 
+                $LocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$($CurrentHostPool.Location)'" -SearchBase $ADOrganizationalUnit.DistinguishedName
+                if (-not($LocationOU)) {
+                    $LocationOU = New-ADOrganizationalUnit -Name $CurrentHostPool.Location -Path $ADOrganizationalUnit.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($LocationOU.DistinguishedName)' OU (under '$($ADOrganizationalUnit.DistinguishedName)')"
+                }
+                #endregion
 
-            #region General AD Management
-            #region Host Pool Management: Dedicated AD OU Setup (1 OU per HostPool)
-            $CurrentHostPoolOU = Get-ADOrganizationalUnit -Filter "Name -eq '$($CurrentHostPool.Name)'" -SearchBase $PooledDesktopsOU.DistinguishedName
-            if (-not($CurrentHostPoolOU)) {
-                $CurrentHostPoolOU = New-ADOrganizationalUnit -Name "$($CurrentHostPool.Name)" -Path $PooledDesktopsOU.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolOU.DistinguishedName)' OU (under '$($PooledDesktopsOU.DistinguishedName)')"
-            }
-            #endregion
+                #region Creating a PooledDesktops OU 
+                $PooledDesktopsOU = Get-ADOrganizationalUnit -Filter 'Name -eq "PooledDesktops"' -SearchBase $LocationOU.DistinguishedName
+                if (-not($PooledDesktopsOU)) {
+                    $PooledDesktopsOU = New-ADOrganizationalUnit -Name "PooledDesktops" -Path $LocationOU.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($PooledDesktopsOU.DistinguishedName)' OU (under '$($LocationOU.DistinguishedName)')"
+                }
+                #endregion
 
-            #region Host Pool Management: Dedicated AD users group
-            $CurrentHostPoolDAGUsersADGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
-            $CurrentHostPoolDAGUsersADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolDAGUsersADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-            if (-not($CurrentHostPoolDAGUsersADGroup)) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolDAGUsersADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                $CurrentHostPoolDAGUsersADGroup = New-ADGroup -Name $CurrentHostPoolDAGUsersADGroupName -SamAccountName $CurrentHostPoolDAGUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolDAGUsersADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
-            }
+                #region General AD Management
+                #region Host Pool Management: Dedicated AD OU Setup (1 OU per HostPool)
+                $CurrentHostPoolOU = Get-ADOrganizationalUnit -Filter "Name -eq '$($CurrentHostPool.Name)'" -SearchBase $PooledDesktopsOU.DistinguishedName
+                if (-not($CurrentHostPoolOU)) {
+                    $CurrentHostPoolOU = New-ADOrganizationalUnit -Name "$($CurrentHostPool.Name)" -Path $PooledDesktopsOU.DistinguishedName -ProtectedFromAccidentalDeletion $false -PassThru
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolOU.DistinguishedName)' OU (under '$($PooledDesktopsOU.DistinguishedName)')"
+                }
+                #endregion
 
-            $CurrentHostPoolRAGUsersADGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
-            $CurrentHostPoolRAGUsersADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolRAGUsersADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-            if (-not($CurrentHostPoolRAGUsersADGroup)) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolRAGUsersADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                $CurrentHostPoolRAGUsersADGroup = New-ADGroup -Name $CurrentHostPoolRAGUsersADGroupName -SamAccountName $CurrentHostPoolRAGUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolRAGUsersADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
-            }
-            #endregion
+                #region Host Pool Management: Dedicated AD users group
+                $CurrentHostPoolDAGUsersGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
+                $CurrentHostPoolDAGUsersGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolDAGUsersGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+                if (-not($CurrentHostPoolDAGUsersGroup)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolDAGUsersGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolDAGUsersGroup = New-ADGroup -Name $CurrentHostPoolDAGUsersGroupName -SamAccountName $CurrentHostPoolDAGUsersGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolDAGUsersGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+                }
 
-            #region AD Session Hosts groups
-            $SessionHosts = "SessionHosts"
-            $CurrentHostPoolSessionHostsADGroupName = "$($CurrentHostPool.Name) - $SessionHosts"
-            $CurrentHostPoolSessionHostsADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolSessionHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-            if (-not($CurrentHostPoolSessionHostsADGroup)) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolSessionHostsADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                $CurrentHostPoolSessionHostsADGroup = New-ADGroup -Name $CurrentHostPoolSessionHostsADGroupName -SamAccountName $CurrentHostPoolSessionHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolSessionHostsADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
-            }
-            #endregion 
+                $CurrentHostPoolRAGUsersGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
+                $CurrentHostPoolRAGUsersGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolRAGUsersGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+                if (-not($CurrentHostPoolRAGUsersGroup)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolRAGUsersGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolRAGUsersGroup = New-ADGroup -Name $CurrentHostPoolRAGUsersGroupName -SamAccountName $CurrentHostPoolRAGUsersGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolRAGUsersGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+                }
+                #endregion
 
-            #region Run a sync with Azure AD
-            Start-MicrosoftEntraIDConnectSync
-            #endregion 
-            #endregion
+                #region AD Session Hosts groups
+                $SessionHosts = "SessionHosts"
+                $CurrentHostPoolSessionHostsADGroupName = "$($CurrentHostPool.Name) - $SessionHosts"
+                $CurrentHostPoolSessionHostsADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolSessionHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+                if (-not($CurrentHostPoolSessionHostsADGroup)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolSessionHostsADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolSessionHostsADGroup = New-ADGroup -Name $CurrentHostPoolSessionHostsADGroupName -SamAccountName $CurrentHostPoolSessionHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolSessionHostsADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+                }
+                #endregion 
+
+                #region Run a sync with Azure AD
+                Start-MicrosoftEntraIDConnectSync
+                #endregion 
+                #endregion
+            }
+            else {
+                #region Host Pool Management: Dedicated EntraID users group
+                $CurrentHostPoolDAGUsersGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
+                $CurrentHostPoolDAGUsersGroup = Get-MgBetaGroup -Filter "displayName eq '$CurrentHostPoolDAGUsersGroupName'"
+                $MailNickname = $($CurrentHostPoolDAGUsersGroupName -replace "\s" -replace "\W").ToLower()
+                if (-not($CurrentHostPoolDAGUsersGroup)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolDAGUsersGroupName' Entra ID Group"
+                    $CurrentHostPoolDAGUsersGroup = New-MgBetaGroup -DisplayName $CurrentHostPoolDAGUsersGroupName -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
+                }
+
+                $CurrentHostPoolRAGUsersGroupName = "$($CurrentHostPool.Name) - Remote Application Group Users"
+                $CurrentHostPoolRAGUsersGroup = Get-MgBetaGroup -Filter "displayName eq '$CurrentHostPoolRAGUsersGroupName'"
+                $MailNickname = $($CurrentHostPoolRAGUsersGroupName -replace "\s" -replace "\W").ToLower()
+                if (-not($CurrentHostPoolRAGUsersGroup)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolRAGUsersGroupName' Entra ID Group"
+                    $CurrentHostPoolRAGUsersGroup = New-MgBetaGroup -DisplayName $CurrentHostPoolRAGUsersGroupName -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
+                }
+                #endregion
+            }
 
 
             #region Dedicated Resource Group Management (1 per HostPool)
@@ -7570,7 +7652,7 @@ function New-PsAvdPooledHostPoolSetup {
             #region OneDrive
             if ($CurrentHostPool.OneDriveForKnownFolders) {
                 #region Dedicated Host Pool AD GPO Management (1 OneDrive GPO per Host Pool)
-                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
                     #region OneDrive GPO
                     $CurrentHostPoolOneDriveGPO = Get-GPO -Name "$($CurrentHostPool.Name) - OneDrive Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolOneDriveGPO)) {
@@ -7602,6 +7684,9 @@ function New-PsAvdPooledHostPoolSetup {
                     #endregion
                     #endregion
                 }
+                else {
+                    Write-Warning -Message "One Drive For Known Folders is only implemented for the Cloud Only Identity Model ..."
+                }
                 #endregion 
             }
             else {
@@ -7616,44 +7701,78 @@ function New-PsAvdPooledHostPoolSetup {
                 #$CurrentHostPoolStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName()
                 #endregion 
 
-                #region FSLogix AD Management
-                #region Dedicated HostPool AD group
-                #region Dedicated HostPool AD FSLogix groups
-                $CurrentHostPoolFSLogixContributorADGroupName = "$($CurrentHostPool.Name) - $FSLogixContributor"
-                $CurrentHostPoolFSLogixContributorADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolFSLogixContributorADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-                if (-not($CurrentHostPoolFSLogixContributorADGroup)) {
-                    $CurrentHostPoolFSLogixContributorADGroup = New-ADGroup -Name $CurrentHostPoolFSLogixContributorADGroupName -SamAccountName $CurrentHostPoolFSLogixContributorADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolFSLogixContributorADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolFSLogixContributorADGroup.Name)' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                }
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersADGroupName' AD group to the '$CurrentHostPoolFSLogixContributorADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                $CurrentHostPoolFSLogixContributorADGroup | Add-ADGroupMember -Members $CurrentHostPoolDAGUsersADGroupName
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersADGroupName' AD group to the '$CurrentHostPoolFSLogixContributorADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                $CurrentHostPoolFSLogixContributorADGroup | Add-ADGroupMember -Members $CurrentHostPoolRAGUsersADGroupName
-
-                $CurrentHostPoolFSLogixElevatedContributorADGroupName = "$($CurrentHostPool.Name) - $FSLogixElevatedContributor"
-                $CurrentHostPoolFSLogixElevatedContributorADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolFSLogixElevatedContributorADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-                if (-not($CurrentHostPoolFSLogixElevatedContributorADGroup)) {
-                    $CurrentHostPoolFSLogixElevatedContributorADGroup = New-ADGroup -Name $CurrentHostPoolFSLogixElevatedContributorADGroupName -SamAccountName $CurrentHostPoolFSLogixElevatedContributorADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolFSLogixElevatedContributorADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolFSLogixElevatedContributorADGroup.Name)' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                }
-
-                $CurrentHostPoolFSLogixReaderADGroupName = "$($CurrentHostPool.Name) - $FSLogixReader"
-                $CurrentHostPoolFSLogixReaderADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolFSLogixReaderADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-                if (-not($CurrentHostPoolFSLogixReaderADGroup)) {
-                    $CurrentHostPoolFSLogixReaderADGroup = New-ADGroup -Name $CurrentHostPoolFSLogixReaderADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolFSLogixReaderADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolFSLogixReaderADGroup.Name)' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                }
-                #endregion
-                #region Run a sync with Azure AD
-                Start-MicrosoftEntraIDConnectSync
-                #endregion 
-                #endregion
-                #endregion
-
-                #region FSLogix Storage Account Management
                 #region FSLogix Storage Account Name Setup
                 $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetFSLogixStorageAccountName()
                 #endregion 
+
+                #region FSLogix AD Management
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                    #region Dedicated HostPool AD group
+                    #region Dedicated HostPool AD FSLogix groups
+                    $CurrentHostPoolFSLogixContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixContributor"
+                    $CurrentHostPoolFSLogixContributorGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolFSLogixContributorGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+                    if (-not($CurrentHostPoolFSLogixContributorGroup)) {
+                        $CurrentHostPoolFSLogixContributorGroup = New-ADGroup -Name $CurrentHostPoolFSLogixContributorGroupName -SamAccountName $CurrentHostPoolFSLogixContributorGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolFSLogixContributorGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolFSLogixContributorGroup.Name)' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    }
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersGroupName' AD group to the '$CurrentHostPoolFSLogixContributorGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolFSLogixContributorGroup | Add-ADGroupMember -Members $CurrentHostPoolDAGUsersGroupName
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersGroupName' AD group to the '$CurrentHostPoolFSLogixContributorGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolFSLogixContributorGroup | Add-ADGroupMember -Members $CurrentHostPoolRAGUsersGroupName
+
+                    $CurrentHostPoolFSLogixElevatedContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixElevatedContributor"
+                    $CurrentHostPoolFSLogixElevatedContributorGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolFSLogixElevatedContributorGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+                    if (-not($CurrentHostPoolFSLogixElevatedContributorGroup)) {
+                        $CurrentHostPoolFSLogixElevatedContributorGroup = New-ADGroup -Name $CurrentHostPoolFSLogixElevatedContributorGroupName -SamAccountName $CurrentHostPoolFSLogixElevatedContributorGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolFSLogixElevatedContributorGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolFSLogixElevatedContributorGroup.Name)' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    }
+
+                    $CurrentHostPoolFSLogixReaderGroupName = "$($CurrentHostPool.Name) - $FSLogixReader"
+                    $CurrentHostPoolFSLogixReaderGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolFSLogixReaderGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+                    if (-not($CurrentHostPoolFSLogixReaderGroup)) {
+                        $CurrentHostPoolFSLogixReaderGroup = New-ADGroup -Name $CurrentHostPoolFSLogixReaderGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolFSLogixReaderGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolFSLogixReaderGroup.Name)' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    }
+                    #endregion
+                    #region Run a sync with Azure AD
+                    Start-MicrosoftEntraIDConnectSync
+                    #endregion 
+                    #endregion
+                }
+                else {
+                    $CurrentHostPoolFSLogixContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixContributor"
+                    $CurrentHostPoolFSLogixContributorGroup = Get-MgBetaGroup -Filter "displayName eq '$CurrentHostPoolFSLogixContributorGroupName'"
+                    $MailNickname = $($CurrentHostPoolFSLogixContributorGroupName -replace "\s" -replace "\W").ToLower()
+                    if (-not($CurrentHostPoolFSLogixContributorGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolFSLogixContributorGroupName' Entra ID Group"
+                        $CurrentHostPoolFSLogixContributorGroup = New-MgBetaGroup -DisplayName $CurrentHostPoolFSLogixContributorGroupName -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
+                    }
+
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersGroupName' EntraID group to the '$CurrentHostPoolFSLogixContributorGroupName' EntraID Group"
+                    New-MGBetaGroupMember -GroupId $CurrentHostPoolFSLogixContributorGroup.Id -DirectoryObjectId $CurrentHostPoolDAGUsersGroup.Id -ErrorAction Ignore
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersGroupName' EntraID group to the '$CurrentHostPoolFSLogixContributorGroupName' EntraID Group"
+                    New-MGBetaGroupMember -GroupId $CurrentHostPoolFSLogixContributorGroup.Id -DirectoryObjectId $CurrentHostPoolRAGUsersGroup.Id -ErrorAction Ignore
+                
+                    $CurrentHostPoolFSLogixElevatedContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixElevatedContributor"
+                    $CurrentHostPoolFSLogixElevatedContributorGroup = Get-MgBetaGroup -Filter "displayName eq '$CurrentHostPoolFSLogixElevatedContributorGroupName'"
+                    $MailNickname = $($CurrentHostPoolFSLogixElevatedContributorGroupName -replace "\s" -replace "\W").ToLower()
+                    if (-not($CurrentHostPoolFSLogixElevatedContributorGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolFSLogixElevatedContributorGroupName' Entra ID Group"
+                        $CurrentHostPoolFSLogixElevatedContributorGroup = New-MgBetaGroup -DisplayName $CurrentHostPoolFSLogixElevatedContributorGroupName -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
+                    }
+
+                    $CurrentHostPoolFSLogixReaderGroupName = "$($CurrentHostPool.Name) - $FSLogixReader"
+                    $CurrentHostPoolFSLogixReaderGroup = Get-MgBetaGroup -Filter "displayName eq '$CurrentHostPoolFSLogixReaderGroupName'"
+                    $MailNickname = $($CurrentHostPoolFSLogixReaderGroupName -replace "\s" -replace "\W").ToLower()
+                    if (-not($CurrentHostPoolFSLogixReaderGroup)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolFSLogixReaderGroupName' Entra ID Group"
+                        $CurrentHostPoolFSLogixReaderGroup = New-MgBetaGroup -DisplayName $CurrentHostPoolFSLogixReaderGroupName -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
+                    }
+                
+                }
+                #endregion
+
+                #region FSLogix Storage Account Management
 
                 #region Dedicated Host Pool AD GPO Management (1 FSLogix per Host Pool)
                 if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
@@ -7682,7 +7801,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "PreventLoginWithFailure" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "PreventLoginWithTempProfile" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "VolumeType" -Type ([Microsoft.Win32.RegistryValueKind]::String) -Value "VHDX"
-                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "LogFileKeepingPeriod" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 10
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles\Logging' -ValueName "LogFileKeepingPeriod" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 10
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "IsDynamic" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
 
                     #For running FSLogix System Tray at Logon
@@ -8002,8 +8121,8 @@ function New-PsAvdPooledHostPoolSetup {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixContributorADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixContributorADGroupName'"
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixContributorGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixContributorGroupName'"
                     } while (-not($AzADGroup.Id))
                     #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
                     #region 'Storage File Data SMB Share Contributor' RBAC Assignment
@@ -8034,8 +8153,8 @@ function New-PsAvdPooledHostPoolSetup {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixElevatedContributorADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixElevatedContributorADGroupName'"
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixElevatedContributorGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixElevatedContributorGroupName'"
                     } while (-not($AzADGroup.Id))
 
                     #region 'Storage File Data SMB Share Elevated Contributor' RBAC Assignment
@@ -8067,8 +8186,8 @@ function New-PsAvdPooledHostPoolSetup {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixReaderADGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixReaderADGroupName'"
+                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixReaderGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixReaderGroupName'"
                     } while (-not($AzADGroup.Id))
 
                     #region 'Storage File Data SMB Share Reader' RBAC Assignment
@@ -8143,8 +8262,8 @@ function New-PsAvdPooledHostPoolSetup {
 
                         #Add Modify for "Users" Group for This folder only
                         #$identity = "Users"
-                        $identity = $CurrentHostPoolDAGUsersADGroupName
-                        #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
+                        $identity = $CurrentHostPoolDAGUsersGroupName
+                        #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
                         $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
                         $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
                         $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -8156,8 +8275,8 @@ function New-PsAvdPooledHostPoolSetup {
 
                         #Add Modify for "Users" Group for This folder only
                         #$identity = "Users"
-                        $identity = $CurrentHostPoolRAGUsersADGroupName
-                        #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
+                        $identity = $CurrentHostPoolRAGUsersGroupName
+                        #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
                         $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
                         $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
                         $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -8184,8 +8303,8 @@ function New-PsAvdPooledHostPoolSetup {
                             $existingAcl = Get-Acl Z:\redirections.xml
                             #Add Read for "Users" Group for This folder only
                             #$identity = "Users"
-                            $identity = $CurrentHostPoolDAGUsersADGroupName
-                            #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
+                            $identity = $CurrentHostPoolDAGUsersGroupName
+                            #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
                             $colRights = [System.Security.AccessControl.FileSystemRights]::Read
                             $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
                             $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -8196,8 +8315,8 @@ function New-PsAvdPooledHostPoolSetup {
                             $existingAcl.SetAccessRule($AccessRule)
 
                             #$identity = "Users"
-                            $identity = $CurrentHostPoolRAGUsersADGroupName
-                            #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersADGroupName)").Sid.value
+                            $identity = $CurrentHostPoolRAGUsersGroupName
+                            #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
                             $colRights = [System.Security.AccessControl.FileSystemRights]::Read
                             $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
                             $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
@@ -8237,7 +8356,7 @@ Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
 #`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -UseConnectedAccount
 `$Root = Get-AzStorageFile -Context `$Context -ShareName "$CurrentHostPoolShareName" -Path "/"
 
-foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPoolRAGUsersADGroupName") {
+foreach (`$Principal in "$CurrentHostPoolDAGUsersGroupName", "$CurrentHostPoolRAGUsersGroupName") {
     Add-AzFileAce -File `$Root -Type Allow -Principal `$Principal -AccessRights Read,Synchronize -InheritanceFlags ObjectInherit,ContainerInherit
 }
 "@
@@ -8266,6 +8385,7 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
                 $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
                 $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
                 New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -StorageAccount $CurrentHostPoolStorageAccount
+                #endregion
                 #endregion
             }
             else {
@@ -8493,10 +8613,10 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
                         $CurrentHostPoolMSIXUsersADGroup = New-ADGroup -Name $CurrentHostPoolMSIXUsersADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolMSIXUsersADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
                     }
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersADGroupName' AD group to the '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                    $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolDAGUsersADGroupName
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersADGroupName' AD group to the '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                    $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolRAGUsersADGroupName
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersGroupName' AD group to the '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolDAGUsersGroupName
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersGroup' AD group to the '$CurrentHostPoolMSIXUsersADGroup' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolMSIXUsersADGroup | Add-ADGroupMember -Members $CurrentHostPoolRAGUsersGroupName
                     #endregion
 
                     #region ADGroup Mutex
@@ -9095,9 +9215,16 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
                 else {
                     $Tag['JoinMode'] = "Hybrid"
                 }
+                $Tag['IdentityModel'] = "Hybrid"
             }
             else {
                 $Tag['JoinMode'] = "Microsoft Entra ID"
+                if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                    $Tag['IdentityModel'] = "CloudOnly"
+                }
+                else {
+                    $Tag['IdentityModel'] = "Hybrid"
+                }
                 #region Assign Virtual Machine User Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
                 do {
@@ -9105,8 +9232,8 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                     $AzADGroup = $null
-                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersADGroupName
-                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersADGroupName'"
+                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
+                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
                 } while (-not($AzADGroup.Id))
 
                 # Assign users to the application group
@@ -9352,8 +9479,8 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                 Start-Sleep -Seconds 30
                 $AzADGroup = $null
-                #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersADGroupName
-                $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersADGroupName'"
+                #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
+                $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
             } while (-not($AzADGroup.Id))
 
             # Assign users to the application group
@@ -9405,8 +9532,8 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                 Start-Sleep -Seconds 30
                 $AzADGroup = $null
-                #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolRAGUsersADGroupName
-                $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolRAGUsersADGroupName'"
+                #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolRAGUsersGroupName
+                $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolRAGUsersGroupName'"
             } while (-not($AzADGroup.Id))
 
             # Assign users to the application group
@@ -9484,6 +9611,12 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
             if ($CurrentHostPool.SessionHostConfiguration) {
                 $Options += 'SessionHostConfiguration'
             }
+            if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                $Options += "CloudOnly"
+            }
+            else {
+                $Options += "Hybrid"
+            }
 
             $FriendlyName = "{0} ({1})" -f $CurrentHostPool.GetAzAvdWorkSpaceName(), $($Options -join ', ')
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$FriendlyName: $FriendlyName"
@@ -9537,12 +9670,57 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
                 $NextSessionHostNames = Get-PsAvdNextSessionHostName -HostPoolId $CurrentAzWvdHostPool.Id -NamePrefix $CurrentHostPool.NamePrefix -VMNumberOfInstances $CurrentHostPool.VMNumberOfInstances
                 if (-not([String]::IsNullOrEmpty($CurrentHostPool.VMSourceImageId))) {
                     #We propagate the AsJob context to the child function
-                    Add-PsAvdSessionHost -HostPoolId $CurrentAzWvdHostPool.Id -NamePrefix $CurrentHostPool.NamePrefix -VMNumberOfInstances $CurrentHostPool.VMNumberOfInstances -KeyVault $CurrentHostPool.KeyVault -RegistrationInfoToken $RegistrationInfoToken.Token -SubnetId $CurrentHostPool.SubnetId -DomainName $DomainName -OUPath $CurrentHostPoolOU.DistinguishedName -VMSize $CurrentHostPool.VMSize -VMSourceImageId $CurrentHostPool.VMSourceImageId -DiffDiskPlacement $CurrentHostPool.DiffDiskPlacement -CustomConfigurationScriptUrl $CurrentHostPool.CustomConfigurationScriptUrl -Tag $Tag -IsMicrosoftEntraIdJoined:$CurrentHostPool.IsMicrosoftEntraIdJoined() -Spot:$CurrentHostPool.Spot -HibernationEnabled:$CurrentHostPool.HibernationEnabled -Intune:$CurrentHostPool.Intune -LogDir $LogDir -SessionHostConfiguration:$CurrentHostPool.SessionHostConfiguration -AsJob:$AsJob
+                    $Params = @{
+                        HostPoolId                    = $CurrentAzWvdHostPool.Id
+                        NamePrefix                    = $CurrentHostPool.NamePrefix
+                        VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
+                        KeyVault                      = $CurrentHostPool.KeyVault
+                        RegistrationInfoToken         = $RegistrationInfoToken.Token
+                        SubnetId                      = $CurrentHostPool.SubnetId
+                        VMSize                        = $CurrentHostPool.VMSize
+                        VMSourceImageId               = $CurrentHostPool.VMSourceImageId
+                        DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
+                        CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
+                        Tag                           = $Tag
+                        IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                        Spot                          = $CurrentHostPool.Spot
+                        HibernationEnabled            = $CurrentHostPool.HibernationEnabled
+                        Intune                        = $CurrentHostPool.Intune
+                        LogDir                        = $LogDir
+                        SessionHostConfiguration      = $CurrentHostPool.SessionHostConfiguration
+                        AsJob                         = $AsJob
+                    }
                 }
                 else {
                     #We propagate the AsJob context to the child function
-                    Add-PsAvdSessionHost -HostPoolId $CurrentAzWvdHostPool.Id -NamePrefix $CurrentHostPool.NamePrefix -VMNumberOfInstances $CurrentHostPool.VMNumberOfInstances -KeyVault $CurrentHostPool.KeyVault -RegistrationInfoToken $RegistrationInfoToken.Token -SubnetId $CurrentHostPool.SubnetId -DomainName $DomainName -OUPath $CurrentHostPoolOU.DistinguishedName -VMSize $CurrentHostPool.VMSize -DiffDiskPlacement $CurrentHostPool.DiffDiskPlacement -ImagePublisherName $CurrentHostPool.ImagePublisherName -ImageOffer $CurrentHostPool.ImageOffer -ImageSku $CurrentHostPool.ImageSku -CustomConfigurationScriptUrl $CurrentHostPool.CustomConfigurationScriptUrl -Tag $Tag -IsMicrosoftEntraIdJoined:$CurrentHostPool.IsMicrosoftEntraIdJoined() -Spot:$CurrentHostPool.Spot -HibernationEnabled:$CurrentHostPool.HibernationEnabled -Intune:$CurrentHostPool.Intune -LogDir $LogDir -SessionHostConfiguration:$CurrentHostPool.SessionHostConfiguration -AsJob:$AsJob
+                    $Params = @{
+                        HostPoolId                    = $CurrentAzWvdHostPool.Id
+                        NamePrefix                    = $CurrentHostPool.NamePrefix
+                        VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
+                        KeyVault                      = $CurrentHostPool.KeyVault
+                        RegistrationInfoToken         = $RegistrationInfoToken.Token
+                        SubnetId                      = $CurrentHostPool.SubnetId
+                        VMSize                        = $CurrentHostPool.VMSize
+                        DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
+                        ImagePublisherName            = $CurrentHostPool.ImagePublisherName
+                        ImageOffer                    = $CurrentHostPool.ImageOffer
+                        ImageSku                      = $CurrentHostPool.ImageSku
+                        CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
+                        Tag                           = $Tag
+                        IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                        Spot                          = $CurrentHostPool.Spot
+                        HibernationEnabled            = $CurrentHostPool.HibernationEnabled
+                        Intune                        = $CurrentHostPool.Intune
+                        LogDir                        = $LogDir
+                        SessionHostConfiguration      = $CurrentHostPool.SessionHostConfiguration
+                        AsJob                         = $AsJob
+                    }
                 }
+                if ((-not([string]::IsNullOrEmpty($DomainName))) -and ((-not([string]::IsNullOrEmpty($CurrentHostPoolOU.DistinguishedName))))) {
+                        $Params["DomainName"] = $DomainName
+                        $Params["OUPath"] = $CurrentHostPoolOU.DistinguishedName
+                }
+                Add-PsAvdSessionHost @Params
             }
             else {
                 #Waiting for the Session Host creation in SessionHostConfiguration Mode
@@ -9575,7 +9753,9 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersADGroupName", "$CurrentHostPool
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
-            $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
+            }
             #endregion
 
             if ($CurrentHostPool.FSLogix) {
@@ -10936,17 +11116,14 @@ function New-PsAvdRdcMan {
 
         #region Server Nodes Management
         #$Machines = Get-ADComputer -SearchBase $CurrentOU -Properties DNSHostName -Filter 'DNSHostName -like "*"' -SearchScope OneLevel
-        $Machines = Get-ADComputer -SearchBase $CurrentOU -Properties DNSHostName -Filter 'DNSHostName -like "*"' -SearchScope OneLevel | Select-Object -Property Name
-        if ($null -eq $Machines) {
-            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
-            if ($null -ne $SessionHosts) {
-                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
-                $Machines = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)' Session Host"
-                    $NIC = Get-AzNetworkInterface -Name $($CurrentSessionHostVM.NetworkProfile.NetworkInterfaces.Id -replace ".+/")
-                    $PrivateIpAddress = $NIC.IpConfigurations.PrivateIPAddress
-                    [PSCustomObject]@{DisplayName = $CurrentSessionHostVM.Name; Name = $PrivateIpAddress }
-                }
+        $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
+        if ($null -ne $SessionHosts) {
+            $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+            $Machines = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)' Session Host"
+                $NIC = Get-AzNetworkInterface -Name $($CurrentSessionHostVM.NetworkProfile.NetworkInterfaces.Id -replace ".+/")
+                $PrivateIpAddress = $NIC.IpConfigurations.PrivateIPAddress
+                [PSCustomObject]@{DisplayName = $CurrentSessionHostVM.Name; Name = $PrivateIpAddress }
             }
         }
         foreach ($CurrentMachine in $Machines) {
