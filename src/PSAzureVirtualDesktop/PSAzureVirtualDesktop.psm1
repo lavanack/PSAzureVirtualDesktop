@@ -8350,19 +8350,26 @@ While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
 
 Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
 
-
 `$CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName "$CurrentHostPoolResourceGroupName" -AccountName "$CurrentHostPoolStorageAccountName") | Where-Object -FilterScript { `$_.KeyName -eq "key1" }).Value
 `$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -StorageAccountKey `$CurrentHostPoolStorageAccountKey
-#`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -UseConnectedAccount
-`$Root = Get-AzStorageFile -Context `$Context -ShareName "$CurrentHostPoolShareName" -Path "/"
+`$FileShareName = "$CurrentHostPoolShareName"
+`$FilePath = "/"
 
-foreach (`$Principal in "$CurrentHostPoolDAGUsersGroupName", "$CurrentHostPoolRAGUsersGroupName") {
-    Add-AzFileAce -File `$Root -Type Allow -Principal `$Principal -AccessRights Read,Synchronize -InheritanceFlags ObjectInherit,ContainerInherit
+`$Groups = @(
+    "$CurrentHostPoolDAGUsersGroupName",
+    "$CurrentHostPoolRAGUsersGroupName"
+)
+`$Acl = "O:BAG:SYD:(A;;FA;;;SY)"
+`$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
+`$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key -ErrorAction Stop
+
+foreach (`$Principal in `$Groups) {
+    Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal `$Principal -AccessRights Modify -InheritanceFlags None -PropagationFlags None
 }
 "@
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
                         $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
-                        if (pwsh -?) {
+                        if (pwsh -v) {
                             pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
                             <#
                             $AzFileAce = pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
@@ -9227,33 +9234,35 @@ foreach (`$Principal in "$CurrentHostPoolDAGUsersGroupName", "$CurrentHostPoolRA
                 }
                 #region Assign Virtual Machine User Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
-                do {
-                    Start-MicrosoftEntraIDConnectSync
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                    Start-Sleep -Seconds 30
-                    $AzADGroup = $null
-                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
-                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
-                } while (-not($AzADGroup.Id))
+                foreach ($CurrentHostPoolAGUsersGroupName in $CurrentHostPoolDAGUsersGroupName, $CurrentHostPoolRAGUsersGroupName) {
+                    do {
+                        Start-MicrosoftEntraIDConnectSync
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                        $AzADGroup = $null
+                        #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
+                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolAGUsersGroupName'"
+                    } while (-not($AzADGroup.Id))
 
-                # Assign users to the application group
-                #region 'Virtual Machine User Login' RBAC Assignment
-                $RoleDefinition = Get-AzRoleDefinition -Name "Virtual Machine User Login"
-                $Scope = $CurrentHostPoolStorageAccount.Id
+                    # Assign users to the application group
+                    #region 'Virtual Machine User Login' RBAC Assignment
+                    $RoleDefinition = Get-AzRoleDefinition -Name "Virtual Machine User Login"
+                    $Scope = $CurrentHostPoolStorageAccount.Id
 
-                $Parameters = @{
-                    ObjectId           = $AzADGroup.Id
-                    ResourceGroupName  = $CurrentHostPoolResourceGroupName
-                    RoleDefinitionName = $RoleDefinition.Name
-                }
+                    $Parameters = @{
+                        ObjectId           = $AzADGroup.Id
+                        ResourceGroupName  = $CurrentHostPoolResourceGroupName
+                        RoleDefinitionName = $RoleDefinition.Name
+                    }
 
-                while (-not(Get-AzRoleAssignment @Parameters)) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
-                    $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                    Start-Sleep -Seconds 30
-                }
+                    while (-not(Get-AzRoleAssignment @Parameters)) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
+                        $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                        Start-Sleep -Seconds 30
+                    }
+                    } 
                 #endregion
                 #endregion 
             }
