@@ -10953,7 +10953,7 @@ function New-PsAvdHostPoolBackup {
 }
 
 #Use the AD OU for generating the RDG file. Had to be called after the AD Object creation (at the end of the processing)
-function New-PsAvdRdcMan {
+function New-PsAvdRdcManOld {
     [CmdletBinding(PositionalBinding = $false)]
     param
     (
@@ -11177,7 +11177,7 @@ function New-PsAvdRdcMan {
 }
 
 #Use the HostPool properties for generating the RDG file. Doesn't required to be called after the AD Object creation. 
-function New-PsAvdRdcManV2 {
+function New-PsAvdRdcMan {
     [CmdletBinding(PositionalBinding = $false)]
     param
     (
