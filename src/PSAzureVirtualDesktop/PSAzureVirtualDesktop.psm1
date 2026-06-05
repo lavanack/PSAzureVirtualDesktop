@@ -7971,6 +7971,7 @@ function New-PsAvdPooledHostPoolSetup {
                 if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     if (-not(Get-ADComputer -Filter "Name -eq '$CurrentHostPoolStorageAccountName'" -SearchBase $CurrentHostPoolOU.DistinguishedName)) {
                         if (-not(Get-Module -Name AzFilesHybrid -ListAvailable)) {
+                            <#
                             $AzFilesHybridZipName = 'AzFilesHybrid.zip'
                             $OutFile = Join-Path -Path $env:TEMP -ChildPath $AzFilesHybridZipName
                             Start-BitsTransfer https://github.com/Azure-Samples/azure-files-samples/releases/latest/download/AzFilesHybrid.zip -Destination $OutFile
@@ -7978,6 +7979,8 @@ function New-PsAvdPooledHostPoolSetup {
                             Push-Location -Path $env:TEMP\AzFilesHybrid
                             .\CopyToPSPath.ps1
                             Pop-Location
+                            #>
+                            Install-Module -Name AzFilesHybrid -Force
                         }
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
                         Import-Module AzFilesHybrid  -DisableNameChecking #-Force
@@ -11345,30 +11348,25 @@ function New-PsAvdRdcMan {
         #endregion
 
         #region Server Nodes Management
-        #$Machines = Get-ADComputer -SearchBase $Level -Properties DNSHostName -Filter 'DNSHostName -like "*"' -SearchScope OneLevel | Select-Object -Property @{Name = 'DisplayName'; Expression = { $_.Name } }, Name
-        $Machines = for ($index = 0; $index -lt $CurrentHostPool.VMNumberOfInstances; $index++) {
-            "{0}-{1}" -f $CurrentHostPool.NamePrefix, $index
-        }
-        if ($null -eq $Machines) {
-            $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
-            if ($null -ne $SessionHosts) {
-                $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
-                $Machines = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)' Session Host"
-                    $NIC = Get-AzNetworkInterface -Name $($CurrentSessionHostVM.NetworkProfile.NetworkInterfaces.Id -replace ".+/")
-                    $PrivateIpAddress = $NIC.IpConfigurations.PrivateIPAddress
-                    [PSCustomObject]@{DisplayName = $CurrentSessionHostVM.Name; Name = $PrivateIpAddress }
-                }
+        $SessionHosts = Get-AzWvdSessionHost -HostPoolName $CurrentHostPool.Name -ResourceGroupName $ResourceGroupName
+        if ($null -ne $SessionHosts) {
+            $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
+            $Machines = foreach ($CurrentSessionHostVM in $SessionHostVMs) {
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentSessionHostVM.Name)' Session Host"
+                $NIC = Get-AzNetworkInterface -Name $($CurrentSessionHostVM.NetworkProfile.NetworkInterfaces.Id -replace ".+/")
+                $PrivateIpAddress = $NIC.IpConfigurations.PrivateIPAddress
+                [PSCustomObject]@{DisplayName = $CurrentSessionHostVM.Name; Name = $PrivateIpAddress }
             }
         }
+
         foreach ($CurrentMachine in $Machines) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentMachine)' Machine"
             $serverElement = $groupElement.AppendChild($AVDRDGFileContent.CreateElement('server'))
             $propertiesElement = $serverElement.AppendChild($AVDRDGFileContent.CreateElement('properties'))
             $displayNameElement = $propertiesElement.AppendChild($AVDRDGFileContent.CreateElement('displayName'))
-            $displayNameTextNode = $displayNameElement.AppendChild($AVDRDGFileContent.CreateTextNode($CurrentMachine))
+            $displayNameTextNode = $displayNameElement.AppendChild($AVDRDGFileContent.CreateTextNode($CurrentMachine.DisplayName))
             $nameElement = $propertiesElement.AppendChild($AVDRDGFileContent.CreateElement('name'))
-            $NameTextNode = $nameElement.AppendChild($AVDRDGFileContent.CreateTextNode($CurrentMachine))
+            $NameTextNode = $nameElement.AppendChild($AVDRDGFileContent.CreateTextNode($CurrentMachine.Name))
         }
         #endregion
         #endregion 
