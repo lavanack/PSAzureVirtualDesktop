@@ -1,20 +1,35 @@
 ﻿#region PowerShell HostPool classes
+
+# Defines how the session host VMs are joined to a directory.
+# - ActiveDirectory: traditional on-premises AD domain join.
+# - MicrosoftEntraID: cloud-only join to Microsoft Entra ID (formerly Azure AD).
+# - Hybrid: joined to on-premises AD and synchronized/registered with Entra ID.
 enum JoinMode {
     ActiveDirectory
     MicrosoftEntraID
     Hybrid
 }
 
+# Describes where user identities live.
+# - Hybrid: identities exist on-premises and are synced to the cloud.
+# - CloudOnly: identities exist only in Microsoft Entra ID.
 enum IdentityModel {
     Hybrid
     CloudOnly
 }
 
+# The two Azure Virtual Desktop host pool types.
+# - Personal: each user is assigned a dedicated session host.
+# - Pooled: users share a set of session hosts (multi-session).
 enum HostPoolType {
     Personal
     Pooled
 }
 
+# Placement option for the ephemeral OS disk of a VM.
+# - ResourceDisk: place the OS disk on the temporary/resource disk.
+# - CacheDisk: place the OS disk on the VM cache disk.
+# - None: do not use an ephemeral OS disk (use a managed disk instead).
 enum DiffDiskPlacement {
     #Temp/Resource Disk
     ResourceDisk
@@ -23,6 +38,9 @@ enum DiffDiskPlacement {
     None
 }
 
+# Base class modelling an Azure Virtual Desktop host pool and all of the
+# associated configuration (networking, identity, security, image, etc.).
+# PooledHostPool and PersonalHostPool derive from this class.
 class HostPool {
     [ValidateNotNullOrEmpty()] [JoinMode] $JoinMode
     [ValidateNotNullOrEmpty()] [IdentityModel] $IdentityModel
@@ -63,23 +81,28 @@ class HostPool {
     [string] $ASRFailOverVNetId
 
     [DiffDiskPlacement] $DiffDiskPlacement
+    # Names of the Key Vault secrets used to store the local admin and AD-join credentials.
     static [string] $LocalAdminUserNameSecretName = "LocalAdminUserName"
     static [string] $LocalAdminPasswordSecretName = "LocalAdminPassword"
     static [string] $AdJoinUserNameSecretName = "AdJoinUserName"
     static [string] $AdJoinPasswordSecretName = "AdJoinPassword"
 
 
-    hidden static [hashtable] $AzLocationShortNameHT = $null     
-    static [hashtable] $AzEphemeralOsDiskSkuHT = $null
-    static [hashtable] $AzPairedRegionHT = $null
-    static [uint16] $VMProfileOsdiskSizeGb = 127
-    static [string] $VMProfileOsdiskType = "StandardSSD_LRS"
+    # Cached lookup tables shared by all instances (built once, lazily) to avoid repeated Azure calls.
+    hidden static [hashtable] $AzLocationShortNameHT = $null     # Maps Azure location -> short name (for naming conventions).
+    static [hashtable] $AzEphemeralOsDiskSkuHT = $null           # Maps location -> VM SKUs eligible for ephemeral OS disks.
+    static [hashtable] $AzPairedRegionHT = $null                 # Maps location -> its Azure paired region (for DR/ASR).
+    static [uint16] $VMProfileOsdiskSizeGb = 127                 # Default OS disk size in GB used for SKU evaluation.
+    static [string] $VMProfileOsdiskType = "StandardSSD_LRS"     # Default OS disk storage type.
     
+    # Returns the short name for an Azure location from the cached lookup table.
     static [string] GetAzLocationShortName([string] $Location) {
         #[HostPool]::BuildAzureLocationShortNameHashtable()    
         return [HostPool]::AzLocationShortNameHT[$Location].shortName
     }
 
+    # Builds (once) the location -> short-name lookup table by combining Azure locations
+    # with the Azure Naming Tool reference data published on GitHub.
     hidden static BuildAzureLocationShortNameHashtable() {
         if ($null -eq [HostPool]::AzLocationShortNameHT) {
             $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
@@ -88,12 +111,15 @@ class HostPool {
         }
     }
     
+    # Builds (once) the location -> paired-region lookup table used for disaster recovery scenarios.
     hidden static BuildAzurePairedRegionHashtable() {
         if ($null -eq [HostPool]::AzPairedRegionHT) {
             [HostPool]::AzPairedRegionHT = (Get-AzLocation -OutVariable locations) | Select-Object -Property Location, PhysicalLocation, @{Name = 'PairedRegion'; Expression = { $_.PairedRegion.Name } }, @{Name = 'PairedRegionPhysicalLocation'; Expression = { ($locations | Where-Object -FilterScript { $_.location -eq $_.PairedRegion.Name }).PhysicalLocation } } | Where-Object -FilterScript { $_.PairedRegion } | Group-Object -Property Location -AsHashTable -AsString
         }
     }
     
+    # Builds (per location) the list of VM SKUs that support ephemeral OS disks and whether the
+    # resource disk and/or cache disk are large enough to hold an OS image of the given size.
     hidden static BuildAzureEphemeralOsDiskSkuHashtable([String] $Location, [uint16]$OSImageSizeInGB) {
         if (($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) -or (-not([HostPool]::AzEphemeralOsDiskSkuHT.ContainsKey($Location)))) {
             #Based on https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-faq
@@ -125,11 +151,14 @@ class HostPool {
         }
     }
 
+    # Returns the ephemeral-OS-disk capable SKUs for the given location (building the table if needed).
     static [array] GetAzureEphemeralOsDiskSku([String] $Location) {
         [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($Location, [HostPool]::VMProfileOsdiskSizeGb)
         return $([HostPool]::AzEphemeralOsDiskSkuHT[$Location])
     }
 
+    # Shared initialization logic applying sensible defaults (VM size, instance count, identity,
+    # networking, disabled optional features) used by the constructors.
     hidden Init([Object] $KeyVault, [string] $SubnetId, [string[]] $PrivateEndpointSubnetId) {
         [HostPool]::BuildAzureLocationShortNameHashtable()
         if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
@@ -159,18 +188,23 @@ class HostPool {
         $this.PrivateEndpointSubnetId = $PrivateEndpointSubnetId
     }
         
+    # Primary constructor: takes the credential Key Vault, the session host subnet and optional
+    # private endpoint subnet(s), then delegates to Init for default configuration.
     HostPool([Object] $KeyVault, [string] $SubnetId, [string[]] $PrivateEndpointSubnetId) {
         $this.Init($KeyVault, $SubnetId, $PrivateEndpointSubnetId)
     }
 
+    # Resolves and returns the virtual network object that owns the configured subnet.
     [object] GetVirtualNetwork() {
         return Get-AzResource -ResourceId $($this.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
     }
     
+    # Simple accessors returning the derived/cached resource names for this host pool.
     [string] GetAzAvdWorkSpaceName() {
         return $this.WorkSpaceName
     }
 
+    # Returns the scaling plan name, or an empty string when scaling is disabled.
     [string] GetAzAvdScalingPlanName() {
         if ($this.ScalingPlan) {
             return $this.ScalingPlanName
@@ -204,10 +238,15 @@ class HostPool {
         return $this.RecoveryServiceVaultName
     }
 
+    # Projects the object for JSON export: adds computed name properties and removes
+    # non-serializable / circular references (the live KeyVault object and paired host pool).
     [object] GetPropertyForJSON() {
         return $this | Select-Object -Property *, @{Name = "ResourceGroupName"; Expression = { $_.GetResourceGroupName() } }, @{Name = "RecoveryServiceVaultName"; Expression = { $_.GetRecoveryServiceVaultName() } }, @{Name = "RecoveryLocationResourceGroupName"; Expression = { $_.GetRecoveryLocationResourceGroupName() } }, @{Name = "AppAttachStorageAccountName"; Expression = { $_.GetAppAttachStorageAccountName() } }, @{Name = "CredentialKeyVault"; Expression = { $_.KeyVault.VaultName } } -ExcludeProperty "KeyVault", "FSLogixCloudCachePairedPooledHostPool"
     }
 
+    # The following are fluent (return $this) toggle/setter methods used to configure the host
+    # pool in a chainable fashion. Enable* methods that depend on the join mode only take effect
+    # when the host pool is Entra ID or Hybrid joined.
     [HostPool] SetVMNumberOfInstances([uint16] $VMNumberOfInstances) {
         $this.VMNumberOfInstances = $VMNumberOfInstances
         return $this
@@ -299,6 +338,8 @@ class HostPool {
         return $this
     }
 
+    # Sets a custom post-configuration script URL, but only after validating it is a reachable
+    # HTTP(S) URL; otherwise it warns and clears the value.
     [HostPool]SetCustomConfigurationScriptUrl([string] $CustomConfigurationScriptUrl) {
         $this.CustomConfigurationScriptUrl = $CustomConfigurationScriptUrl
         if ($CustomConfigurationScriptUrl -match "^https?://.+") {
@@ -324,6 +365,8 @@ class HostPool {
         return $this
     }
 
+    # Enables an ephemeral OS disk at the requested placement, but only if the current VM size
+    # supports it in this location/placement; otherwise resets placement to None and returns $null.
     [HostPool]EnableEphemeralOSDisk([DiffDiskPlacement] $DiffDiskPlacement) {
         [HostPool]::BuildAzureEphemeralOsDiskSkuHashtable($this.Location, [HostPool]::VMProfileOsdiskSizeGb)
         $AzEphemeralOsDiskSkuForThisLocation = ([HostPool]::AzEphemeralOsDiskSkuHT)[$this.Location]
@@ -353,6 +396,7 @@ class HostPool {
         #Overwritten in the child classes
     }
 
+    # Convenience predicates for the configured join mode.
     [bool] IsMicrosoftEntraIdJoined() {
         return ([JoinMode]::MicrosoftEntraID -eq $this.JoinMode)
     }
@@ -365,6 +409,7 @@ class HostPool {
         return ([JoinMode]::Hybrid -eq $this.JoinMode)
     }
 
+    # Sets the identity model; choosing CloudOnly forces the join mode to Microsoft Entra ID.
     [HostPool] SetIdentityModel([IdentityModel] $IdentityModel) {
         $this.IdentityModel = $IdentityModel
         if ([IdentityModel]::CloudOnly -eq $IdentityModel) {
@@ -373,6 +418,7 @@ class HostPool {
         return $this
     }
 
+    # Sets the join mode; Active Directory join disables Intune/SSO and forces a Hybrid identity model.
     [HostPool] SetJoinMode([JoinMode] $JoinMode) {
         $this.JoinMode = $JoinMode
         if ([JoinMode]::ActiveDirectory -eq $JoinMode) {
@@ -384,6 +430,7 @@ class HostPool {
         return $this
     }
 
+    # Sets the VM size only if available in the current region; changing size resets ephemeral disk placement.
     [HostPool] SetVMSize([string] $VMSize) {
         if ($VMSize -in (Get-AzComputeResourceSku -Location $this.Location).Name) {
             $this.VMSize = $VMSize
@@ -397,6 +444,8 @@ class HostPool {
         return $this
     }
 
+    # Sets the Azure region (validating the location and VM size availability), then recomputes the
+    # paired region and the derived recovery resource group / vault names.
     [HostPool] SetLocation([string] $Location) {
         if ([HostPool]::AzLocationShortNameHT.ContainsKey($Location)) {
             if ($this.VMSize -in (Get-AzComputeResourceSku -Location $Location).Name) {
@@ -427,6 +476,7 @@ class HostPool {
         return $this
     }
 
+    # Sets the marketplace image reference (publisher/offer/sku) and refreshes derived names.
     [HostPool] SetImage([string] $ImagePublisherName, [string] $ImageOffer, [string] $ImageSku ) {
         $this.ImagePublisherName = $ImagePublisherName
         $this.ImageOffer = $ImageOffer
@@ -442,6 +492,8 @@ class HostPool {
     }
 
 
+    # Enables Azure Site Recovery only when the supplied failover VNet lives in the paired region;
+    # otherwise it errors and leaves ASR disabled.
     [HostPool]EnableAzureSiteRecovery([string] $vNetId) {
 
         $RecoveryNetwork = Get-AzVirtualNetwork | Where-Object -FilterScript { $_.Id -eq $vNetId }
@@ -467,6 +519,7 @@ class HostPool {
         return $this
     }
 
+    # Extracts the trailing numeric index from the host pool name (e.g. "...-03" -> 3).
     [int] GetIndex() {
         $this.RefreshNames()
         return $([regex]::Match($this.Name, "-(?<Index>\d+)$").Groups["Index"].Value -as [int])
@@ -474,8 +527,11 @@ class HostPool {
 
 }
 
+# Pooled (multi-session) host pool. Adds profile management options (FSLogix / OneDrive Known
+# Folders), application delivery (MSIX App Attach / Azure App Attach), session limits and an
+# optional FSLogix Cloud Cache pairing with a host pool in the paired region.
 class PooledHostPool : HostPool {
-    static [hashtable] $IndexHT = $null
+    static [hashtable] $IndexHT = $null   # Per-location auto-incrementing index used to build unique names.
     [ValidateRange(0, 10)] [uint16] $MaxSessionLimit
     [ValidateNotNullOrEmpty()] [boolean] $FSLogix
     [ValidateNotNullOrEmpty()] [boolean] $OneDriveForKnownFolders
@@ -493,6 +549,8 @@ class PooledHostPool : HostPool {
 
     static [hashtable] $AppAttachStorageAccountNameHT = @{}
 
+    # Pooled-specific initialization: assigns the next per-location index, sets the pooled defaults
+    # (Office 365 multi-session image, breadth-first load balancing, FSLogix + App Attach enabled).
     hidden Init() {
         if ($null -eq [PooledHostPool]::IndexHT) {
             [PooledHostPool]::IndexHT = @{}
@@ -522,10 +580,12 @@ class PooledHostPool : HostPool {
         $this.Init()
     }
 
+    # Resets the shared per-location index counter (e.g. between deployments).
     static ResetIndex() {
         [PooledHostPool]::IndexHT = @{}
     }
 
+    # Accessors that only return a name when the related feature is enabled, otherwise empty string.
     [string] GetFSLogixStorageAccountName() {
         if ($this.FSLogix) {
             return $this.FSLogixStorageAccountName
@@ -614,6 +674,8 @@ class PooledHostPool : HostPool {
         return $this
     }
 
+    # FSLogix and OneDrive Known Folders are mutually exclusive profile solutions; enabling one
+    # disables the other. Enabling Cloud Cache also forces FSLogix on.
     [PooledHostPool]DisableFSLogix() {
         $this.FSLogix = $false
         $this.DisableFSLogixCloudCache()
@@ -650,6 +712,8 @@ class PooledHostPool : HostPool {
         return $this
     }
 
+    # Pairs this host pool with another for FSLogix Cloud Cache, wiring both directions so each
+    # references the other's storage account; enables Cloud Cache (and FSLogix) on both.
     [PooledHostPool]EnableFSLogixCloudCache([PooledHostPool] $FSLogixCloudCachePairedPooledHostPool) {
         $this.EnableFSLogixCloudCache()
         $this.FSLogixCloudCachePairedPooledHostPool = $FSLogixCloudCachePairedPooledHostPool
@@ -668,6 +732,7 @@ class PooledHostPool : HostPool {
         return $this
     }
 
+    # App Attach and MSIX App Attach are mutually exclusive; enabling one disables the other.
     [PooledHostPool]DisableAppAttach() {
         $this.AppAttach = $false
         $this.RefreshNames()        
@@ -709,6 +774,7 @@ class PooledHostPool : HostPool {
         return $this
     }
 
+    # Overrides the base join mode setter: MSIX App Attach is not supported with Entra ID join.
     [PooledHostPool] SetJoinMode([JoinMode] $JoinMode) {
         $this.JoinMode = $JoinMode
         if ($this.IsMicrosoftEntraIdJoined()) {
@@ -719,6 +785,9 @@ class PooledHostPool : HostPool {
         return $this
     }
 
+    # Recomputes all derived resource names from the join mode, image source, location and index.
+    # Name fragments encode the configuration (e.g. -ei/-ad/-hy for join mode, -cg/-mp for image
+    # source) and storage account names are trimmed to Azure's 24-character limit.
     hidden RefreshNames() {
         $KeyVaultNameMaxLength = 24
         $StorageAccountNameMaxLength = 24
@@ -823,6 +892,7 @@ class PooledHostPool : HostPool {
         }
     }
 
+    # Sets the preferred application group type (e.g. "Desktop" or "RailApplications").
     [HostPool] SetPreferredAppGroupType ([String] $PreferredAppGroupType) {
         $this.PreferredAppGroupType = $PreferredAppGroupType 
         return $this
@@ -835,11 +905,15 @@ class PooledHostPool : HostPool {
     #>
 }
 
+# Personal (one-to-one) host pool. Each user keeps a dedicated, persistent session host.
+# Supports VM hibernation (mutually exclusive with Spot instances).
 class PersonalHostPool : HostPool {
     static [hashtable] $IndexHT = $null
     #Hibernation is not compatible with Spot Instance and is only allowed for Personal Dektop
     [ValidateNotNullOrEmpty()] [boolean] $HibernationEnabled = $false
 
+    # Personal-specific initialization: next per-location index, Cloud PC enterprise image and
+    # persistent load balancing.
     hidden Init() {
         if ($null -eq [PersonalHostPool]::IndexHT[$this.Location]) {
             [PersonalHostPool]::IndexHT[$this.Location] = 0
@@ -881,6 +955,7 @@ class PersonalHostPool : HostPool {
     }
     
 
+    # Hibernation and Spot are mutually exclusive: enabling one disables the other.
     [PersonalHostPool]DisableHibernation() {
         $this.HibernationEnabled = $false
         return $this
@@ -900,6 +975,8 @@ class PersonalHostPool : HostPool {
         return $this
     }
 
+    # Recomputes the derived resource names (personal pools use the "hp-pd" prefix and have no
+    # FSLogix/App Attach storage accounts).
     hidden RefreshNames() {
         $KeyVaultNameMaxLength = 24
         $StorageAccountNameMaxLength = 24
@@ -1002,6 +1079,19 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
 #region Function definitions
 
 #region Prerequisites
+<#
+.SYNOPSIS
+    Ensures an authenticated connection to both Azure and Microsoft Graph.
+.DESCRIPTION
+    Verifies an existing Azure session by requesting an access token; if none is present it prompts
+    an interactive Connect-AzAccount. It then verifies a Microsoft Graph session by issuing a test
+    call and, if that fails, connects to Microsoft Graph requesting all of the scopes required by
+    this module (application, device, Intune configuration, directory and group management, etc.).
+.EXAMPLE
+    Connect-PsAvdAzure
+.NOTES
+    Used as a prerequisite before any Azure/Graph operation performed by the module.
+#>
 function Connect-PsAvdAzure {
     [CmdletBinding(PositionalBinding = $false)]
     param()
@@ -1033,6 +1123,18 @@ function Connect-PsAvdAzure {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Registers the Azure resource providers and preview features required by Azure Virtual Desktop.
+.DESCRIPTION
+    Splits the required providers into standard providers and preview features (those containing a
+    '/'). Standard providers are registered in parallel via background jobs and the result checked;
+    preview features are registered one at a time, polling until each reaches the 'Registered' state.
+.EXAMPLE
+    Register-PsAvdRequiredResourceProvider
+.NOTES
+    Provider registration is idempotent and only needs to succeed once per subscription.
+#>
 function Register-PsAvdRequiredResourceProvider {
     [CmdletBinding(PositionalBinding = $false)]
     param()
@@ -1096,6 +1198,18 @@ function Register-PsAvdRequiredResourceProvider {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Blocks automatic Microsoft Entra workplace (hybrid) join on the Domain Controllers OU.
+.DESCRIPTION
+    Creates (if needed) and links a dedicated GPO to the Domain Controllers OU, then sets the
+    registry values that disable autoWorkplaceJoin and enable BlockAADWorkplaceJoin. This prevents
+    domain controllers from registering as Entra devices, a recommended practice for hybrid AVD SSO.
+.EXAMPLE
+    Set-BlockAADWorkplaceJoinOnDC
+.NOTES
+    Must be run on / against a machine with the Group Policy and AD modules available.
+#>
 function Set-BlockAADWorkplaceJoinOnDC {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -1130,6 +1244,18 @@ function Set-BlockAADWorkplaceJoinOnDC {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Installs the FSLogix administrative template (ADMX/ADML) into the local PolicyDefinitions store.
+.DESCRIPTION
+    Downloads the latest FSLogix package, extracts the ADMX/ADML files and copies them into the
+    central/local policy definitions folders so FSLogix GPO settings become available. Skipped when
+    the files already exist unless -Force is specified.
+.PARAMETER Force
+    Re-downloads and reinstalls the templates even if they are already present.
+.EXAMPLE
+    Install-PsAvdFSLogixGpoSettings -Force
+#>
 function Install-PsAvdFSLogixGpoSettings {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -1163,6 +1289,18 @@ function Install-PsAvdFSLogixGpoSettings {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Installs the Azure Virtual Desktop administrative template (ADMX/ADML) locally.
+.DESCRIPTION
+    Downloads the AVD Group Policy template CAB, extracts the embedded ZIP and copies the
+    terminalserver-avd ADMX/ADML files into the policy definitions folders. Skipped when the files
+    already exist unless -Force is specified.
+.PARAMETER Force
+    Re-downloads and reinstalls the templates even if they are already present.
+.EXAMPLE
+    Install-PsAvdAvdGpoSettings
+#>
 function Install-PsAvdAvdGpoSettings {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -1199,6 +1337,19 @@ function Install-PsAvdAvdGpoSettings {
 #From https://www.mdmandgpanswers.com/blogs/view-blog/redirect-to-onedrive-for-business-with-intune-and-group-policy
 #From https://www.it-connect.fr/comment-configurer-le-sso-onedrive-par-gpo/#A_Autoriser_uniquement_la_synchronisation_sur_certains_tenants
 #From https://gpsearch.azurewebsites.net/#13753
+<#
+.SYNOPSIS
+    Installs the OneDrive administrative template (ADMX/ADML) locally.
+.DESCRIPTION
+    Downloads the latest OneDrive setup, installs it (only if not already installed) to locate the
+    bundled ADMX/ADML files, copies them into the policy definitions folders, then uninstalls
+    OneDrive again if this function was the one that installed it. Skipped when the templates already
+    exist unless -Force is specified.
+.PARAMETER Force
+    Re-downloads and reinstalls the templates even if they are already present.
+.EXAMPLE
+    Install-PsAvdOneDriveGpoSettings
+#>
 function Install-PsAvdOneDriveGpoSettings {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -1250,6 +1401,22 @@ function Install-PsAvdOneDriveGpoSettings {
 }
 
 #region Microsoft Entra ID Conditional Access Policies
+<#
+.SYNOPSIS
+    Creates (idempotently) the Microsoft Entra ID security group used to exclude users from MFA.
+.DESCRIPTION
+    Uses a named mutex so concurrent runs (e.g. parallel host pool deployments) don't create the
+    group twice. Inside the lock it looks up the group by display name and creates a mail-disabled,
+    security-enabled group if it does not already exist. Optionally runs the associated Pester tests.
+.PARAMETER NoMFAEntraIDGroupName
+    Display name of the exclusion group. Defaults to 'No-MFA Users'.
+.PARAMETER Pester
+    When set, runs the MFA.Azure Pester validation tests after the group is ensured.
+.OUTPUTS
+    The Microsoft Entra ID group object.
+.EXAMPLE
+    New-PsAvdNoMFAUserEntraIDGroup
+#>
 function New-PsAvdNoMFAUserEntraIDGroup {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -1307,6 +1474,28 @@ function New-PsAvdNoMFAUserEntraIDGroup {
     $NoMFAEntraIDGroup
 }
 
+<#
+.SYNOPSIS
+    Creates or updates the Conditional Access policy requiring MFA for all AVD users.
+.DESCRIPTION
+    Builds a Conditional Access policy targeting the AVD/Remote Desktop service principals (and
+    excluding the VM sign-in apps), requiring MFA for the included users while excluding the given
+    group(s), the Directory Synchronization Accounts role and trusted locations. A 1-hour sign-in
+    frequency is enforced. Creation/update is serialized with a named mutex and the policy is created
+    if missing or updated in place otherwise. Optionally runs the associated Pester tests.
+.PARAMETER ExcludeGroupName
+    Display name(s) of the group(s) to exclude from the MFA requirement (default 'No-MFA Users').
+.PARAMETER DisplayName
+    Display name of the Conditional Access policy.
+.PARAMETER IncludeUsers
+    Users the policy applies to (default 'All').
+.PARAMETER Pester
+    When set, runs the Conditional Access Pester validation tests.
+.OUTPUTS
+    The Conditional Access policy object.
+.EXAMPLE
+    New-PsAvdMFAForAllUsersConditionalAccessPolicy
+#>
 function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -1440,6 +1629,19 @@ function New-PsAvdMFAForAllUsersConditionalAccessPolicy {
 #region Graph API
 
 #From https://github.com/andrew-s-taylor/public/blob/main/Powershell%20Scripts/Intune/function-getallpagination.ps1
+<#
+.SYNOPSIS
+    Invokes a Microsoft Graph GET request and transparently follows OData paging.
+.DESCRIPTION
+    Repeatedly calls the supplied Graph URI, emitting either the 'value' collection (for list
+    endpoints) or the raw object, and follows the '@odata.nextLink' until all pages are returned.
+.PARAMETER Uri
+    The absolute Microsoft Graph URI to query (must start with http/https).
+.OUTPUTS
+    The aggregated objects across all result pages.
+.EXAMPLE
+    Get-MgGraphObject -Uri 'https://graph.microsoft.com/beta/deviceManagement/managedDevices'
+#>
 function Get-MgGraphObject {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -1466,6 +1668,21 @@ function Get-MgGraphObject {
     return $MgGraphObject
 }
 
+<#
+.SYNOPSIS
+    Adds Entra ID group(s) to the Windows Intune automatic enrollment (MDM) policy scope.
+.DESCRIPTION
+    Reads the included groups of the built-in mobility (MDM) management policy and, for each group
+    not already present, adds it via a Graph $ref reference. The add is retried (with 30s back-off)
+    until it succeeds or the timeout is reached, because the policy can be briefly unavailable after
+    tenant changes.
+.PARAMETER GroupId
+    One or more Entra ID group object IDs to include in the Windows Intune enrollment scope.
+.PARAMETER TimeoutInSeconds
+    Maximum time to keep retrying each group addition (default 300).
+.EXAMPLE
+    Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy -GroupId $group.Id
+#>
 function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -1933,6 +2150,26 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaGraphAPI {
 
 #region Settings Catalog
 #From https://www.youtube.com/watch?v=LQRXg95qTg0
+<#
+.SYNOPSIS
+    Builds the JSON settingInstance object for a single Intune Settings Catalog configuration setting.
+.DESCRIPTION
+    Translates a Settings Catalog setting definition (and an optional value) into the
+    deviceManagementConfigurationSetting structure expected by Microsoft Graph. When enabling, it
+    resolves the 'Enabled' option and recursively builds any dependent child settings, handling the
+    different definition types (choice, simple, simple-collection and group-collection); when
+    disabling it emits the 'Disabled' option with no children.
+.PARAMETER Setting
+    The parent setting definition to configure.
+.PARAMETER Settings
+    The full set of available setting definitions, used to resolve dependent child settings.
+.PARAMETER SettingValue
+    The value to apply. Can be a scalar, an array or a hashtable for multi-valued settings.
+.PARAMETER Enable / Disable
+    Selects whether the setting is enabled (with values) or disabled.
+.OUTPUTS
+    An ordered hashtable representing the setting, ready to be embedded in a configuration policy.
+#>
 function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
     [CmdletBinding(DefaultParameterSetName = 'Enable', PositionalBinding = $false)]
     param(
@@ -2088,6 +2325,21 @@ function New-PsAvdIntuneSettingsCatalogConfigurationPolicySettingsViaGraphAPI {
 }
 
 
+<#
+.SYNOPSIS
+    Annotates Settings Catalog categories with their full hierarchical path.
+.DESCRIPTION
+    Recursively walks the category tree (starting from the top category whose parent id is all
+    zeros/dashes when none is supplied) and adds a 'FullPath' note property to each category in the
+    form '\Parent\Child\...'. This makes it possible to look up a setting category by its readable
+    path instead of by id.
+.PARAMETER Categories
+    The flat collection of category objects returned by Graph.
+.PARAMETER ParentCategory
+    Internal recursion parameter; omit on the initial call.
+.OUTPUTS
+    The categories, each augmented with a FullPath property.
+#>
 function Add-PsAvdCategoryFullPath {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -2118,6 +2370,18 @@ function Add-PsAvdCategoryFullPath {
 }
 
 #From https://www.mdmandgpanswers.com/blogs/view-blog/redirect-to-onedrive-for-business-with-intune-and-group-policy
+<#
+.SYNOPSIS
+    Creates the OneDrive Intune Settings Catalog configuration policy for a host pool and assigns it.
+.DESCRIPTION
+    Resolves the host pool's '<name> - Devices' Entra ID group, builds the OneDrive Known Folder
+    Move / silent sign-in settings from the Settings Catalog and creates (or replaces) the
+    configuration policy, then assigns it to the devices group.
+.PARAMETER HostPoolName
+    Name of the host pool; used to locate the devices group and to name the policy.
+.EXAMPLE
+    New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI -HostPoolName $hp.Name
+#>
 function New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -2249,6 +2513,23 @@ function New-PsAvdOneDriveIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Creates the FSLogix Intune Settings Catalog configuration policy for a host pool and assigns it.
+.DESCRIPTION
+    Builds the FSLogix profile container settings (VHD location on the supplied storage account,
+    naming, logging and, when a recovery location storage account is provided, Cloud Cache settings)
+    from the Settings Catalog, creates (or replaces) the configuration policy and assigns it to the
+    host pool devices group.
+.PARAMETER HostPoolStorageAccountName
+    Storage account holding the FSLogix profile share (aliased StorageAccountName).
+.PARAMETER HostPoolName
+    Name of the host pool; used to locate the devices group and to name the policy.
+.PARAMETER StorageEndpointSuffix
+    Azure storage endpoint suffix (default 'core.windows.net').
+.PARAMETER HostPoolRecoveryLocationStorageAccountName
+    Optional paired-region storage account enabling FSLogix Cloud Cache.
+#>
 function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -2575,6 +2856,21 @@ function New-PsAvdFSLogixIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Creates the Azure Virtual Desktop Intune Settings Catalog configuration policy and assigns it.
+.DESCRIPTION
+    Builds the AVD-recommended device settings (security options, RDP redirection, session time
+    limits, Defender exclusions for the FSLogix storage account, and optionally watermarking) from
+    the Settings Catalog, creates (or replaces) the configuration policy and assigns it to the host
+    pool devices group.
+.PARAMETER HostPoolStorageAccountName
+    Storage account used to derive Defender antivirus exclusion paths (aliased StorageAccountName).
+.PARAMETER HostPoolName
+    Name of the host pool; used to locate the devices group and to name the policy.
+.PARAMETER Watermarking
+    When set, enables the AVD watermarking policy settings.
+#>
 function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -2845,6 +3141,18 @@ function New-PsAvdAvdIntuneSettingsCatalogConfigurationPolicyViaGraphAPI {
 #endregion
 
 #region PowerShell Cmdlets
+<#
+.SYNOPSIS
+    Forces an Intune sync on the managed devices belonging to the given host pool(s).
+.DESCRIPTION
+    Builds a regular expression from each host pool's NamePrefix, finds the matching Intune managed
+    devices and issues a sync request to each. Uses the Microsoft.Graph Beta cmdlets (as opposed to
+    the raw Graph API variant).
+.PARAMETER HostPool
+    One or more host pool objects whose session host devices should be synced.
+.EXAMPLE
+    Sync-PsAvdIntuneSessionHostViaCmdlet -HostPool $hostPools
+#>
 function Sync-PsAvdIntuneSessionHostViaCmdlet {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -2872,6 +3180,19 @@ function Sync-PsAvdIntuneSessionHostViaCmdlet {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Removes all Intune objects and enrolled devices associated with the given host pool(s).
+.DESCRIPTION
+    Matches items by the host pool name (in brackets) or device name prefix and removes, in turn:
+    group policy configurations (administrative templates), configuration policies (settings
+    catalog), device management scripts and the enrolled managed devices. Used during host pool
+    teardown to clean up Intune.
+.PARAMETER HostPool
+    One or more host pool objects whose Intune artefacts should be removed.
+.EXAMPLE
+    Remove-PsAvdIntuneItemViaCmdlet -HostPool $hostPools
+#>
 function Remove-PsAvdIntuneItemViaCmdlet {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -2928,6 +3249,24 @@ function Remove-PsAvdIntuneItemViaCmdlet {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Creates (or replaces) an Intune PowerShell platform script and assigns it to a host pool.
+.DESCRIPTION
+    Accepts the script as a URL, a file path or an inline script block, resolves the host pool's
+    '<name> - Devices' Entra ID group, deletes any existing script with the same '[HostPool] file'
+    display name, uploads the new script and assigns it to the devices group.
+.PARAMETER HostPoolName
+    Name of the host pool; used to resolve the devices group and to name the script.
+.PARAMETER ScriptURI
+    URL to download the script from (ScriptURI parameter set).
+.PARAMETER ScriptPath
+    Local path to the script file (ScriptPath parameter set).
+.PARAMETER ScriptBlock
+    Inline script block to upload (ScriptBlock parameter set).
+.PARAMETER RunAsAccount
+    Execution context for the script: 'system' (default) or 'user'.
+#>
 function New-PsAvdIntunePowerShellScriptViaCmdlet {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3011,6 +3350,18 @@ function New-PsAvdIntunePowerShellScriptViaCmdlet {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Retrieves the presentation metadata for the supplied group policy definitions.
+.DESCRIPTION
+    For each definition, fetches its group policy definition (presentation) and stores it in a
+    hashtable keyed by '<displayName> (version: <v>)' (and the supportedOn value when present). The
+    presentation describes the input controls a setting exposes and is needed to set values.
+.PARAMETER GroupPolicyDefinition
+    The group policy definition object(s) to resolve presentations for.
+.OUTPUTS
+    A hashtable mapping a readable key to each definition's presentation.
+#>
 function Get-PsAvdGroupPolicyDefinitionPresentationViaCmdlet {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3101,6 +3452,23 @@ function Import-PsAvdFSLogixADMXViaCmdlet {
     #endregion
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
+#>
+<#
+.SYNOPSIS
+    Enables or disables a single administrative-template group policy setting in a configuration.
+.DESCRIPTION
+    Resolves the definition's presentation values, converts the supplied value (int, string or
+    per-label hashtable for multi-valued settings) into the correct Graph presentation value types,
+    and updates the group policy configuration's definition values accordingly. Disabling clears the
+    presentation values.
+.PARAMETER GroupPolicyDefinition
+    The group policy definition to configure.
+.PARAMETER GroupPolicyConfiguration
+    The target group policy configuration to update.
+.PARAMETER Value
+    The value(s) to apply when enabling. Can be an int, a string or a hashtable for multi-valued settings.
+.PARAMETER Enable / Disable
+    Whether the setting should be enabled (with values) or disabled.
 #>
 function Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet {
     [CmdletBinding(DefaultParameterSetName = 'Enable', PositionalBinding = $false)]
@@ -3193,6 +3561,25 @@ function Set-PsAvdGroupPolicyDefinitionSettingViaCmdlet {
 
 #region Miscellanous
 #This function was only created because sometimes Set-GPRegistryValue returns "Access Denied" so I implemented a retry.
+<#
+.SYNOPSIS
+    Sets a Group Policy registry value with retry logic.
+.DESCRIPTION
+    Wraps Set-GPRegistryValue in a retry loop (10s back-off) until it succeeds or the timeout is
+    reached, because GPO registry writes can transiently fail right after a GPO is created.
+.PARAMETER Name
+    Display name of the target GPO.
+.PARAMETER Key
+    Registry key path to set.
+.PARAMETER ValueName
+    Name of the registry value.
+.PARAMETER Type
+    Registry value kind (Dword, String, etc.).
+.PARAMETER Value
+    The value to write.
+.PARAMETER TimeoutInSeconds
+    Maximum time to keep retrying (default 30).
+#>
 function Set-PsAvdGPRegistryValue {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -3240,6 +3627,17 @@ function Set-PsAvdGPRegistryValue {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Sets the UsageLocation on Microsoft Entra users (required before assigning licenses).
+.DESCRIPTION
+    By default only updates users that have no UsageLocation; with -Force it updates all users.
+    UsageLocation is validated against the known two-letter ISO region codes.
+.PARAMETER UsageLocation
+    Two-letter ISO country/region code to set (default 'US').
+.PARAMETER Force
+    When set, updates every user rather than only those missing a UsageLocation.
+#>
 function Update-PsAvdMgBetaUserUsageLocation {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -3265,6 +3663,20 @@ function Update-PsAvdMgBetaUserUsageLocation {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Assigns or removes a group-based license (e.g. an Intune-bearing SKU) on an Entra ID group.
+.DESCRIPTION
+    Validates that the chosen SKU exists and (when adding) that free units remain, then calls the
+    Graph assignLicense endpoint on the target group. A raw Graph request is used instead of
+    Set-MgBetaGroupLicense to work around a known SDK bug.
+.PARAMETER SkuPartNumber
+    The license SKU part number to assign (default 'Microsoft_365_E5_(no_Teams)').
+.PARAMETER GroupDisplayName
+    Display name of the group to license.
+.PARAMETER Remove
+    When set, removes the license instead of adding it.
+#>
 function Set-PsAvdMgBetaUsersGroupLicense {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -3442,6 +3854,15 @@ function Get-CallerPreference {
     }
 }
 
+<#
+.SYNOPSIS
+    Returns $true when the current machine is a domain controller.
+.DESCRIPTION
+    Determines domain controller status by checking the Win32_OperatingSystem ProductType for the
+    value 2 (domain controller).
+.OUTPUTS
+    Boolean.
+#>
 function Test-DomainController {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -3454,6 +3875,19 @@ function Test-DomainController {
     return (-not([string]::IsNullOrEmpty((Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'"))))
 }
 
+<#
+.SYNOPSIS
+    Returns the most recent Heartbeat, Performance and Event records per computer from each host
+    pool's Log Analytics workspace.
+.DESCRIPTION
+    For every host pool, resolves its Log Analytics workspace and runs three KQL queries that take
+    the latest record per computer for Heartbeat, Perf and Event tables, enriching the results with
+    local time, workspace name and the originating query.
+.PARAMETER HostPool
+    The host pool object(s) to query.
+.OUTPUTS
+    The query result rows, annotated with workspace/query metadata.
+#>
 function Get-PsAvdLatestOperationalInsightsData {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -3487,6 +3921,18 @@ function Get-PsAvdLatestOperationalInsightsData {
 }
 
 #From https://stackoverflow.com/questions/63529599/how-to-grant-admin-consent-to-an-azure-aad-app-in-powershell
+<#
+.SYNOPSIS
+    Grants tenant-wide admin consent to an Entra ID application.
+.DESCRIPTION
+    Acquires a token for the Azure AD IAM portal API using the supplied Azure context and POSTs to
+    the RegisteredApplications Consent endpoint with onBehalfOfAll=true to grant admin consent for
+    all users.
+.PARAMETER applicationId
+    The application (client) ID to grant consent for.
+.PARAMETER Context
+    The Azure context used to authenticate the consent request.
+#>
 function Set-AdminConsent {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -3513,6 +3959,21 @@ function Set-AdminConsent {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Verifies the storage account names required by the given host pools are available.
+.DESCRIPTION
+    For each host pool, checks the availability of the FSLogix and/or App Attach/MSIX storage
+    account names. App Attach accounts that are already taken are treated as reusable (warning),
+    while unavailable FSLogix/MSIX names are treated as errors. Optionally runs the host pool class
+    Pester tests first.
+.PARAMETER HostPool
+    The host pool object(s) to validate.
+.PARAMETER Pester
+    When set, runs the HostPool class Pester tests.
+.OUTPUTS
+    Boolean indicating whether all required names are available.
+#>
 function Test-PsAvdStorageAccountNameAvailability {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3574,6 +4035,17 @@ function Test-PsAvdStorageAccountNameAvailability {
     return $result
 }
 
+<#
+.SYNOPSIS
+    Verifies the Key Vault names required by the given host pools are available.
+.DESCRIPTION
+    For each host pool, checks the availability of its derived Key Vault name and reports an error
+    for any name that is already taken.
+.PARAMETER HostPool
+    The host pool object(s) to validate.
+.OUTPUTS
+    Boolean indicating whether all required Key Vault names are available.
+#>
 function Test-PsAvdKeyVaultNameAvailability {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3600,6 +4072,20 @@ function Test-PsAvdKeyVaultNameAvailability {
     return $result
 }
 
+<#
+.SYNOPSIS
+    Retrieves the local administrator credential for a host pool from its Key Vault.
+.DESCRIPTION
+    Reads the local admin username and password secrets from the supplied Key Vault and builds a
+    PSCredential. Retries up to -Attempts times (a negative value means retry indefinitely) to cope
+    with replication/permission propagation delays right after secret creation.
+.PARAMETER KeyVault
+    The Key Vault holding the local admin credential secrets.
+.PARAMETER Attempts
+    Maximum retry attempts (default 10; negative = infinite).
+.OUTPUTS
+    A PSCredential for the local administrator.
+#>
 function Get-LocalAdminCredential {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3636,6 +4122,19 @@ function Get-LocalAdminCredential {
     return $LocalAdminCredential
 }
 
+<#
+.SYNOPSIS
+    Retrieves the Active Directory domain-join credential for a host pool from its Key Vault.
+.DESCRIPTION
+    Reads the AD-join username and password secrets from the supplied Key Vault and builds a
+    PSCredential, retrying up to -Attempts times to cope with propagation delays.
+.PARAMETER KeyVault
+    The Key Vault holding the AD-join credential secrets.
+.PARAMETER Attempts
+    Maximum retry attempts (default 10; negative = infinite).
+.OUTPUTS
+    A PSCredential for the domain-join account.
+#>
 function Get-AdjoinCredential {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3672,6 +4171,18 @@ function Get-AdjoinCredential {
     return $AdjoinCredential
 }
 
+<#
+.SYNOPSIS
+    Resolves the resource group that hosts a given Private DNS zone, creating a default one if absent.
+.DESCRIPTION
+    Looks up the named Private DNS zone. If none exists it provisions a default network resource
+    group (rg-avd-network-poc-<loc>-001) in the current VM's location and returns its name. If the
+    zone exists in multiple resource groups, the first is returned with a warning.
+.PARAMETER PrivateDnsZoneName
+    The private link DNS zone name (Key Vault, File, or AVD zones).
+.OUTPUTS
+    The resource group name hosting (or that will host) the zone.
+#>
 function Get-PsAvdPrivateDnsResourceGroupName {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3700,6 +4211,18 @@ function Get-PsAvdPrivateDnsResourceGroupName {
     return $ResourceGroupName
 }
 
+<#
+.SYNOPSIS
+    Ensures the required Private DNS zones exist and returns their zone/config objects.
+.DESCRIPTION
+    For each private link DNS zone name, resolves (or creates) the hosting resource group, creates
+    the zone if missing and builds a Private DNS zone config. Returns a hashtable keyed by zone name
+    containing the zone and its config, used when wiring up private endpoints.
+.PARAMETER PrivateDnsZoneName
+    The private link DNS zone names to set up (defaults cover Key Vault, File and AVD zones).
+.OUTPUTS
+    Hashtable mapping each zone name to its PrivateDnsZone/PrivateDnsZoneConfig.
+#>
 function New-PsAvdPrivateDnsZoneSetup {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -3741,6 +4264,29 @@ function New-PsAvdPrivateDnsZoneSetup {
     return $PrivateDnsZoneSetup
 }
 
+<#
+.SYNOPSIS
+    Creates a Private Endpoint (and links the matching Private DNS zone) for a supported resource.
+.DESCRIPTION
+    Depending on the parameter set, targets a Key Vault, Storage Account (file), host pool
+    connection, workspace feed download or the global workspace feed discovery. It determines the
+    correct private link group id and DNS zone, creates the private endpoint on the given subnet and
+    registers the DNS zone group so name resolution works privately.
+.PARAMETER PrivateEndpointSubnetId
+    Resource id of the subnet to place the private endpoint in.
+.PARAMETER PrivateDNSZoneVirtualNetworkId
+    Virtual network id(s) to link the private DNS zone to.
+.PARAMETER KeyVault
+    Target Key Vault (KeyVault parameter set).
+.PARAMETER StorageAccount
+    Target Storage Account (StorageAccount parameter set).
+.PARAMETER HostPool
+    Target host pool for connection private link (HostPool parameter set).
+.PARAMETER Workspace
+    Target workspace for feed download (FeedDownload parameter set).
+.PARAMETER GlobalWorkspace
+    Configures the global workspace feed discovery (FeedDiscovery parameter set).
+#>
 function New-PsAvdPrivateEndpointSetup {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -4008,6 +4554,25 @@ function New-PsAvdPrivateEndpointSetup {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Creates a shared Key Vault holding the local admin and AD-join credentials for session hosts.
+.DESCRIPTION
+    Provisions a uniquely named Key Vault (and resource group) in the private endpoint's region,
+    assigns the caller the 'Key Vault Administrator' role, then stores the local admin and AD-join
+    usernames/passwords as secrets (generating random passwords when no credential is supplied) and
+    creates a private endpoint for the vault.
+.PARAMETER PrivateEndpointSubnetId
+    Subnet resource id used to derive the location and to host the Key Vault private endpoint.
+.PARAMETER PrivateDNSZoneVirtualNetworkId
+    Virtual network id(s) to link the Key Vault private DNS zone to.
+.PARAMETER LocalAdminCredential
+    Optional explicit local admin credential; a random one is generated when omitted.
+.PARAMETER ADJoinCredential
+    Optional explicit AD-join credential; a random one is generated when omitted.
+.OUTPUTS
+    The created Key Vault.
+#>
 function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -4137,6 +4702,20 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     return $KeyVault
 }
 
+<#
+.SYNOPSIS
+    Creates the dedicated, per-host-pool Key Vault.
+.DESCRIPTION
+    Resolves the host pool's derived Key Vault name, resource group and virtual network, creates the
+    vault if it does not already exist, assigns the caller the 'Key Vault Administrator' role and
+    optionally wires up a private endpoint for the vault.
+.PARAMETER PrivateEndpointSubnetId
+    Optional subnet resource id used to create a private endpoint for the vault.
+.PARAMETER PrivateDNSZoneVirtualNetworkId
+    Optional virtual network id(s) to link the private DNS zone to.
+.PARAMETER HostPool
+    The host pool whose dedicated Key Vault is being created.
+#>
 function New-PsAvdHostPoolCredentialKeyVault {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -4205,6 +4784,24 @@ function New-PsAvdHostPoolCredentialKeyVault {
 #endregion
 
 #Based from https://adamtheautomator.com/powershell-random-password/
+<#
+.SYNOPSIS
+    Generates a random password that satisfies Azure VM complexity requirements.
+.DESCRIPTION
+    Produces a password of random length within the given bounds, either locally (via
+    System.Web.Security.Membership) or from the online DinoPass service, retrying until it contains
+    upper/lower/digit/non-alphanumeric characters and is not one of the prohibited weak passwords.
+.PARAMETER minLength / maxLength
+    Lower/upper bounds (inclusive of min, exclusive of max) for the generated length.
+.PARAMETER AsSecureString
+    Return the password as a SecureString instead of plain text.
+.PARAMETER ClipBoard
+    Copy the generated password to the clipboard.
+.PARAMETER nonAlphaChars
+    Minimum number of non-alphanumeric characters (local generation only).
+.PARAMETER Online
+    Use the DinoPass online generator instead of local generation.
+#>
 function New-RandomPassword {
     [CmdletBinding(PositionalBinding = $false, DefaultParameterSetName = 'GeneratePassword')]
     param
@@ -4304,6 +4901,22 @@ function Get-PsAvdKeyVaultNameAvailability {
 }
 #>
 #Was coded as an alterative to Expand-AzWvdMsixImage (for testing purpose - no more used in this script)
+<#
+.SYNOPSIS
+    Expands an MSIX image package via the AVD REST API (alternative to Expand-AzWvdMsixImage).
+.DESCRIPTION
+    Acquires an ARM access token and POSTs the package VHD/VHDX UNC path to the host pool's
+    expandMsixImage endpoint, returning the parsed image metadata. Network/HTTP errors are surfaced
+    as warnings.
+.PARAMETER HostPoolName
+    Name of the host pool to expand the image against.
+.PARAMETER ResourceGroupName
+    Resource group containing the host pool.
+.PARAMETER Uri
+    UNC path to the .vhd/.vhdx MSIX package.
+.OUTPUTS
+    The REST response describing the expanded image.
+#>
 function Expand-PsAvdMSIXImage {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -4361,6 +4974,19 @@ function Expand-PsAvdMSIXImage {
     return $Response
 }
 
+<#
+.SYNOPSIS
+    Grants an AD account the delegated rights needed to join computers to an Organizational Unit.
+.DESCRIPTION
+    Creates the AD-join user if it does not already exist, then applies the standard set of
+    delegated Active Directory access rules (create/delete computer objects, write properties,
+    reset password, validated SPN/DNS host name, etc.) recursively on the target OU so the account
+    can domain-join AVD session hosts.
+.PARAMETER Credential
+    Credential for the AD-join account (created if missing).
+.PARAMETER OrganizationalUnit
+    Distinguished name of the OU to delegate the permissions on.
+#>
 function Grant-PsAvdADJoinPermission {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -4547,6 +5173,20 @@ function Grant-PsAvdADJoinPermission {
 }
 
 #From https://github.com/Azure/azvmimagebuilder/tree/main/solutions/14_Building_Images_WVD
+<#
+.SYNOPSIS
+    Builds an Azure Compute Gallery with a custom AVD image via Azure VM Image Builder.
+.DESCRIPTION
+    Provisions the gallery, image definition and an Image Builder template (based on the Azure VM
+    Image Builder WVD solution), runs the build and distributes the resulting image to the requested
+    target regions with the specified replica count.
+.PARAMETER Location
+    Primary location for the gallery/build (default EastUS2).
+.PARAMETER TargetRegions
+    Regions to replicate the built image to (defaults to Location).
+.PARAMETER ReplicaCount
+    Number of image replicas per region (default 1).
+#>
 function New-AzureComputeGallery {
     [CmdletBinding()]
     Param(
@@ -5035,6 +5675,15 @@ function New-AzureComputeGallery {
     return $Gallery
 }
 
+<#
+.SYNOPSIS
+    Ensures the given Azure VM has a system-assigned managed identity.
+.DESCRIPTION
+    If the VM has no identity, enables a SystemAssigned managed identity and updates the VM;
+    otherwise leaves it unchanged. Defaults to the VM running this code.
+.PARAMETER VM
+    The VM to update (defaults to the current VM via Get-AzVMCompute).
+#>
 function Update-PsAvdSystemAssignedAzVM {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -5060,6 +5709,17 @@ function Update-PsAvdSystemAssignedAzVM {
 }
 
 #Get The Virtual Network Object for the VM executing this function
+<#
+.SYNOPSIS
+    Returns the virtual network object that the given VM is connected to.
+.DESCRIPTION
+    Walks the VM's first NIC to its subnet, then resolves and returns the parent virtual network.
+    Defaults to the VM running this code.
+.PARAMETER VM
+    The VM to inspect (defaults to the current VM via Get-AzVMCompute).
+.OUTPUTS
+    The virtual network object.
+#>
 function Get-AzVMVirtualNetwork {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -5083,6 +5743,17 @@ function Get-AzVMVirtualNetwork {
 }
 
 #Get The Virtual Network Object for the VM executing this function
+<#
+.SYNOPSIS
+    Returns the subnet config object that the given VM's NIC is attached to.
+.DESCRIPTION
+    Resolves the VM's first NIC to its subnet id and returns the corresponding subnet configuration.
+    Defaults to the VM running this code.
+.PARAMETER VM
+    The VM to inspect (defaults to the current VM via Get-AzVMCompute).
+.OUTPUTS
+    The subnet configuration object.
+#>
 function Get-AzVMSubnet {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -5103,6 +5774,16 @@ function Get-AzVMSubnet {
 }
 
 #Get The Azure VM Compute Object for the VM executing this function
+<#
+.SYNOPSIS
+    Returns the Azure Instance Metadata Service 'compute' object for the current VM.
+.DESCRIPTION
+    Queries the IMDS endpoint (169.254.169.254) to obtain this VM's compute metadata (name, resource
+    group, location, etc.). Returns $null when not running on an Azure VM or the endpoint is
+    unreachable.
+.OUTPUTS
+    The compute metadata object, or $null.
+#>
 function Get-AzVMCompute {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -5125,6 +5806,41 @@ function Get-AzVMCompute {
     }
 }
 
+<#
+.SYNOPSIS
+    Creates a single AVD session host VM and registers it with a host pool.
+.DESCRIPTION
+    Builds one session host VM from either a marketplace image (Image parameter set) or an Azure
+    Compute Gallery image (ACG parameter set), joins it to AD or Microsoft Entra ID, applies the
+    AVD agent registration token and optional custom configuration script, and supports ephemeral
+    OS disk placement, Spot, hibernation and Intune enrolment.
+.PARAMETER HostPoolId
+    Resource id of the target host pool.
+.PARAMETER VMName
+    Name of the VM/session host to create.
+.PARAMETER ResourceGroupName
+    Resource group to create the VM in.
+.PARAMETER KeyVault
+    Key Vault holding the local admin / AD-join credentials.
+.PARAMETER RegistrationInfoToken
+    AVD agent registration token used to join the host pool.
+.PARAMETER OUPath / DomainName
+    Target AD OU distinguished name and domain for domain join (when applicable).
+.PARAMETER SubnetId
+    Subnet resource id to attach the VM NIC to.
+.PARAMETER VMSize
+    VM SKU (default Standard_D2s_v5).
+.PARAMETER ImagePublisherName / ImageOffer / ImageSku
+    Marketplace image reference (Image parameter set).
+.PARAMETER VMSourceImageId
+    Azure Compute Gallery image id (ACG parameter set).
+.PARAMETER Location
+    Azure region for the VM.
+.PARAMETER CustomConfigurationScriptUrl
+    Optional URL of a custom post-deployment configuration script.
+.PARAMETER DiffDiskPlacement
+    Ephemeral OS disk placement option (None/CacheDisk/ResourceDisk).
+#>
 function New-PsAvdSessionHost {
     [CmdletBinding(DefaultParameterSetName = 'Image')]
     param(
@@ -5474,6 +6190,21 @@ function New-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Computes the next available session host names for a host pool given a name prefix.
+.DESCRIPTION
+    Enumerates existing session hosts that share the prefix, finds the highest numeric index in use
+    and emits the requested number of sequential '<prefix>-<n>' names starting just after it.
+.PARAMETER HostPoolId
+    Resource id of the host pool.
+.PARAMETER NamePrefix
+    Name prefix (2-10 chars) for the session hosts.
+.PARAMETER VMNumberOfInstances
+    Number of new names to generate.
+.OUTPUTS
+    The generated session host names.
+#>
 function Get-PsAvdNextSessionHostName {
     [CmdletBinding(DefaultParameterSetName = 'Image')]
     param(
@@ -5517,6 +6248,16 @@ function Get-PsAvdNextSessionHostName {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Enables single sign-on (SSO) for a host pool using Microsoft Entra authentication for RDP.
+.DESCRIPTION
+    Enables the RDP protocol on the 'Microsoft Remote Desktop' and 'Windows Cloud Login' service
+    principals, configures a Kerberos server endpoint, and targets the host pool's '<name> - Devices'
+    group so the consent prompt is suppressed for those devices.
+.PARAMETER HostPoolName
+    Name of the host pool whose devices group should be configured for SSO.
+#>
 function Enable-SSO {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -5559,6 +6300,16 @@ function Enable-SSO {
 
 }
 
+<#
+.SYNOPSIS
+    Removes the SSO target device group configuration for the given host pools.
+.DESCRIPTION
+    For each SSO-enabled host pool, removes its '<name> - Devices' group from the remote desktop
+    security configuration of the 'Microsoft Remote Desktop' and 'Windows Cloud Login' service
+    principals, reversing what Enable-SSO configured.
+.PARAMETER HostPool
+    The host pool object(s) to clean up.
+#>
 function Remove-SSO {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -5589,6 +6340,34 @@ function Remove-SSO {
     #endregion
 }
 
+<#
+.SYNOPSIS
+    Adds one or more session hosts to a host pool (optionally in parallel).
+.DESCRIPTION
+    Resolves the next available session host names, then calls New-PsAvdSessionHost for each
+    instance - either from a marketplace image or an Azure Compute Gallery image - passing through
+    the join, identity, Spot, hibernation, Intune and configuration options. Can run the creations
+    as background jobs with -AsJob.
+.PARAMETER HostPoolId
+    Resource id of the target host pool.
+.PARAMETER NamePrefix
+    Name prefix (2-10 chars) for the new session hosts.
+.PARAMETER VMNumberOfInstances
+    Number of session hosts to add.
+.PARAMETER KeyVault
+    Key Vault holding the local admin / AD-join credentials.
+.PARAMETER RegistrationInfoToken
+    AVD agent registration token.
+.PARAMETER OUPath / DomainName / SubnetId
+    AD OU, domain and subnet placement settings.
+.PARAMETER VMSize / ImagePublisherName / ImageOffer / ImageSku / VMSourceImageId
+    VM SKU and image selection (marketplace Image set or Compute Gallery ACG set).
+.PARAMETER CustomConfigurationScriptUrl / DiffDiskPlacement / LogDir / Tag
+    Optional configuration script, ephemeral disk placement, log directory and resource tags.
+.PARAMETER IsMicrosoftEntraIdJoined / Spot / HibernationEnabled / Intune / SessionHostConfiguration / AsJob
+    Switches controlling join type, Spot, hibernation, Intune enrolment, session host configuration
+    and asynchronous (job) execution.
+#>
 function Add-PsAvdSessionHost {
     [CmdletBinding(DefaultParameterSetName = 'Image')]
     param(
@@ -5750,6 +6529,24 @@ function Add-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Downloads files from a GitHub repository folder (optionally recursively) to a local directory.
+.DESCRIPTION
+    Accepts either a GitHub web 'tree' URL or a GitHub Contents API URL, normalising the former to
+    the latter. Lists the folder contents via the GitHub API, downloads files matching the regex
+    pattern (URL-decoding their names) and, when -Recurse is set, descends into sub-folders.
+.PARAMETER URI
+    GitHub web tree URL or Contents API URL of the folder.
+.PARAMETER FileRegExPattern
+    Regex used to filter which files are downloaded (default '.*' = all).
+.PARAMETER Destination
+    Local directory to download into.
+.PARAMETER Recurse
+    Descend into sub-folders.
+.OUTPUTS
+    The downloaded local file objects.
+#>
 function Get-GitFile {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -5836,6 +6633,21 @@ function Get-GitFile {
     return $GitFile
 }
 
+<#
+.SYNOPSIS
+    Downloads files linked from a web page to a local directory.
+.DESCRIPTION
+    Requests the page, filters its hyperlinks by the supplied regex pattern, builds absolute URLs and
+    downloads the matching files via BITS.
+.PARAMETER URI
+    Base URL of the page to scrape for links.
+.PARAMETER FileRegExPattern
+    Regex used to select which linked files to download.
+.PARAMETER Destination
+    Local directory to download into.
+.OUTPUTS
+    The downloaded local file objects.
+#>
 function Get-WebSiteFile {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -5871,6 +6683,19 @@ function Get-WebSiteFile {
     return $WebSiteFile
 }
 
+<#
+.SYNOPSIS
+    Downloads the demo MSIX App Attach package VHD(X) files from GitHub or the author's web site.
+.DESCRIPTION
+    Delegates to Get-GitFile or Get-WebSiteFile (depending on -Source) to fetch the demo MSIX
+    package .vhd/.vhdx files into the destination folder.
+.PARAMETER Source
+    Where to download from: 'GitHub' (default) or 'WebSite'.
+.PARAMETER Destination
+    Local directory to download the package into.
+.OUTPUTS
+    The downloaded package file(s).
+#>
 function Copy-PsAvdMSIXDemoAppAttachPackage {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -5903,6 +6728,21 @@ function Copy-PsAvdMSIXDemoAppAttachPackage {
     return $MSIXDemoPackage
 }
 
+<#
+.SYNOPSIS
+    Downloads the demo MSIX signing PFX and imports it into the Trusted People store on session hosts.
+.DESCRIPTION
+    Fetches the demo .pfx file(s) from GitHub or the author's web site, opens remote sessions to the
+    target computers (waiting for them to become available), copies the PFX over and imports it into
+    Cert:\LocalMachine\TrustedPeople so the demo MSIX packages are trusted, then refreshes group
+    policy and cleans up.
+.PARAMETER Source
+    Where to download from: 'GitHub' (default) or 'WebSite'.
+.PARAMETER ComputerName
+    The session hosts to import the certificate on.
+.PARAMETER SecurePassword
+    Password protecting the PFX (defaults to the demo password).
+#>
 function Copy-PsAvdMSIXDemoPFXFile {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -5962,6 +6802,24 @@ function Copy-PsAvdMSIXDemoPFXFile {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Copies a helper script (or files) to one or more session hosts.
+.DESCRIPTION
+    When a credential is supplied, maps a temporary PSDrive over the admin share and copies via SMB;
+    otherwise opens PowerShell remoting sessions (waiting for availability) and copies into the
+    destination folder using Copy-Item -ToSession. Optionally returns the copied items.
+.PARAMETER ComputerName
+    Target session hosts.
+.PARAMETER Source
+    Source path of the file(s) to copy.
+.PARAMETER Destination
+    Destination folder on the hosts (default 'C:\Scripts\').
+.PARAMETER Credential
+    Optional credential used for the SMB copy path.
+.PARAMETER PassThru
+    Return the copied items.
+#>
 function Copy-PsAvdHelperScript {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -6025,6 +6883,25 @@ function Copy-PsAvdHelperScript {
     }
 }
 
+<#
+.SYNOPSIS
+    Waits until PowerShell remoting sessions can be established to all the given computers.
+.DESCRIPTION
+    Retries opening PSSessions to every computer until all succeed or the attempt limit is reached,
+    sleeping between attempts. Returns either the open sessions (-PassThru) or a boolean success.
+.PARAMETER ComputerName
+    The computers to connect to.
+.PARAMETER Seconds
+    Delay between attempts (default 30).
+.PARAMETER Attempts
+    Maximum attempts (default 10; negative = infinite).
+.PARAMETER Credential
+    Optional credential to use for the sessions.
+.PARAMETER PassThru
+    Return the open sessions instead of a boolean.
+.OUTPUTS
+    Open PSSession objects (PassThru) or a boolean.
+#>
 function Wait-PSSession {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -6087,6 +6964,24 @@ function Wait-PSSession {
     }
 }
 
+<#
+.SYNOPSIS
+    Waits until every session host in a host pool can successfully run a PowerShell command.
+.DESCRIPTION
+    Repeatedly runs a trivial 'return $true' script (as jobs) on all session host VMs via
+    Invoke-PsAvdAzVMRunPowerShellScript until all jobs complete, indicating the VMs are ready for
+    run-command operations.
+.PARAMETER HostPoolName
+    Name of the host pool.
+.PARAMETER ResourceGroupName
+    Resource group containing the host pool.
+.PARAMETER Seconds
+    Delay between attempts (default 30).
+.PARAMETER Attempts
+    Maximum attempts (default 10; negative = infinite).
+.OUTPUTS
+    Boolean indicating whether all session hosts are responsive.
+#>
 function Wait-PsAvdRunPowerShell {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -6144,6 +7039,14 @@ function Wait-PsAvdRunPowerShell {
     return $result
 }
 
+<#
+.SYNOPSIS
+    Triggers a delta synchronization cycle on a local Microsoft Entra Connect (ADSync) server.
+.DESCRIPTION
+    If the ADSync service is present, ensures it is started, imports the ADSync module and (when no
+    sync cycle is already running) starts a Delta sync, waiting until it completes. Warns if ADSync
+    is not installed.
+#>
 function Start-MicrosoftEntraIDConnectSync {
     [CmdletBinding(PositionalBinding = $false)]
     param()
@@ -6182,6 +7085,16 @@ function Start-MicrosoftEntraIDConnectSync {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Tears down all Azure Site Recovery (ASR) artefacts for host pools that have replication enabled.
+.DESCRIPTION
+    For each host pool with an ASR failover VNet configured, disables DR on every replication
+    protected item, removes protection container mappings, network mappings and fabrics, then
+    deletes the Recovery Services vault.
+.PARAMETER HostPool
+    The host pool object(s) to clean ASR resources for.
+#>
 function Remove-PsAvdAzRecoveryServicesAsrReplicationProtectedItem {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -6251,6 +7164,16 @@ function Remove-PsAvdAzRecoveryServicesAsrReplicationProtectedItem {
     }
 }
 
+<#
+.SYNOPSIS
+    Revokes any active SAS (shared access) export grants on managed disks.
+.DESCRIPTION
+    Finds disks in the ActiveSAS state (in the given resource groups, or all if none specified) and
+    calls the disks endGetAccess REST API on each to revoke the active SAS so the disks can be
+    deleted or modified.
+.PARAMETER ResourceGroupName
+    Resource group(s) to scope the search to; all disks are inspected when omitted.
+#>
 function Revoke-ActiveSASDiskAccess {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -6308,6 +7231,21 @@ function Revoke-ActiveSASDiskAccess {
     }
 }
 
+<#
+.SYNOPSIS
+    Removes all Azure resources created for one or more AVD host pools.
+.DESCRIPTION
+    Resolves the host pools from objects or exported JSON file(s), then cleans up the associated
+    resources: SSO settings, storage account service principals, active SAS disk grants, ASR
+    resources, Intune items, resource groups and more. The App Attach storage can optionally be
+    preserved.
+.PARAMETER HostPool
+    Host pool object(s) to remove (HostPool parameter set).
+.PARAMETER FullName
+    Path(s) to exported host pool JSON file(s) describing what to remove (FullName parameter set).
+.PARAMETER KeepAzureAppAttachStorage
+    Preserve the Azure App Attach storage account instead of deleting it.
+#>
 function Remove-PsAvdHostPoolSetup {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -6521,6 +7459,19 @@ function Remove-PsAvdHostPoolSetup {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Registers MSIX/App Attach packages from the App Attach file share with the relevant host pools.
+.DESCRIPTION
+    Groups App Attach-enabled host pools by location and, for each location, temporarily enables
+    shared key access on the App Attach storage account, caches its credentials with cmdkey, then
+    enumerates the VHD(X) packages on the 'appattach' share and registers each as an
+    AzWvdAppAttachPackage (skipping any already registered).
+.PARAMETER HostPool
+    The host pool object(s) to process App Attach packages for.
+.PARAMETER StorageEndpointSuffix
+    Storage endpoint suffix (default 'core.windows.net').
+#>
 function Add-PsAvdAzureAppAttach {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -6694,6 +7645,26 @@ function Add-PsAvdAzureAppAttach {
     }
 }
 
+<#
+.SYNOPSIS
+    Provisions the full Azure infrastructure for one or more personal (PersonalHostPool) AVD pools.
+.DESCRIPTION
+    For each personal host pool, creates the dedicated AD OU structure, resource group, networking,
+    Key Vault, host pool / desktop application group / workspace, session host VMs and all the
+    associated configuration (FSLogix, Intune, SSO, scaling, monitoring, ASR, etc.) according to the
+    properties on the supplied PersonalHostPool object(s). Supports pipeline input and parallel
+    (job) execution.
+.PARAMETER HostPool
+    The PersonalHostPool object(s) describing what to deploy.
+.PARAMETER ADOrganizationalUnit
+    The parent Active Directory OU under which the per-host-pool OUs are created.
+.PARAMETER LogDir
+    Directory for per-session-host deployment logs (default '.').
+.PARAMETER AsJob
+    Deploy the session hosts as background jobs (in parallel).
+.PARAMETER Pester
+    Run the associated Pester validation tests.
+#>
 function New-PsAvdPersonalHostPoolSetup {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -7407,6 +8378,28 @@ function New-PsAvdPersonalHostPoolSetup {
     }
 }
 
+<#
+.SYNOPSIS
+    Provisions the full Azure infrastructure for one or more pooled (PooledHostPool) AVD pools.
+.DESCRIPTION
+    For each pooled host pool, creates the dedicated AD OU structure, resource group, networking,
+    Key Vault, FSLogix/App Attach storage, host pool / application group(s) / workspace, session
+    host VMs and all associated configuration (FSLogix, Intune, SSO, MFA conditional access,
+    scaling, monitoring, ASR, etc.) according to the supplied PooledHostPool object(s). Supports
+    pipeline input and parallel (job) execution.
+.PARAMETER HostPool
+    The PooledHostPool object(s) describing what to deploy.
+.PARAMETER ADOrganizationalUnit
+    The parent Active Directory OU under which the per-host-pool OUs are created.
+.PARAMETER NoMFAEntraIDGroupName
+    Name of the Entra ID group excluded from the MFA conditional access policy (default 'No-MFA Users').
+.PARAMETER LogDir
+    Directory for per-session-host deployment logs (default '.').
+.PARAMETER AsJob
+    Deploy the session hosts as background jobs (in parallel).
+.PARAMETER Pester
+    Run the associated Pester validation tests.
+#>
 function New-PsAvdPooledHostPoolSetup {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -10439,6 +11432,33 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
     }
 }
 
+<#
+.SYNOPSIS
+    Top-level entry point that deploys one or more AVD host pools (personal and/or pooled).
+.DESCRIPTION
+    Validates the current location supports AVD, sets up DNS conditional forwarders and the root AVD
+    AD OU, then dispatches each host pool to New-PsAvdPersonalHostPoolSetup or
+    New-PsAvdPooledHostPoolSetup based on its type. Optionally deploys Azure Monitor Baseline Alerts
+    (AMBA) and workbooks, restarts session hosts, generates an RDCMan file and runs Pester tests.
+.PARAMETER HostPool
+    The host pool object(s) to deploy.
+.PARAMETER NoMFAEntraIDGroupName
+    Name of the Entra ID group excluded from the MFA conditional access policy (default 'No-MFA Users').
+.PARAMETER LogDir
+    Directory for deployment logs (default '.').
+.PARAMETER AMBA
+    Deploy Azure Monitor Baseline Alerts.
+.PARAMETER WorkBook
+    Import the AVD monitoring workbooks.
+.PARAMETER Restart
+    Restart the session hosts after deployment.
+.PARAMETER RDCMan
+    Generate an RDCMan (.rdg) connection file.
+.PARAMETER Pester
+    Run the Pester validation tests.
+.PARAMETER AsJob
+    Deploy session hosts as background jobs (in parallel).
+#>
 function New-PsAvdHostPoolSetup {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -10858,6 +11878,15 @@ function New-PsAvdHostPoolSetup {
     }
 }
 
+<#
+.SYNOPSIS
+    Runs the Pester tests that validate the deployment log files for errors.
+.DESCRIPTION
+    Locates the module's bundled Error.LogFile.Tests.ps1 Pester test and runs it against the given
+    log directory to surface any errors recorded during a deployment.
+.PARAMETER LogDir
+    Directory containing the deployment log files to validate.
+#>
 function Invoke-PsAvdErrorLogFilePester {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -10881,6 +11910,17 @@ function Invoke-PsAvdErrorLogFilePester {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Restarts all session host VMs in the given host pools.
+.DESCRIPTION
+    Enumerates the session hosts of each host pool, restarts their VMs as background jobs and
+    optionally waits for all restarts to complete.
+.PARAMETER HostPool
+    The host pool object(s) whose session hosts should be restarted.
+.PARAMETER Wait
+    Wait for all restart jobs to finish before returning.
+#>
 function Restart-PsAvdSessionHost {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -10910,6 +11950,19 @@ function Restart-PsAvdSessionHost {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Exports the configuration of the given host pools to a timestamped JSON backup file.
+.DESCRIPTION
+    Serializes each host pool's JSON-friendly properties to a 'HostPool_<timestamp>.json' file in
+    the target directory, which can later be used to recreate or remove the host pools.
+.PARAMETER HostPool
+    The host pool object(s) to back up.
+.PARAMETER Directory
+    Output directory for the backup file (defaults to My Documents).
+.OUTPUTS
+    The created JSON backup file.
+#>
 function New-PsAvdHostPoolBackup {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -10934,6 +11987,21 @@ function New-PsAvdHostPoolBackup {
 }
 
 #Use the AD OU for generating the RDG file. Had to be called after the AD Object creation (at the end of the processing)
+<#
+.SYNOPSIS
+    (Legacy) Generates a Remote Desktop Connection Manager (.rdg) file for the host pools.
+.DESCRIPTION
+    Earlier implementation that builds an RDCMan XML file grouping session hosts by location, type
+    and host pool name, embedding encrypted credentials. Superseded by New-PsAvdRdcMan.
+.PARAMETER FullName
+    Output path of the .rdg file (defaults to '<domain>.rdg' on the Desktop).
+.PARAMETER HostPool
+    The host pool object(s) to include.
+.PARAMETER Credential
+    Optional credential to embed for the connections.
+.PARAMETER Open / Install / Update
+    Open the file, download/install RDCMan, or update an existing file rather than recreate it.
+#>
 function New-PsAvdRdcManOld {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -11158,6 +12226,23 @@ function New-PsAvdRdcManOld {
 }
 
 #Use the HostPool properties for generating the RDG file. Doesn't required to be called after the AD Object creation. 
+<#
+.SYNOPSIS
+    Generates a Remote Desktop Connection Manager (.rdg) file for the host pools.
+.DESCRIPTION
+    Builds (or updates) an RDCMan XML file, grouping session hosts into Location > <Type>Desktops >
+    HostPool nodes, resolving each session host's private IP and embedding DPAPI-encrypted logon
+    credentials (from the host pool Key Vault or the supplied credential). Can download/install
+    RDCMan from Sysinternals and open the resulting file.
+.PARAMETER FullName
+    Output path of the .rdg file (defaults to '<domain>.rdg' on the Desktop).
+.PARAMETER HostPool
+    The host pool object(s) to include.
+.PARAMETER Credential
+    Optional credential to embed for the connections.
+.PARAMETER Open / Install / Update
+    Open the file, download/install RDCMan, or update an existing file rather than recreate it.
+#>
 function New-PsAvdRdcMan {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -11378,6 +12463,18 @@ function New-PsAvdRdcMan {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Opens the FSLogix 'profiles' file share for each FSLogix-enabled host pool in Explorer.
+.DESCRIPTION
+    For each FSLogix host pool reachable from the current subnet (via its storage account private
+    endpoint), locates the 'profiles' file share and opens its UNC path. Optionally runs the FSLogix
+    Azure Pester tests.
+.PARAMETER HostPool
+    The host pool object(s) to inspect.
+.PARAMETER Pester
+    Run the FSLogix Azure Pester tests.
+#>
 function Get-PsAvdFSLogixProfileShare {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -11427,6 +12524,18 @@ function Get-PsAvdFSLogixProfileShare {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Opens the App Attach/MSIX 'appattach' file share for each enabled host pool in Explorer.
+.DESCRIPTION
+    For each MSIX/App Attach host pool reachable from the current subnet (via its storage account
+    private endpoint), locates the 'appattach' file share and opens its UNC path. Optionally runs the
+    App Attach Azure Pester tests.
+.PARAMETER HostPool
+    The host pool object(s) to inspect.
+.PARAMETER Pester
+    Run the App Attach Azure Pester tests.
+#>
 function Get-PsAvdAppAttachProfileShare {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -11476,6 +12585,18 @@ function Get-PsAvdAppAttachProfileShare {
 }
 
 #From https://learn.microsoft.com/en-us/azure/virtual-desktop/autoscale-scaling-plan?tabs=powershell
+<#
+.SYNOPSIS
+    Creates and assigns autoscale scaling plans for host pools that have scaling enabled.
+.DESCRIPTION
+    For each host pool with ScalingPlan set, creates an AzWvdScalingPlan in the host pool's region
+    and time zone, references the host pool, and adds the appropriate ramp-up/peak/ramp-down/off-peak
+    schedules for pooled (or personal) host pools. Optionally runs Pester tests.
+.PARAMETER HostPool
+    The host pool object(s) to configure scaling plans for.
+.PARAMETER Pester
+    Run the associated Pester tests.
+#>
 function New-PsAvdScalingPlan {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -11653,6 +12774,18 @@ function New-PsAvdScalingPlan {
 }
 
 #From https://learn.microsoft.com/en-us/azure/site-recovery/azure-to-azure-how-to-enable-policy
+<#
+.SYNOPSIS
+    Enables Azure Site Recovery for host pools via an Azure Policy assignment and remediation.
+.DESCRIPTION
+    For each host pool with an ASR failover VNet configured, creates the recovery resource group and
+    Recovery Services vault in the paired region, assigns the built-in 'Configure disaster recovery
+    on virtual machines...' policy (with a system-assigned identity), grants that identity the
+    required roles on the primary and recovery resource groups, and starts a remediation to enable
+    replication.
+.PARAMETER HostPool
+    The host pool object(s) to enable ASR for.
+#>
 function New-PsAvdAzureSiteRecoveryPolicyAssignment {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -11773,6 +12906,23 @@ function New-PsAvdAzureSiteRecoveryPolicyAssignment {
 }
 
 #From https://azure.github.io/azure-monitor-baseline-alerts/patterns/specialized/avd/
+<#
+.SYNOPSIS
+    Deploys the Azure Monitor Baseline Alerts (AMBA) for AVD pattern for the given host pools.
+.DESCRIPTION
+    Creates a dedicated resource group and Log Analytics workspace, downloads the AMBA AVD ARM
+    template and runs a subscription-level deployment (with retries) for each host pool, wiring in
+    its host pool id, storage accounts (FSLogix/App Attach) and the workspace. Optionally enables the
+    resulting metric, scheduled-query and activity-log alert rules.
+.PARAMETER HostPool
+    The host pool object(s) to deploy alerts for.
+.PARAMETER Location
+    Azure region for the AMBA resources (defaults to the current VM's location).
+.PARAMETER Enabled
+    Enable the created alert rules after deployment.
+.PARAMETER PassThru
+    Return the AMBA resource group object.
+#>
 function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -11902,6 +13052,19 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     }
 }
 
+<#
+.SYNOPSIS
+    Imports a curated set of community AVD monitoring workbooks into a dedicated resource group.
+.DESCRIPTION
+    Ensures a workbook resource group exists, then for each known workbook (AVD Accelerator error
+    reporting/tracking, Billy York's WVD workbook, AVD Insights) downloads its definition and creates
+    an Application Insights workbook if one with the same display name does not already exist.
+    Optionally runs Pester tests.
+.PARAMETER Location
+    Azure region for the workbooks (defaults to the current VM's location).
+.PARAMETER Pester
+    Run the associated Pester tests.
+#>
 function Import-PsAvdWorkbook {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -11974,6 +13137,20 @@ function Import-PsAvdWorkbook {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Imports AVD workbook *templates* (gallery templates) for the given host pools.
+.DESCRIPTION
+    Ensures a workbook resource group exists, then downloads and deploys the known workbook template
+    (the AVD error-logging deep-insights workbook) as a workbook template resource, with fallback
+    URLs in case a source host is unreachable. Optionally runs Pester tests.
+.PARAMETER HostPool
+    The host pool object(s) the templates relate to.
+.PARAMETER Location
+    Azure region for the workbook templates (defaults to the current VM's location).
+.PARAMETER Pester
+    Run the associated Pester tests.
+#>
 function Import-PsAvdWorkbookTemplate {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -12075,6 +13252,24 @@ function Import-PsAvdWorkbookTemplate {
     return $AzApplicationInsightsWorkbook
 }
 
+<#
+.SYNOPSIS
+    Deploys an Azure Function that automatically stops inactive AVD session hosts.
+.DESCRIPTION
+    Installs the prerequisites (Azure Functions Core Tools, PowerShell 7+), provisions a storage
+    account and Function App, and deploys a timer-triggered PowerShell function that periodically
+    detects and stops inactive session hosts of the requested host pool type(s).
+.PARAMETER FrequencyInMinutes
+    How often (in minutes) the timer trigger runs (default 5).
+.PARAMETER HostPoolType
+    Which host pool type(s) to target: 'Personal' and/or 'Pooled' (default 'Personal').
+.PARAMETER Location
+    Azure region for the deployed resources (defaults to the current VM's location).
+.PARAMETER PassThru
+    Return the created Function App / related object.
+.PARAMETER Force
+    Recreate resources even if they already exist.
+#>
 function New-PsAvdStopInactiveSessionHostAzFunction {
     [CmdletBinding(PositionalBinding = $false)]
     param
@@ -12336,6 +13531,16 @@ function New-PsAvdStopInactiveSessionHostAzFunction {
     }
 }
 
+<#
+.SYNOPSIS
+    Returns the base directory of this module.
+.DESCRIPTION
+    Returns the value of the global $ModuleBase variable when set (used in remote/Azure Function
+    contexts), otherwise resolves the module base from the loaded module. Used to locate bundled
+    resources such as the Pester tests.
+.OUTPUTS
+    The module base directory path.
+#>
 function Get-ModuleBase {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -12354,6 +13559,16 @@ function Get-ModuleBase {
     $ModuleBase
 }
 
+<#
+.SYNOPSIS
+    Builds a hashtable of Azure regions to their paired regions.
+.DESCRIPTION
+    Queries Azure locations and returns a hashtable keyed by location, including the physical
+    location and the paired region (and its physical location), for regions that have a paired
+    region.
+.OUTPUTS
+    A hashtable of region pairing information keyed by location name.
+#>
 function Get-AzurePairedRegion {
     [CmdletBinding(PositionalBinding = $false)]
     param(
@@ -12367,6 +13582,19 @@ function Get-AzurePairedRegion {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Finds Azure Compute Gallery image definitions that have versions published to the given region(s).
+.DESCRIPTION
+    Enumerates all gallery image definitions across galleries and returns those whose published image
+    versions target every requested region (by region name or display name).
+.PARAMETER RegionDisplayName
+    One or more region display names (e.g. 'East US') to match against the publishing target regions.
+.PARAMETER Region
+    One or more region names (e.g. 'eastus'); resolved to display names when used.
+.OUTPUTS
+    The matching gallery image definition objects.
+#>
 function Get-PsAvdAzGalleryImageDefinition {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -12405,6 +13633,28 @@ function Get-PsAvdAzGalleryImageDefinition {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 
+<#
+.SYNOPSIS
+    Runs a PowerShell script on an Azure VM, retrying until a result is returned.
+.DESCRIPTION
+    Wrapper around Invoke-AzVMRunCommand (CommandId 'RunPowerShellScript') that accepts either a
+    script file path or an inline script string plus parameters, and loops (sleeping 30s) until the
+    command returns a result, working around concurrent run-command limitations. Can run as a job.
+.PARAMETER ResourceGroupName
+    Resource group of the target VM.
+.PARAMETER VMName
+    Name of the target VM.
+.PARAMETER ScriptPath
+    Path to the script file to run (ScriptPath parameter set).
+.PARAMETER ScriptString
+    Inline script text to run (ScriptString parameter set).
+.PARAMETER Parameter
+    Hashtable of parameters passed to the script.
+.PARAMETER AsJob
+    Run the command as a background job.
+.OUTPUTS
+    The Invoke-AzVMRunCommand result.
+#>
 function Invoke-PsAvdAzVMRunPowerShellScript {
     [CmdletBinding(PositionalBinding = $false)]
     param (
@@ -12469,6 +13719,17 @@ function Invoke-PsAvdAzVMRunPowerShellScript {
     $Result
 }
 
+<#
+.SYNOPSIS
+    Resolves the module's HostPool object(s) to their corresponding Azure AVD host pool objects.
+.DESCRIPTION
+    For each input HostPool, retrieves the matching AzWvdHostPool by name and resource group.
+    Accepts pipeline input.
+.PARAMETER HostPool
+    The module HostPool object(s) to resolve.
+.OUTPUTS
+    The corresponding AzWvdHostPool objects.
+#>
 function ConvertTo-AzWvdHostPool {
     [CmdletBinding(PositionalBinding = $false)]
     Param(
@@ -12490,6 +13751,20 @@ function ConvertTo-AzWvdHostPool {
 }
 
 #From https://learn.microsoft.com/en-us/windows-app/direct-launch-urls?tabs=avd
+<#
+.SYNOPSIS
+    Builds Windows App direct-launch URLs for the given AVD host pools.
+.DESCRIPTION
+    For each host pool, resolves its preferred application group (Desktop or RemoteApp) and workspace,
+    then constructs the Windows App direct-launch URL(s) for the published resources. Optionally opens
+    the URL(s) in a browser.
+.PARAMETER HostPool
+    The Azure AVD host pool object(s) to generate direct-launch URLs for. Accepts pipeline input.
+.PARAMETER Browse
+    Open the generated URL(s) in the default browser.
+.OUTPUTS
+    The generated direct-launch URL(s).
+#>
 function Get-PsAvdHostPoolDirectLaunchUrl {
 
     [CmdletBinding(PositionalBinding = $false)]
