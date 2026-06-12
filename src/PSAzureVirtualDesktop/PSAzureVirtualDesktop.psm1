@@ -5705,8 +5705,8 @@ function Add-PsAvdSessionHost {
         }
 
         if ((-not([string]::IsNullOrEmpty($OUPath))) -and (-not([string]::IsNullOrEmpty($DomainName)))) {
-                $Params["OUPath"] = $OUPath
-                $Params["DomainName"] = $DomainName
+            $Params["OUPath"] = $OUPath
+            $Params["DomainName"] = $DomainName
         }
         #Uncomment the line below for a serial processing (instead of a parallel one)
         #$AsJob = $false
@@ -7097,53 +7097,53 @@ function New-PsAvdPersonalHostPoolSetup {
             if (-not([String]::IsNullOrEmpty($CurrentHostPool.VMSourceImageId))) {
                 #We propagate the AsJob context to the child function
                 $Params = @{
-                    HostPoolId                    = $CurrentAzWvdHostPool.Id
-                    NamePrefix                    = $CurrentHostPool.NamePrefix
-                    VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
-                    KeyVault                      = $CurrentHostPool.KeyVault
-                    RegistrationInfoToken         = $RegistrationInfoToken.Token
-                    SubnetId                      = $CurrentHostPool.SubnetId
-                    VMSize                        = $CurrentHostPool.VMSize
-                    VMSourceImageId               = $CurrentHostPool.VMSourceImageId
-                    DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
-                    CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
-                    Tag                           = $Tag
-                    IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
-                    Spot                          = $CurrentHostPool.Spot
-                    HibernationEnabled            = $CurrentHostPool.HibernationEnabled
-                    Intune                        = $CurrentHostPool.Intune
-                    LogDir                        = $LogDir
-                    AsJob                         = $true
+                    HostPoolId                   = $CurrentAzWvdHostPool.Id
+                    NamePrefix                   = $CurrentHostPool.NamePrefix
+                    VMNumberOfInstances          = $CurrentHostPool.VMNumberOfInstances
+                    KeyVault                     = $CurrentHostPool.KeyVault
+                    RegistrationInfoToken        = $RegistrationInfoToken.Token
+                    SubnetId                     = $CurrentHostPool.SubnetId
+                    VMSize                       = $CurrentHostPool.VMSize
+                    VMSourceImageId              = $CurrentHostPool.VMSourceImageId
+                    DiffDiskPlacement            = $CurrentHostPool.DiffDiskPlacement
+                    CustomConfigurationScriptUrl = $CurrentHostPool.CustomConfigurationScriptUrl
+                    Tag                          = $Tag
+                    IsMicrosoftEntraIdJoined     = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                    Spot                         = $CurrentHostPool.Spot
+                    HibernationEnabled           = $CurrentHostPool.HibernationEnabled
+                    Intune                       = $CurrentHostPool.Intune
+                    LogDir                       = $LogDir
+                    AsJob                        = $true
                 }
             }
             else {
                 #We propagate the AsJob context to the child function
                 $Params = @{
-                    HostPoolId                    = $CurrentAzWvdHostPool.Id
-                    NamePrefix                    = $CurrentHostPool.NamePrefix
-                    VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
-                    KeyVault                      = $CurrentHostPool.KeyVault
-                    RegistrationInfoToken         = $RegistrationInfoToken.Token
-                    SubnetId                      = $CurrentHostPool.SubnetId
-                    VMSize                        = $CurrentHostPool.VMSize
-                    DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
-                    ImagePublisherName            = $CurrentHostPool.ImagePublisherName
-                    ImageOffer                    = $CurrentHostPool.ImageOffer
-                    ImageSku                      = $CurrentHostPool.ImageSku
-                    CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
-                    Tag                           = $Tag
-                    IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
-                    Spot                          = $CurrentHostPool.Spot
-                    HibernationEnabled            = $CurrentHostPool.HibernationEnabled
-                    Intune                        = $CurrentHostPool.Intune
-                    LogDir                        = $LogDir
-                    AsJob                         = $true
+                    HostPoolId                   = $CurrentAzWvdHostPool.Id
+                    NamePrefix                   = $CurrentHostPool.NamePrefix
+                    VMNumberOfInstances          = $CurrentHostPool.VMNumberOfInstances
+                    KeyVault                     = $CurrentHostPool.KeyVault
+                    RegistrationInfoToken        = $RegistrationInfoToken.Token
+                    SubnetId                     = $CurrentHostPool.SubnetId
+                    VMSize                       = $CurrentHostPool.VMSize
+                    DiffDiskPlacement            = $CurrentHostPool.DiffDiskPlacement
+                    ImagePublisherName           = $CurrentHostPool.ImagePublisherName
+                    ImageOffer                   = $CurrentHostPool.ImageOffer
+                    ImageSku                     = $CurrentHostPool.ImageSku
+                    CustomConfigurationScriptUrl = $CurrentHostPool.CustomConfigurationScriptUrl
+                    Tag                          = $Tag
+                    IsMicrosoftEntraIdJoined     = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                    Spot                         = $CurrentHostPool.Spot
+                    HibernationEnabled           = $CurrentHostPool.HibernationEnabled
+                    Intune                       = $CurrentHostPool.Intune
+                    LogDir                       = $LogDir
+                    AsJob                        = $true
                 }
             }
 
             if ((-not([string]::IsNullOrEmpty($DomainName))) -and ((-not([string]::IsNullOrEmpty($CurrentHostPoolOU.DistinguishedName))))) {
-                    $Params["DomainName"] = $DomainName
-                    $Params["OUPath"] = $CurrentHostPoolOU.DistinguishedName
+                $Params["DomainName"] = $DomainName
+                $Params["OUPath"] = $CurrentHostPoolOU.DistinguishedName
             }
             Add-PsAvdSessionHost @Params
             #region Pester Tests for Azure Host Pool Session Host - Azure Instantiation
@@ -7748,11 +7748,13 @@ function New-PsAvdPooledHostPoolSetup {
                         $CurrentHostPoolFSLogixContributorGroup = New-MgBetaGroup -DisplayName $CurrentHostPoolFSLogixContributorGroupName -MailEnabled:$False -MailNickname $MailNickname -SecurityEnabled
                     }
 
+                    <#
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolDAGUsersGroupName' EntraID group to the '$CurrentHostPoolFSLogixContributorGroupName' EntraID Group"
                     New-MGBetaGroupMember -GroupId $CurrentHostPoolFSLogixContributorGroup.Id -DirectoryObjectId $CurrentHostPoolDAGUsersGroup.Id -ErrorAction Ignore
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$CurrentHostPoolRAGUsersGroupName' EntraID group to the '$CurrentHostPoolFSLogixContributorGroupName' EntraID Group"
                     New-MGBetaGroupMember -GroupId $CurrentHostPoolFSLogixContributorGroup.Id -DirectoryObjectId $CurrentHostPoolRAGUsersGroup.Id -ErrorAction Ignore
-                
+                    #>
+
                     $CurrentHostPoolFSLogixElevatedContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixElevatedContributor"
                     $CurrentHostPoolFSLogixElevatedContributorGroup = Get-MgBetaGroup -Filter "displayName eq '$CurrentHostPoolFSLogixElevatedContributorGroupName'"
                     $MailNickname = $($CurrentHostPoolFSLogixElevatedContributorGroupName -replace "\s" -replace "\W").ToLower()
@@ -8019,11 +8021,11 @@ function New-PsAvdPooledHostPoolSetup {
                     do {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 60 seconds ..."
                         Start-Sleep -Seconds 60
-                        $ServicePrincipal = Get-MgBetaServicePrincipal -Filter "DisplayName eq '[Storage Account] $CurrentHostPoolStorageAccountName.file.core.windows.net'"
-                    } while ($null -eq $ServicePrincipal)
+                        $Application = Get-MgBetaApplication -Filter "DisplayName eq '[Storage Account] $CurrentHostPoolStorageAccountName.file.core.windows.net'"
+                    } while ($null -eq $Application)
 
                     # Grant admin consent to the service principal for the app role
-                    Set-AdminConsent -Context $AzContext -applicationId $ServicePrincipal.AppId
+                    Set-AdminConsent -Context $AzContext -applicationId $Application.AppId
                     #endregion
 
                     if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
@@ -8032,16 +8034,16 @@ function New-PsAvdPooledHostPoolSetup {
                         $requiredTag = "kdc_enable_cloud_group_sids"
                         # --- merge tags (preserve existing)
                         $currentTags = @()
-                        if ($ServicePrincipal.Tags) { 
-                            $currentTags = @($ServicePrincipal.Tags) 
+                        if ($Application.Tags) { 
+                            $currentTags = @($Application.Tags) 
                         }
 
                         if ($currentTags -contains $requiredTag) {
-                          Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Tag already present: $requiredTag"
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Tag already present: $requiredTag"
                         }
                         else {
                             $newTags = $currentTags + $requiredTag
-                            Update-MgBetaServicePrincipal -ServicePrincipalId $ServicePrincipal.Id -Tags $newTags
+                            Update-MgBetaApplication -ApplicationId $Application.Id -Tags $newTags
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Tag added: $requiredTag"
                         }
                         #endregion
@@ -8053,7 +8055,7 @@ function New-PsAvdPooledHostPoolSetup {
                     $NoMFAEntraIDGroup = Get-MgBetaGroup -Filter "DisplayName eq '$NoMFAEntraIDGroupName'"
 
                     if (-not($NoMFAEntraIDGroup)) {
-                        Write-Warning -Message "'$NoMFAEntraIDGroupName' Entra ID group not found for disabling the MFA for the '$($ServicePrincipal.DisplayName)' Service Principal. We will create one"
+                        Write-Warning -Message "'$NoMFAEntraIDGroupName' Entra ID group not found for disabling the MFA for the '$($Application.DisplayName)' Service Principal. We will create one"
                         #Creating the No MFA Entra ID Group
                         $NoMFAEntraIDGroup = New-PsAvdNoMFAUserEntraIDGroup -NoMFAEntraIDGroupName $NoMFAEntraIDGroupName -Pester:$Pester
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
@@ -8062,8 +8064,9 @@ function New-PsAvdPooledHostPoolSetup {
                     $NoMFAEntraIDGroup = Get-AzADGroup -SearchString $NoMFAEntraIDGroupName
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$NoMFAEntraIDGroup:`r`n$($NoMFAEntraIDGroup | Select-Object -Property * | Out-String)"
                     #>
+                    $ServicePrincipal = Get-MgBetaServicePrincipal -Filter "DisplayName eq '[Storage Account] $CurrentHostPoolStorageAccountName.file.core.windows.net'"
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$($ServicePrincipal.DisplayName)' Service Principal as member of the '$($NoMFAEntraIDGroup.DisplayName)' Microsoft Entra ID Group"
-                    #$result = Add-AzADGroupMember -TargetGroupObjectId $NoMFAEntraIDGroup.Id -MemberObjectId $ServicePrincipal.Id
+                    #$result = Add-AzADGroupMember -TargetGroupObjectId $NoMFAEntraIDGroup.Id -MemberObjectId $Application.Id
                     $result = New-MgBetaGroupMember -GroupId $NoMFAEntraIDGroup.Id -DirectoryObjectId $ServicePrincipal.Id
                     #Creating the MFA Conditional Access Policy and excluding the No MFA Entra ID Group
                     $MFAForAllUsersConditionalAccessPolicy = New-PsAvdMFAForAllUsersConditionalAccessPolicy -ExcludeGroupName $NoMFAEntraIDGroup.DisplayName -Pester:$Pester
@@ -8117,36 +8120,38 @@ function New-PsAvdPooledHostPoolSetup {
                     #Constrain the scope to the target file share
                     $SubscriptionId = $AzContext.Subscription.Id
 
-                    #region Setting up the file share with right RBAC: FSLogix Contributor = "Storage File Data SMB Share Contributor"
-                    #Assign the custom role to the target identity with the specified scope.
-                    do {
-                        Start-MicrosoftEntraIDConnectSync
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
-                        $AzADGroup = $null
-                        #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixContributorGroupName
-                        $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixContributorGroupName'"
-                    } while (-not($AzADGroup.Id))
-                    #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
-                    #region 'Storage File Data SMB Share Contributor' RBAC Assignment
-                    $RoleDefinition = Get-AzRoleDefinition -Name "Storage File Data SMB Share Contributor"
-                    $Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/fileServices/default/fileshares/$CurrentHostPoolShareName"
+                    if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+                        #region Setting up the file share with right RBAC: FSLogix Contributor = "Storage File Data SMB Share Contributor"
+                        #Assign the custom role to the target identity with the specified scope.
+                        do {
+                            Start-MicrosoftEntraIDConnectSync
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                            Start-Sleep -Seconds 30
+                            $AzADGroup = $null
+                            #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixContributorGroupName
+                            $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixContributorGroupName'"
+                        } while (-not($AzADGroup.Id))
+                        #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
+                        #region 'Storage File Data SMB Share Contributor' RBAC Assignment
+                        $RoleDefinition = Get-AzRoleDefinition -Name "Storage File Data SMB Share Contributor"
+                        $Scope = "/subscriptions/$SubscriptionId/resourceGroups/$CurrentHostPoolResourceGroupName/providers/Microsoft.Storage/storageAccounts/$CurrentHostPoolStorageAccountName/fileServices/default/fileshares/$CurrentHostPoolShareName"
 
-                    $Parameters = @{
-                        ObjectId           = $AzADGroup.Id
-                        RoleDefinitionName = $RoleDefinition.Name
-                        Scope              = $Scope
-                    }
+                        $Parameters = @{
+                            ObjectId           = $AzADGroup.Id
+                            RoleDefinitionName = $RoleDefinition.Name
+                            Scope              = $Scope
+                        }
 
-                    while (-not(Get-AzRoleAssignment @Parameters)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
-                        $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                        Start-Sleep -Seconds 30
+                        while (-not(Get-AzRoleAssignment @Parameters)) {
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
+                            $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                            Start-Sleep -Seconds 30
+                        }
+                        #endregion
+                        #endregion
                     }
-                    #endregion
-                    #endregion
 
                     #region Setting up the file share with right RBAC: FSLogix Elevated Contributor = "Storage File Data SMB Share Elevated Contributor"
                     #Get the name of the custom role
@@ -8265,20 +8270,7 @@ function New-PsAvdPooledHostPoolSetup {
 
                         #Add Modify for "Users" Group for This folder only
                         #$identity = "Users"
-                        $identity = $CurrentHostPoolDAGUsersGroupName
-                        #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
-                        $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
-                        $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
-                        $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
-                        $objType = [System.Security.AccessControl.AccessControlType]::Allow
-                        # Create a new FileSystemAccessRule object
-                        $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
-                        # Modify the existing ACL to include the new rule
-                        $existingAcl.SetAccessRule($AccessRule)
-
-                        #Add Modify for "Users" Group for This folder only
-                        #$identity = "Users"
-                        $identity = $CurrentHostPoolRAGUsersGroupName
+                        $identity = $CurrentHostPoolFSLogixContributorGroupName
                         #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
                         $colRights = [System.Security.AccessControl.FileSystemRights]::Modify
                         $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
@@ -8306,7 +8298,7 @@ function New-PsAvdPooledHostPoolSetup {
                             $existingAcl = Get-Acl Z:\redirections.xml
                             #Add Read for "Users" Group for This folder only
                             #$identity = "Users"
-                            $identity = $CurrentHostPoolDAGUsersGroupName
+                            $identity = $CurrentHostPoolFSLogixContributorGroupName
                             #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
                             $colRights = [System.Security.AccessControl.FileSystemRights]::Read
                             $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
@@ -8317,17 +8309,6 @@ function New-PsAvdPooledHostPoolSetup {
                             # Modify the existing ACL to include the new rule
                             $existingAcl.SetAccessRule($AccessRule)
 
-                            #$identity = "Users"
-                            $identity = $CurrentHostPoolRAGUsersGroupName
-                            #$identity = (Get-ADGroup -LDAPFilter "(displayName=$CurrentHostPoolDAGUsersGroupName)").Sid.value
-                            $colRights = [System.Security.AccessControl.FileSystemRights]::Read
-                            $InheritanceFlag = [System.Security.AccessControl.InheritanceFlags]::None
-                            $PropagationFlag = [System.Security.AccessControl.PropagationFlags]::None
-                            $objType = [System.Security.AccessControl.AccessControlType]::Allow
-                            # Create a new FileSystemAccessRule object
-                            $AccessRule = New-Object -TypeName System.Security.AccessControl.FileSystemAccessRule -ArgumentList ($identity, $colRights, $InheritanceFlag, $PropagationFlag, $objType)
-                            # Modify the existing ACL to include the new rule
-                            $existingAcl.SetAccessRule($AccessRule)
                             $existingAcl | Set-Acl -Path Z:\redirections.xml
                         }
                         #endregion
@@ -8350,6 +8331,7 @@ Connect-MgGraph -NoWelcome -UseDeviceCode
 While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
 	Connect-AzAccount -UseDeviceAuthentication
 }
+#endregion
 
 Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
 
@@ -8358,17 +8340,13 @@ Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
 `$FileShareName = "$CurrentHostPoolShareName"
 `$FilePath = "/"
 
-`$Groups = @(
-    "$CurrentHostPoolDAGUsersGroupName",
-    "$CurrentHostPoolRAGUsersGroupName"
-)
-`$Acl = "O:BAG:SYD:(A;;FA;;;SY)"
+#System + Creator Owner = Full Control
+`$Acl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;CO)"
 `$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
 `$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key -ErrorAction Stop
 
-foreach (`$Principal in `$Groups) {
-    Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal `$Principal -AccessRights Modify -InheritanceFlags None -PropagationFlags None
-}
+Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
+Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
 "@
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
                         $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
@@ -9265,7 +9243,7 @@ foreach (`$Principal in `$Groups) {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                     }
-                    } 
+                } 
                 #endregion
                 #endregion 
             }
@@ -9683,54 +9661,54 @@ foreach (`$Principal in `$Groups) {
                 if (-not([String]::IsNullOrEmpty($CurrentHostPool.VMSourceImageId))) {
                     #We propagate the AsJob context to the child function
                     $Params = @{
-                        HostPoolId                    = $CurrentAzWvdHostPool.Id
-                        NamePrefix                    = $CurrentHostPool.NamePrefix
-                        VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
-                        KeyVault                      = $CurrentHostPool.KeyVault
-                        RegistrationInfoToken         = $RegistrationInfoToken.Token
-                        SubnetId                      = $CurrentHostPool.SubnetId
-                        VMSize                        = $CurrentHostPool.VMSize
-                        VMSourceImageId               = $CurrentHostPool.VMSourceImageId
-                        DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
-                        CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
-                        Tag                           = $Tag
-                        IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
-                        Spot                          = $CurrentHostPool.Spot
-                        HibernationEnabled            = $CurrentHostPool.HibernationEnabled
-                        Intune                        = $CurrentHostPool.Intune
-                        LogDir                        = $LogDir
-                        SessionHostConfiguration      = $CurrentHostPool.SessionHostConfiguration
-                        AsJob                         = $AsJob
+                        HostPoolId                   = $CurrentAzWvdHostPool.Id
+                        NamePrefix                   = $CurrentHostPool.NamePrefix
+                        VMNumberOfInstances          = $CurrentHostPool.VMNumberOfInstances
+                        KeyVault                     = $CurrentHostPool.KeyVault
+                        RegistrationInfoToken        = $RegistrationInfoToken.Token
+                        SubnetId                     = $CurrentHostPool.SubnetId
+                        VMSize                       = $CurrentHostPool.VMSize
+                        VMSourceImageId              = $CurrentHostPool.VMSourceImageId
+                        DiffDiskPlacement            = $CurrentHostPool.DiffDiskPlacement
+                        CustomConfigurationScriptUrl = $CurrentHostPool.CustomConfigurationScriptUrl
+                        Tag                          = $Tag
+                        IsMicrosoftEntraIdJoined     = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                        Spot                         = $CurrentHostPool.Spot
+                        HibernationEnabled           = $CurrentHostPool.HibernationEnabled
+                        Intune                       = $CurrentHostPool.Intune
+                        LogDir                       = $LogDir
+                        SessionHostConfiguration     = $CurrentHostPool.SessionHostConfiguration
+                        AsJob                        = $AsJob
                     }
                 }
                 else {
                     #We propagate the AsJob context to the child function
                     $Params = @{
-                        HostPoolId                    = $CurrentAzWvdHostPool.Id
-                        NamePrefix                    = $CurrentHostPool.NamePrefix
-                        VMNumberOfInstances           = $CurrentHostPool.VMNumberOfInstances
-                        KeyVault                      = $CurrentHostPool.KeyVault
-                        RegistrationInfoToken         = $RegistrationInfoToken.Token
-                        SubnetId                      = $CurrentHostPool.SubnetId
-                        VMSize                        = $CurrentHostPool.VMSize
-                        DiffDiskPlacement             = $CurrentHostPool.DiffDiskPlacement
-                        ImagePublisherName            = $CurrentHostPool.ImagePublisherName
-                        ImageOffer                    = $CurrentHostPool.ImageOffer
-                        ImageSku                      = $CurrentHostPool.ImageSku
-                        CustomConfigurationScriptUrl  = $CurrentHostPool.CustomConfigurationScriptUrl
-                        Tag                           = $Tag
-                        IsMicrosoftEntraIdJoined      = $CurrentHostPool.IsMicrosoftEntraIdJoined()
-                        Spot                          = $CurrentHostPool.Spot
-                        HibernationEnabled            = $CurrentHostPool.HibernationEnabled
-                        Intune                        = $CurrentHostPool.Intune
-                        LogDir                        = $LogDir
-                        SessionHostConfiguration      = $CurrentHostPool.SessionHostConfiguration
-                        AsJob                         = $AsJob
+                        HostPoolId                   = $CurrentAzWvdHostPool.Id
+                        NamePrefix                   = $CurrentHostPool.NamePrefix
+                        VMNumberOfInstances          = $CurrentHostPool.VMNumberOfInstances
+                        KeyVault                     = $CurrentHostPool.KeyVault
+                        RegistrationInfoToken        = $RegistrationInfoToken.Token
+                        SubnetId                     = $CurrentHostPool.SubnetId
+                        VMSize                       = $CurrentHostPool.VMSize
+                        DiffDiskPlacement            = $CurrentHostPool.DiffDiskPlacement
+                        ImagePublisherName           = $CurrentHostPool.ImagePublisherName
+                        ImageOffer                   = $CurrentHostPool.ImageOffer
+                        ImageSku                     = $CurrentHostPool.ImageSku
+                        CustomConfigurationScriptUrl = $CurrentHostPool.CustomConfigurationScriptUrl
+                        Tag                          = $Tag
+                        IsMicrosoftEntraIdJoined     = $CurrentHostPool.IsMicrosoftEntraIdJoined()
+                        Spot                         = $CurrentHostPool.Spot
+                        HibernationEnabled           = $CurrentHostPool.HibernationEnabled
+                        Intune                       = $CurrentHostPool.Intune
+                        LogDir                       = $LogDir
+                        SessionHostConfiguration     = $CurrentHostPool.SessionHostConfiguration
+                        AsJob                        = $AsJob
                     }
                 }
                 if ((-not([string]::IsNullOrEmpty($DomainName))) -and ((-not([string]::IsNullOrEmpty($CurrentHostPoolOU.DistinguishedName))))) {
-                        $Params["DomainName"] = $DomainName
-                        $Params["OUPath"] = $CurrentHostPoolOU.DistinguishedName
+                    $Params["DomainName"] = $DomainName
+                    $Params["OUPath"] = $CurrentHostPoolOU.DistinguishedName
                 }
                 Add-PsAvdSessionHost @Params
             }
