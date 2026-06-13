@@ -13,11 +13,18 @@
 
 ## Release Notes
 
+- [1.0.20]
+  - Code improvements
+  - Adding HybridJoin VM a,dnd Cloud Only Identities se cases
+- [1.0.19]
+  - Test Version
+- [1.0.18]
+  - Test Version
 - [1.0.17]
   - Code improvements
   - Adding Code for [Session Host Configuration](https://learn.microsoft.com/en-us/azure/virtual-desktop/deploy-azure-virtual-desktop?tabs=portal-standard%2Cportal-session-host-configuration%2Cportal&pivots=host-pool-session-host-configuration) (Preview)
 - [1.0.16]
-  - Adding more scopes when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0) 
+  - Adding more scopes when connecting to Graph via [Connect-MgGraph](https://learn.microsoft.com/en-us/powershell/module/microsoft.graph.authentication/connect-mggraph?view=graph-powershell-1.0)
   - Enabling [PKU2U](https://github.com/Azure/avdaccelerator/blob/main/workload/scripts/Set-SessionHostConfiguration.ps1#L420-L431) when the IDP is EntraID
   - Update on New-AzureComputeGallery
   - Bug fixes
@@ -29,16 +36,16 @@
   - Bug fixes
 - [1.0.14]
   - [Configuring the session lock behavior for Azure Virtual Desktop](https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-session-lock-behavior?tabs=group-policy)
-  - OneDrive management for redirection of the known folders (Desktop, Documents, Pictures) 
+  - OneDrive management for redirection of the known folders (Desktop, Documents, Pictures)
 - [1.0.13]
   - Enabling SSO
   - Switching from Standard_D2s_v4 to Standard_D2s_v6 for the AVD Session Hosts
-  - Adding the more scopes for Graph
+  - Adding more scopes for Graph
   - Updating the '[AVD] Require multifactor authentication for all users' Conditional Access Policy
   - Adding a Toast notification when a user logs in to have information about the FSLogix Profile space used.
   - Adding some code to start VMs in case of eviction due to Spot Instance VM settings.
   - Adding a workbook instance from the [https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/](https://blog.itprocloud.de/AVD-Azure-Virtual-Desktop-Error-Drill-Down-Workbook/) Azure Workbook Template for every Hostpool.
-  - The[AMBA] (http://aka.ms/amba) alerts are now enabled by default
+  - The [AMBA](http://aka.ms/amba) alerts are now enabled by default
   - Updating Pester Tests
 - [1.0.12]
   - Updating OS from Windows 11 23H2 to Windows 11 24H2 for the AVD Session Hosts
@@ -83,7 +90,7 @@ A list of potential changes or evolutions can be found in the [What's next log](
 This GitHub repository is the home of the PowerShell module [PSAzureVirtualDesktop](https://www.powershellgallery.com/packages/PSAzureVirtualDesktop). This module is a collection of PowerShell classes and functions that can be used to quickly deploy Azure Virtual Desktop (AVD) Proof-Of-Concepts. FSLogix, MSIX, AppAttach (With AD only for the moment in this project), Intune, ADDS or Entra joined VMs, Scaling Plan, Hibernation, OS Ephemeral Disks are some of the supported options available.
 
 > [!IMPORTANT]
-The module is designed to be used in a lab environment and is not intended for production use. The module is provided as-is and is not supported by Microsoft. **For a Microsoft-supported version deployment, I suggest using the Azure Virtual Desktop (AVD) Landing Zone Accelerator (LZA), which is available [here](https://github.com/Azure/avdaccelerator). Please note that this only covers the Azure component where the module [PSAzureVirtualDesktop](https://www.powershellgallery.com/packages/PSAzureVirtualDesktop) encompasses both OnPrem and Azure configurations.**
+> The module is designed to be used in a lab environment and is not intended for production use. The module is provided as-is and is not supported by Microsoft. **For a Microsoft-supported version deployment, I suggest using the [Azure Virtual Desktop (AVD) Landing Zone Accelerator (LZA)](https://github.com/Azure/avdaccelerator). Please note that this only covers the Azure component where the module [PSAzureVirtualDesktop](https://www.powershellgallery.com/packages/PSAzureVirtualDesktop) encompasses both OnPrem and Azure configurations.**
 
 ## Requirements
 
@@ -124,7 +131,7 @@ The following PowerShell modules are also required to be installed on the machin
 
 ### Domain Controller
 
-Before proceeding, ensure that a Domain Controller is present in your Azure Tenant. This requires a Windows Server with the Active Directory Directory Services role installed and configured. If this is not already set up, you can use the following links to quicky create these resources. The options are listed from least to most preferred:
+Before proceeding, ensure that a Domain Controller is present in your Azure Tenant. This requires a Windows Server with the Active Directory Directory Services role installed and configured. If this is not already set up, you can use the following links to quickly create these resources. The options are listed from least to most preferred:
 
 - [https://aka.ms/m365avdws](https://aka.ms/m365avdws)
 - [https://github.com/lavanack/laurentvanacker.com/tree/master/Azure/Azure%20Virtual%20Desktop/AAD-Hybrid-Lab](https://github.com/lavanack/laurentvanacker.com/tree/master/Azure/Azure%20Virtual%20Desktop/AAD-Hybrid-Lab)
