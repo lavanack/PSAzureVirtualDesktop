@@ -6,6 +6,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [Changelog for PSAzureVirtualDesktop](#changelog-for-psazurevirtualdesktop)
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
+  - [\[1.0.20\] - 2026-06-13](#1020---2026-06-13)
+  - [\[1.0.19\] - 2026-05-16](#1019---2026-05-16)
+  - [\[1.0.18\] - 2026-xx-yy](#1018---2026-xx-yy)
   - [\[1.0.17\] - 2026-01-12](#1017---2026-01-12)
   - [\[1.0.16\] - 2025-10-27](#1016---2025-10-27)
   - [\[1.0.15\] - 2025-10-15](#1015---2025-10-15)
@@ -29,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- 2026-06-13 - Updated `CHANGELOG.md`
 - 2026-01-12 - Updated `CHANGELOG.md`
 - 2025-10-27 - Updated `CHANGELOG.md`
 - 2025-10-15 - Updated `CHANGELOG.md`
@@ -42,6 +46,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
 
+## [1.0.20] - 2026-06-13
+
+- Added [Microsoft Entra hybrid join](https://learn.microsoft.com/en-us/entra/identity/devices/concept-hybrid-join) support for the AVD Session Hosts. Dedicated "Hybrid Join Settings" GPOs (setting the `autoWorkplaceJoin` and `CDJ\AAD` `TenantId`/`TenantName` registry values) are created and linked to the Host Pool OU.
+- Added the `Set-BlockAADWorkplaceJoinOnDC` function, which creates and links a GPO on the `Domain Controllers` OU to disable `autoWorkplaceJoin` and enable `BlockAADWorkplaceJoin` (preventing the Domain Controllers from registering in Microsoft Entra ID).
+- Added a new `IdentityModel` (`Hybrid` / `CloudOnly`) on the [HostPool](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/HostPool-PowerShell-Classes) class. `CloudOnly` targets identities that exist only in Microsoft Entra ID and forces the Microsoft Entra ID join mode (`SetIdentityModel()` method and `IdentityModel` property/tag added).
+- Improved the `Az.DesktopVirtualization` prerequisite handling: replaced `Update-AzDesktopVirtualizationModule.ps1` with `Install-AzDesktopVirtualizationModule.ps1` and updated `Test-NewerAvailableModule.ps1`.
+- Added a workaround for [azure-monitor-baseline-alerts issue #812](https://github.com/Azure/azure-monitor-baseline-alerts/issues/812).
+- Refactored the [`New-PsAvdRdcMan`](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/New-PsAvdRdcMan) function (previous implementation kept as `New-PsAvdRdcManOld`; removed the `New-PsAvdRdcManV2` function).
+- Added extensive inline code comments and help across the module.
+
+## [1.0.19] - 2026-05-16
+
+- Test Version
+
+## [1.0.18] - 2026-xx-yy
+
+- Test Version
+  
 ## [1.0.17] - 2026-01-12
 
 - Code improvements

@@ -13,6 +13,13 @@
 
 ## Release Notes
 
+- [1.0.20]
+  - Code improvements
+  - Adding HybridJoin VM a,dnd Cloud Only Identities se cases
+- [1.0.19]
+  - Test Version
+- [1.0.18]
+  - Test Version
 - [1.0.17]
   - Code improvements
   - Adding Code for [Session Host Configuration](https://learn.microsoft.com/en-us/azure/virtual-desktop/deploy-azure-virtual-desktop?tabs=portal-standard%2Cportal-session-host-configuration%2Cportal&pivots=host-pool-session-host-configuration) (Preview)
