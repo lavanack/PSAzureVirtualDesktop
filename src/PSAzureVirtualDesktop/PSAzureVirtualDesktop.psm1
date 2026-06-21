@@ -9349,7 +9349,7 @@ While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
 #endregion
 
 Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
-
+`$null = Set-AzStorageAccount -ResourceGroupName "$CurrentHostPoolResourceGroupName" -Name "$CurrentHostPoolStorageAccountName" -AllowSharedKeyAccess `$true
 `$CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName "$CurrentHostPoolResourceGroupName" -AccountName "$CurrentHostPoolStorageAccountName") | Where-Object -FilterScript { `$_.KeyName -eq "key1" }).Value
 `$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -StorageAccountKey `$CurrentHostPoolStorageAccountKey
 `$FileShareName = "$CurrentHostPoolShareName"
@@ -9363,14 +9363,12 @@ Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
 Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
 Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
 "@
+                        $Path = Join-Path -Path $env:Temp -ChildPath $("pwsh_AzFileAce_{0}.ps1" -f $CurrentHostPool.Name)                            
+                        $null = New-Item -Path $Path -ItemType File -Value $ScriptBlockContent -Force
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
                         $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
                         if (pwsh -v) {
                             pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
-                            <#
-                            $AzFileAce = pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$AzFileAce: $($AzFileAce | Out-String)"
-                            #>
                         }
                         else {
                             Write-Warning -Message "Powershell 7+ not installed. Install it (Invoke-Expression -Command ""& { $(Invoke-RestMethod https://aka.ms/install-powershell.ps1) } -UseMSI -Quiet"") and proceed with https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell or run the following script (from pwsh):`r`n$ScriptBlockContent"
