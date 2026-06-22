@@ -165,7 +165,8 @@ class HostPool {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
         }
         #$this.VMSize = "Standard_D4s_v5"
-        $this.VMSize = "Standard_B2as_v2"
+        #$this.VMSize = "Standard_B2as_v2"
+        $this.VMSize = "Standard_E2s_v5"
         $this.SubnetId = $SubnetId        
         #Getting the VNet from the Subnet
         $VirtualNetwork = $this.GetVirtualNetwork()
@@ -9358,12 +9359,16 @@ Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
 #System + Creator Owner = Full Control
 `$Acl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;CO)"
 `$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
+Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '`$CurrentHostPoolStorageAccountName\`$FileShareName'"
 `$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key -ErrorAction Stop
 
+Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '`$CurrentHostPoolStorageAccountName\`$FileShareName'"
 `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
+Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '`$CurrentHostPoolStorageAccountName\`$FileShareName'"
 `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
 "@
                         $Path = Join-Path -Path $env:Temp -ChildPath $("pwsh_AzFileAce_{0}.ps1" -f $CurrentHostPool.Name)                            
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Powershell 7+ Script Path for Azure File ACE(s):$Path"
                         $null = New-Item -Path $Path -ItemType File -Value $ScriptBlockContent -Force
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
                         $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
