@@ -165,8 +165,8 @@ class HostPool {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
         }
         #$this.VMSize = "Standard_D4s_v5"
-        #$this.VMSize = "Standard_B2as_v2"
-        $this.VMSize = "Standard_E2s_v5"
+        $this.VMSize = "Standard_E2_v4"
+        #$this.VMSize = "Standard_E2s_v5"
         $this.SubnetId = $SubnetId        
         #Getting the VNet from the Subnet
         $VirtualNetwork = $this.GetVirtualNetwork()
@@ -8257,6 +8257,7 @@ function New-PsAvdPersonalHostPoolSetup {
             #endregion
 
             #region Performance Counters
+            #From https://github.com/AzaryaShaulov/AVD/blob/main/AVD-SessionHost-Insights/AVD-Insights-Enable-PerfMetricsDCR.ps1
             $PerformanceCounters = @(
                 # CPU
                 [PSCustomObject] @{ObjectName = 'Processor Information'; CounterName = '% Processor Time'; InstanceName = '_Total'; IntervalSeconds = 30 }
@@ -8268,6 +8269,9 @@ function New-PsAvdPersonalHostPoolSetup {
                 # Disk - Capacity (per-volume for C: and other drives)
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = '% Free Space'; InstanceName = '*'; IntervalSeconds = 30 }
                 # Disk - Latency (per-volume and per-physical-disk)
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = 'C:'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = 'C:'; IntervalSeconds = 60 }
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = 'C:'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Read'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Write'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
@@ -8275,11 +8279,7 @@ function New-PsAvdPersonalHostPoolSetup {
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Write'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
                 # Disk - Queue
-                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
                 # AVD Session Quality - User Input Delay
                 [PSCustomObject] @{ObjectName = 'User Input Delay per Process'; CounterName = 'Max Input Delay'; InstanceName = '*'; IntervalSeconds = 30 }
@@ -8290,9 +8290,9 @@ function New-PsAvdPersonalHostPoolSetup {
                 # AVD Session Quality - RemoteFX Graphics (GPU hosts)
                 [PSCustomObject] @{ObjectName = 'RemoteFX Network'; CounterName = 'Average Encoding Time'; InstanceName = '*'; IntervalSeconds = 30 }
                 # AVD Session Lifecycle - Terminal Services
-                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Active Sessions'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Inactive Sessions'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Total Sessions'; InstanceName = '*'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Active Sessions'; InstanceName = '*'; IntervalSeconds = 60 }
+                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Inactive Sessions'; InstanceName = '*'; IntervalSeconds = 60 }
+                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Total Sessions'; InstanceName = '*'; IntervalSeconds = 60 }
                 # Network - Bandwidth (bytes per second)
                 [PSCustomObject] @{ObjectName = 'Network Adapter'; CounterName = 'Bytes Total/sec'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'Network Adapter'; CounterName = 'Bytes Received/sec'; InstanceName = '*'; IntervalSeconds = 30 }
@@ -9359,12 +9359,12 @@ Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
 #System + Creator Owner = Full Control
 `$Acl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;CO)"
 `$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
-Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '`$CurrentHostPoolStorageAccountName\`$FileShareName'"
+Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
 `$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key -ErrorAction Stop
 
-Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '`$CurrentHostPoolStorageAccountName\`$FileShareName'"
+Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
 `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
-Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '`$CurrentHostPoolStorageAccountName\`$FileShareName'"
+Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
 `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
 "@
                         $Path = Join-Path -Path $env:Temp -ChildPath $("pwsh_AzFileAce_{0}.ps1" -f $CurrentHostPool.Name)                            
@@ -11332,7 +11332,8 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
             #endregion
 
             #region Performance Counters
-$PerformanceCounters = @(
+            #From https://github.com/AzaryaShaulov/AVD/blob/main/AVD-SessionHost-Insights/AVD-Insights-Enable-PerfMetricsDCR.ps1
+            $PerformanceCounters = @(
                 # CPU
                 [PSCustomObject] @{ObjectName = 'Processor Information'; CounterName = '% Processor Time'; InstanceName = '_Total'; IntervalSeconds = 30 }
                 #Memory
@@ -11343,6 +11344,9 @@ $PerformanceCounters = @(
                 # Disk - Capacity (per-volume for C: and other drives)
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = '% Free Space'; InstanceName = '*'; IntervalSeconds = 30 }
                 # Disk - Latency (per-volume and per-physical-disk)
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = 'C:'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = 'C:'; IntervalSeconds = 60 }
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = 'C:'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Read'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Write'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
@@ -11365,9 +11369,9 @@ $PerformanceCounters = @(
                 # AVD Session Quality - RemoteFX Graphics (GPU hosts)
                 [PSCustomObject] @{ObjectName = 'RemoteFX Network'; CounterName = 'Average Encoding Time'; InstanceName = '*'; IntervalSeconds = 30 }
                 # AVD Session Lifecycle - Terminal Services
-                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Active Sessions'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Inactive Sessions'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Total Sessions'; InstanceName = '*'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Active Sessions'; InstanceName = '*'; IntervalSeconds = 60 }
+                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Inactive Sessions'; InstanceName = '*'; IntervalSeconds = 60 }
+                [PSCustomObject] @{ObjectName = 'Terminal Services'; CounterName = 'Total Sessions'; InstanceName = '*'; IntervalSeconds = 60 }
                 # Network - Bandwidth (bytes per second)
                 [PSCustomObject] @{ObjectName = 'Network Adapter'; CounterName = 'Bytes Total/sec'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'Network Adapter'; CounterName = 'Bytes Received/sec'; InstanceName = '*'; IntervalSeconds = 30 }
