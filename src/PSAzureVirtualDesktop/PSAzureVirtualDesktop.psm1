@@ -4485,7 +4485,7 @@ function New-PsAvdPrivateEndpointSetup {
 
                 $PrivateDnsZoneGroup = Get-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName
                 if ($PrivateDnsZoneGroup) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Remving the already existing Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing the already existing Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
                     Remove-AzPrivateDnsZoneGroup -ResourceGroupName $ResourceGroupName -PrivateEndpointName $PrivateEndpointName -Name $PrivateDnsZoneGroup.Name -Force
                 }
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Private DNS Zone Group for the Specified Private Endpoint '$PrivateEndpointName' (in the '$ResourceGroupName' Resource Group)"
@@ -7437,12 +7437,16 @@ function Remove-PsAvdHostPoolSetup {
         $AzureLocation = $AzureAppAttachPooledHostPools.Location | Select-Object -Unique 
         foreach ($CurrentAzureLocation in $AzureLocation) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$CurrentAzureLocation' Azure Location"
-            $CurrentAzureLocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$CurrentAzureLocation'" -SearchBase $AVDRootOU.DistinguishedName
-            $PooledDesktopsOU = Get-ADOrganizationalUnit -Filter 'Name -eq "PooledDesktops"' -SearchBase $CurrentAzureLocationOU.DistinguishedName
-            $ADComputers = Get-ADComputer -Filter * -SearchBase $PooledDesktopsOU.DistinguishedName | Where-Object -FilterScript { $_.Name -in $AppAttachStorageAccountNames }
-            if ($ADComputers) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$($ADComputers.Name -join ', ')' AD Computer Accounts"
-                $ADComputers | Remove-ADComputer -Confirm:$false
+            $CurrentAzureLocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$CurrentAzureLocation'" -SearchBase $AVDRootOU.DistinguishedName -ErrorAction Ignore
+            if ($CurrentAzureLocationOU) {
+                $PooledDesktopsOU = Get-ADOrganizationalUnit -Filter 'Name -eq "PooledDesktops"' -SearchBase $CurrentAzureLocationOU.DistinguishedName -ErrorAction Ignore
+                if ($PooledDesktopsOU) {
+                    $ADComputers = Get-ADComputer -Filter * -SearchBase $PooledDesktopsOU.DistinguishedName | Where-Object -FilterScript { $_.Name -in $AppAttachStorageAccountNames }
+                    if ($ADComputers) {
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Removing '$($ADComputers.Name -join ', ')' AD Computer Accounts"
+                        $ADComputers | Remove-ADComputer -Confirm:$false
+                    }
+                }
             }
         }
         #endregion
@@ -8266,7 +8270,7 @@ function New-PsAvdPersonalHostPoolSetup {
                 [PSCustomObject] @{ObjectName = 'Memory'; CounterName = 'Page Faults/sec'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'Memory'; CounterName = 'Pages/sec'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'Memory'; CounterName = '% Committed Bytes In Use'; InstanceName = '*'; IntervalSeconds = 30 }
-                # Disk - Capacity (per-volume for C: and other drives)
+				# Disk - Capacity (per-volume for C: and other drives)
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = '% Free Space'; InstanceName = '*'; IntervalSeconds = 30 }
                 # Disk - Latency (per-volume and per-physical-disk)
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = 'C:'; IntervalSeconds = 30 }
@@ -8279,7 +8283,11 @@ function New-PsAvdPersonalHostPoolSetup {
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Write'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
                 # Disk - Queue
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 60 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 60 }
+                [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
                 # AVD Session Quality - User Input Delay
                 [PSCustomObject] @{ObjectName = 'User Input Delay per Process'; CounterName = 'Max Input Delay'; InstanceName = '*'; IntervalSeconds = 30 }
@@ -8313,6 +8321,8 @@ function New-PsAvdPersonalHostPoolSetup {
                 New-AzPerfCounterDataSourceObject -Name $Name -Stream Microsoft-Perf -CounterSpecifier $CounterSpecifier -SamplingFrequencyInSecond $CurrentKey
             }
             #endregion
+
+            #region Data Collection Rule
             <#
             $DataCollectionEndpointName = "dce-{0}" -f $LogAnalyticsWorkSpace.Name
             $DataCollectionEndpoint = New-AzDataCollectionEndpoint -Name $DataCollectionEndpointName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -NetworkAclsPublicNetworkAccess Enabled
@@ -8322,6 +8332,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $DataFlow = New-AzDataFlowObject -Stream Microsoft-InsightsMetrics, Microsoft-Perf, Microsoft-Event -Destination $LogAnalyticsWorkSpace.Name
             $DestinationLogAnalytic = New-AzLogAnalyticsDestinationObject -Name $LogAnalyticsWorkSpace.Name -WorkspaceResourceId $LogAnalyticsWorkSpace.ResourceId
             $DataCollectionRule = New-AzDataCollectionRule -Name $DataCollectionRuleName -ResourceGroupName $CurrentHostPoolResourceGroupName -Location $CurrentHostPool.Location -DataFlow $DataFlow -DataSourcePerformanceCounter $PerformanceCounters -DataSourceWindowsEventLog $WindowsEventLogs -DestinationLogAnalytic $DestinationLogAnalytic #-DataCollectionEndpointId $DataCollectionEndpoint.Id
+            #endregion
             #endregion
 
             #region Adding Data Collection Rule Association for every Session Host
@@ -8472,14 +8483,21 @@ function New-PsAvdPooledHostPoolSetup {
 <?xml version="1.0"  encoding="UTF-8"?>
 <FrxProfileFolderRedirection ExcludeCommonFolders="49">
 <Excludes>
-<Exclude Copy="0">AppData\Roaming\Microsoft\Teams\media-stack</Exclude>
+<!-- Temp -->
+<Exclude Copy="0">AppData\Local\Temp</Exclude>
+<!-- Browser -->
+<Exclude Copy="0">AppData\Local\Microsoft\Edge\User Data\Default\Cache</Exclude>
+<Exclude Copy="0">AppData\Local\Google\Chrome\User Data\Default\Cache</Exclude>
+<!-- Teams -->
+<Exclude Copy="0">AppData\Local\Packages\MSTeams_*</Exclude>
 <Exclude Copy="0">AppData\Local\Microsoft\Teams\meeting-addin\Cache</Exclude>
+<Exclude Copy="0">AppData\Roaming\Microsoft\Teams\media-stack</Exclude>
+<!-- Misc -->
+<Exclude Copy="0">AppData\Local\CrashDumps</Exclude>
+<!-- Outlook -->
 <Exclude Copy="0">AppData\Local\Microsoft\Outlook</Exclude>
+<!-- OneDrive -->
 <Exclude Copy="0">AppData\Local\Microsoft\OneDrive</Exclude>
-<Exclude Copy="0">AppData\Local\Microsoft\Edge</Exclude>
-<Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs</Exclude>
-<Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\PerfLogs</Exclude>
-<Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\EBWebView\WV2Profile_tfw\WebStorage</Exclude>
 </Excludes>
 <Includes>
 <Include>AppData\Local\Microsoft\Edge\User Data</Include>
@@ -8804,6 +8822,9 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
                     Start-Sleep -Seconds 10
                     #region FSLogix GPO Management: Dedicated GPO settings for FSLogix profiles for this HostPool 
+                    #From https://learn.microsoft.com/en-us/fslogix/reference-configuration-settings?tabs=profiles#cleanupinvalidsessions
+                    $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Apps' -ValueName "CleanupInvalidSessions" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
+
                     #From https://learn.microsoft.com/en-us/FSLogix/tutorial-configure-profile-containers#profile-container-configuration
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting some 'FSLogix' related registry values for '$($CurrentHostPoolFSLogixGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolFSLogixGPO.DisplayName -Key 'HKLM\SOFTWARE\FSLogix\Profiles' -ValueName "Enabled" -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
@@ -10255,7 +10276,7 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
                     }
 
                     while (-not(Get-AzRoleAssignment @Parameters)) {
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.ResourceGroupName)' ResourceGroup"
                         $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -11341,7 +11362,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                 [PSCustomObject] @{ObjectName = 'Memory'; CounterName = 'Page Faults/sec'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'Memory'; CounterName = 'Pages/sec'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'Memory'; CounterName = '% Committed Bytes In Use'; InstanceName = '*'; IntervalSeconds = 30 }
-                # Disk - Capacity (per-volume for C: and other drives)
+				# Disk - Capacity (per-volume for C: and other drives)
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = '% Free Space'; InstanceName = '*'; IntervalSeconds = 30 }
                 # Disk - Latency (per-volume and per-physical-disk)
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = 'C:'; IntervalSeconds = 30 }
@@ -11355,9 +11376,9 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
                 # Disk - Queue
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 60 }
                 [PSCustomObject] @{ObjectName = 'LogicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
-                [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 30 }
+                [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk sec/Transfer'; InstanceName = '*'; IntervalSeconds = 60 }
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Current Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
                 [PSCustomObject] @{ObjectName = 'PhysicalDisk'; CounterName = 'Avg. Disk Queue Length'; InstanceName = '*'; IntervalSeconds = 30 }
                 # AVD Session Quality - User Input Delay

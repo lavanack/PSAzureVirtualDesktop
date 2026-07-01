@@ -34,6 +34,9 @@ param(
 Clear-Host
 
 #region FSLogix GPO Management: Dedicated GPO settings for FSLogix profiles for this HostPool 
+#From https://learn.microsoft.com/en-us/fslogix/reference-configuration-settings?tabs=profiles#app-services-settings
+Set-ItemProperty -Path 'HKLM:\SOFTWARE\FSLogix\Apps' -Name 'CleanupInvalidSessions' -Type ([Microsoft.Win32.RegistryValueKind]::Dword) -Value 1
+
 #From https://learn.microsoft.com/en-us/fslogix/tutorial-configure-profile-containers#profile-container-configuration
 Write-Verbose -Message "Setting some 'FSLogix' related registry values ..."
 $null = New-Item -Path 'HKLM:\SOFTWARE\FSLogix\Profiles' -Force
