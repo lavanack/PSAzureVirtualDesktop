@@ -5147,7 +5147,7 @@ function Grant-PsAvdADJoinPermission {
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
         #$DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Forest.Name
-        $ADUser = New-ADUser -Name $Credential.UserName -AccountPassword $Credential.Password -PasswordNeverExpires $true -Enabled $true -Description "Created by PowerShell Script for joining AVD Session Hosts to ADDS" -UserPrincipalName $("{0}@{1}" -f $Credential.UserName, $DomainName) -PassThru
+        $ADUser = New-ADUser -Name $($Credential.UserName -replace "@.*")  -AccountPassword $Credential.Password -PasswordNeverExpires $true -Enabled $true -Description "Created by PowerShell Script for joining AVD Session Hosts to ADDS" -UserPrincipalName $Credential.UserName -PassThru
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ADUser: $($ADUser | Out-string)"
     }
 
@@ -5953,6 +5953,9 @@ function New-PsAvdSessionHost {
         $null = Set-AzVMSourceImage -VM $VMConfig -PublisherName $ImagePublisherName -Offer $ImageOffer -Skus $ImageSku -Version 'latest'
     }
     #Set OsDisk configuration
+	$null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage
+	Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] No Ephemeral OS disk for '$VMName' Azure VM"
+	<#
     #From https://learn.microsoft.com/en-us/azure/virtual-machines/ephemeral-os-disks-deploy#powershell
     if ($DiffDiskPlacement -eq [DiffDiskPlacement]::None) {
         $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage
@@ -5980,6 +5983,7 @@ function New-PsAvdSessionHost {
         $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage
         $null = New-AzVM -ResourceGroupName $ResourceGroupName -Location $Location -VM $VMConfig -Tag $Tag -DisableBginfoExtension
     }
+	#>
     $VM = Get-AzVM -ResourceGroup $ResourceGroupName -Name $VMName
     $null = $VM | Start-AzVM #-Name $VMName -ResourceGroupName $ResourceGroupName
 
