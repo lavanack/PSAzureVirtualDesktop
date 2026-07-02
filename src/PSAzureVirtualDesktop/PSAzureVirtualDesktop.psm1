@@ -5969,6 +5969,7 @@ function New-PsAvdSessionHost {
         $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage -DiffDiskSetting Local -DiffDiskPlacement ResourceDisk -Caching ReadOnly
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Ephemeral OS disk for '$VMName' Azure VM set to 'ResourceDisk'"
     }
+	#>
     try {
         $null = New-AzVM -ResourceGroupName $ResourceGroupName -Location $Location -VM $VMConfig -Tag $Tag -DisableBginfoExtension -ErrorAction Stop
     } 
@@ -5979,11 +5980,12 @@ function New-PsAvdSessionHost {
         # Note that value__ is not a typo.
         Write-Warning -Message "StatusCode: $($_.Exception.Response.StatusCode.value__ )"
         Write-Warning -Message "Message: $($_.Exception.Message)"
+        <#
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Disabling Ephemeral OS disk for '$VMName' Azure VM"
         $null = Set-AzVMOSDisk -VM $VMConfig -Name $OSDiskName -DiskSizeInGB $OSDiskSize -StorageAccountType $OSDiskType -CreateOption fromImage
         $null = New-AzVM -ResourceGroupName $ResourceGroupName -Location $Location -VM $VMConfig -Tag $Tag -DisableBginfoExtension
+        #>
     }
-	#>
     $VM = Get-AzVM -ResourceGroup $ResourceGroupName -Name $VMName
     $null = $VM | Start-AzVM #-Name $VMName -ResourceGroupName $ResourceGroupName
 
@@ -6016,8 +6018,7 @@ function New-PsAvdSessionHost {
         $AdJoinUserName = $ADDomainJoinCredential.UserName
         $AdJoinPassword = $ADDomainJoinCredential.Password
 
-
-        $ADDomainJoinUser = Get-ADUser -Identity $AdJoinUserName -Properties UserPrincipalName -ErrorAction Ignore
+        $ADDomainJoinUser = Get-ADUser -Filter { UserPrincipalName -eq $AdJoinUserName } -ErrorAction Ignore
         if ([string]::IsNullOrEmpty($ADDomainJoinUser.UserPrincipalName)) {
             $ADDomainJoinUPNCredential = New-Object System.Management.Automation.PSCredential -ArgumentList("$AdJoinUserName@$DomainName", $AdJoinPassword)
         }
