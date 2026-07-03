@@ -8485,28 +8485,28 @@ function New-PsAvdPooledHostPoolSetup {
 
         #From https://www.youtube.com/watch?v=lvBiLj7oAG4&t=700s
         $RedirectionsXMLFileContent = @'
-<?xml version="1.0"  encoding="UTF-8"?>
-<FrxProfileFolderRedirection ExcludeCommonFolders="49">
-<Excludes>
-<!-- Temp -->
-<Exclude Copy="0">AppData\Local\Temp</Exclude>
-<!-- Browser -->
-<Exclude Copy="0">AppData\Local\Microsoft\Edge\User Data\Default\Cache</Exclude>
-<Exclude Copy="0">AppData\Local\Google\Chrome\User Data\Default\Cache</Exclude>
-<!-- Teams -->
-<Exclude Copy="0">AppData\Local\Packages\MSTeams_*</Exclude>
-<Exclude Copy="0">AppData\Local\Microsoft\Teams\meeting-addin\Cache</Exclude>
-<Exclude Copy="0">AppData\Roaming\Microsoft\Teams\media-stack</Exclude>
-<!-- Misc -->
-<Exclude Copy="0">AppData\Local\CrashDumps</Exclude>
-<!-- Outlook -->
-<Exclude Copy="0">AppData\Local\Microsoft\Outlook</Exclude>
-<!-- OneDrive -->
-<Exclude Copy="0">AppData\Local\Microsoft\OneDrive</Exclude>
-</Excludes>
-<Includes>
-<Include>AppData\Local\Microsoft\Edge\User Data</Include>
-</Includes>
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Keep exclusions limited to temporary and easily regenerated data -->
+<FrxProfileFolderRedirection ExcludeCommonFolders="0">
+    <Excludes>
+        <!-- Exclude temporary files recreated automatically -->
+        <Exclude Copy="0">AppData\Local\Temp</Exclude>
+
+        <!-- Exclude Edge browser cache to reduce profile size -->
+        <Exclude Copy="0">AppData\Local\Microsoft\Edge\User Data\Default\Cache</Exclude>
+
+        <!-- Exclude Chrome browser cache to reduce profile size -->
+        <Exclude Copy="0">AppData\Local\Google\Chrome\User Data\Default\Cache</Exclude>
+
+        <!-- Exclude Teams meeting add-in cache -->
+        <Exclude Copy="0">AppData\Local\Microsoft\Teams\meeting-addin\Cache</Exclude>
+
+        <!-- Exclude Teams media cache generated during calls and meetings -->
+        <Exclude Copy="0">AppData\Roaming\Microsoft\Teams\media-stack</Exclude>
+
+        <!-- Exclude application crash dumps -->
+        <Exclude Copy="0">AppData\Local\CrashDumps</Exclude>
+    </Excludes>
 </FrxProfileFolderRedirection>
 '@
 
@@ -13092,7 +13092,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         do {
             $Index++
             Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
-            $DeploymentName = (Get-Item -Path $TemplateFilePath).BaseName
+			$DeploymentName = "{0}_{1:yyyyMMddHHmmss}" -f (Get-Item -Path $TemplateFilePath).BaseName, (Get-Date)
             try {
                 #https://github.com/Azure/azure-monitor-baseline-alerts/issues/812
                 $Result = New-AzDeployment -Name $DeploymentName -Location $Location -TemplateFile $TemplateFilePath -TemplateParameterObject $TemplateParameterObject -ErrorAction Stop
