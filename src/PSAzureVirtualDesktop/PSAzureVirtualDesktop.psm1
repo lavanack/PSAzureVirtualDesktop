@@ -8486,27 +8486,30 @@ function New-PsAvdPooledHostPoolSetup {
         #From https://www.youtube.com/watch?v=lvBiLj7oAG4&t=700s
         $RedirectionsXMLFileContent = @'
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Keep exclusions limited to temporary and easily regenerated data -->
-<FrxProfileFolderRedirection ExcludeCommonFolders="0">
-    <Excludes>
-        <!-- Exclude temporary files recreated automatically -->
-        <Exclude Copy="0">AppData\Local\Temp</Exclude>
 
-        <!-- Exclude Edge browser cache to reduce profile size -->
-        <Exclude Copy="0">AppData\Local\Microsoft\Edge\User Data\Default\Cache</Exclude>
+<FrxProfileFolderRedirection ExcludeCommonFolders="49">
 
-        <!-- Exclude Chrome browser cache to reduce profile size -->
-        <Exclude Copy="0">AppData\Local\Google\Chrome\User Data\Default\Cache</Exclude>
+  <Excludes>
 
-        <!-- Exclude Teams meeting add-in cache -->
-        <Exclude Copy="0">AppData\Local\Microsoft\Teams\meeting-addin\Cache</Exclude>
+    <!-- Windows -->
+    <Exclude Copy="0">AppData\Local\Temp</Exclude>
+    <Exclude Copy="0">AppData\Local\CrashDumps</Exclude>
+    <Exclude Copy="0">AppData\Local\Microsoft\Windows\WER</Exclude>
 
-        <!-- Exclude Teams media cache generated during calls and meetings -->
-        <Exclude Copy="0">AppData\Roaming\Microsoft\Teams\media-stack</Exclude>
+    <!-- Teams Classic -->
+    <Exclude Copy="0">AppData\Roaming\Microsoft\Teams\media-stack</Exclude>
+    <Exclude Copy="0">AppData\Local\Microsoft\Teams\meeting-addin\Cache</Exclude>
 
-        <!-- Exclude application crash dumps -->
-        <Exclude Copy="0">AppData\Local\CrashDumps</Exclude>
-    </Excludes>
+    <!-- OneDrive -->
+    <Exclude Copy="0">AppData\Local\Microsoft\OneDrive\logs</Exclude>
+    <Exclude Copy="0">AppData\Local\Microsoft\OneDrive\setup\logs</Exclude>
+
+    <!-- New Teams -->
+    <Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\Logs</Exclude>
+    <Exclude Copy="0">AppData\Local\Packages\MSTeams_8wekyb3d8bbwe\LocalCache\Microsoft\MSTeams\PerfLogs</Exclude>
+
+  </Excludes>
+
 </FrxProfileFolderRedirection>
 '@
 
