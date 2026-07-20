@@ -3876,6 +3876,36 @@ function Test-DomainController {
     return (-not([string]::IsNullOrEmpty((Get-WmiObject -Query "select * from Win32_OperatingSystem where ProductType='2'"))))
 }
 
+
+<#
+.SYNOPSIS
+    Returns $true when the current user is a domain admin.
+.DESCRIPTION
+    Determines user status by checking the group membership. If this user is member of a group matching the S-1-5-*-512 pattern, it is a domain admin. 
+.OUTPUTS
+    Boolean.
+#>
+function Test-DomainAdmin {
+    [CmdletBinding(PositionalBinding = $false)]
+    param (
+    )
+
+    Get-CallerPreference -Cmdlet $PSCmdlet -SessionState $ExecutionContext.SessionState
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
+    $Groups = [System.Security.Principal.WindowsIdentity]::GetCurrent().Groups | ForEach-Object {
+        [PSCustomObject]@{
+            SID  = $_.Value
+            Name = $_.Translate([System.Security.Principal.NTAccount]).Value
+        }
+    }
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
+
+    return (-not([string]::IsNullOrEmpty($Groups.SID -match "^S-1-5-.*-512$")))
+
+}
+
 <#
 .SYNOPSIS
     Returns the most recent Heartbeat, Performance and Event records per computer from each host
