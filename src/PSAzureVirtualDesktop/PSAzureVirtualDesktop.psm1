@@ -13065,11 +13065,16 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
 
     $LogAnalyticsWorkSpace = New-AzOperationalInsightsWorkspace -Location $Location -Name $LogAnalyticsWorkSpaceName -Sku pergb2018 -ResourceGroupName $ResourceGroupName -Force
 
-
+    #region My fix from from MS AMBA repository (bugs)
     #region AMBA Template Download
+    #Buggy Code
     $AMBAAVDURI = "https://raw.githubusercontent.com/Azure/azure-monitor-baseline-alerts/main/patterns/avd/avdArm.json"
     #https://github.com/Azure/azure-monitor-baseline-alerts/issues/812
+    #Old working version
     #$AMBAAVDURI = "https://raw.githubusercontent.com/Azure/azure-monitor-baseline-alerts/0cd73726172ae99069e8ac0cf5136e9081da0958/patterns/avd/avdArm.json"
+    #From Another fix: https://github.com/durrante/AVDMonitoringBaseline
+    #$AMBAAVDURI = "https://raw.githubusercontent.com/durrante/AVDMonitoringBaseline/main/patterns/avd/avdArm.json"
+    #My fix
     $AMBAAVDURI = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/AMBA/avdarm.json"
     $TemplateFileName = Split-Path -Path $AMBAAVDURI -Leaf
     $TemplateFilePath = Join-Path -Path $env:Temp -ChildPath $TemplateFileName
@@ -13146,6 +13151,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         $TimeSpan = New-TimeSpan -Start $StartTime -End $EndTime
         Write-Host -Object "Azure Subscription Deployment Processing Time: $($TimeSpan.ToString())"
     }
+    #endregion
     #endregion
 
     if ($Enabled) {
