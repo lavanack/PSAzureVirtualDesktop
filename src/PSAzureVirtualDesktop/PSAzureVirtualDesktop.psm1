@@ -7850,7 +7850,8 @@ function New-PsAvdPersonalHostPoolSetup {
 
 
             #region Identity Provider Management
-            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinUserNameSecretName) -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinPasswordSecretName)).SecretValue
@@ -8175,7 +8176,8 @@ function New-PsAvdPersonalHostPoolSetup {
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
-            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
             }
             #endregion 
@@ -8604,7 +8606,8 @@ function New-PsAvdPooledHostPoolSetup {
             }
 
 
-            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #region Creating an <Azure Location> OU 
                 $LocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$($CurrentHostPool.Location)'" -SearchBase $ADOrganizationalUnit.DistinguishedName
                 if (-not($LocationOU)) {
@@ -8779,7 +8782,8 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion 
 
                 #region FSLogix AD Management
-                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+                #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region Dedicated HostPool AD group
                     #region Dedicated HostPool AD FSLogix groups
                     $CurrentHostPoolFSLogixContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixContributor"
@@ -8850,7 +8854,8 @@ function New-PsAvdPooledHostPoolSetup {
                 #region FSLogix Storage Account Management
 
                 #region Dedicated Host Pool AD GPO Management (1 FSLogix per Host Pool)
-                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+                #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region FSLogix GPO
                     $CurrentHostPoolFSLogixGPO = Get-GPO -Name "$($CurrentHostPool.Name) - FSLogix Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolFSLogixGPO)) {
@@ -9465,7 +9470,8 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
                 #region FSLogix AD Management
 
                 #region Dedicated Host Pool AD GPO Management (1 AVD GPO per Host Pool)
-                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+                #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region AVD GPO
                     $CurrentHostPoolAVDGPO = Get-GPO -Name "$($CurrentHostPool.Name) - AVD Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolAVDGPO)) {
@@ -9506,6 +9512,7 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
             #endregion 
 
             #region MSIX AppAttach / Azure AppAttach
+            #if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
             if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
@@ -10267,7 +10274,8 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
             #endregion
 
             #region Identity Provider Management
-            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinUserNameSecretName) -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinPasswordSecretName)).SecretValue
@@ -10821,7 +10829,8 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
-            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
             }
             #endregion
@@ -11050,7 +11059,8 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
 
 
             #region MSIX AppAttach / Azure AppAttach
-            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
