@@ -1,4 +1,4 @@
-﻿#region PowerShell HostPool classes
+﻿﻿#region PowerShell HostPool classes
 
 # Defines how the session host VMs are joined to a directory.
 # - ActiveDirectory: traditional on-premises AD domain join.
@@ -1226,7 +1226,7 @@ function Set-BlockAADWorkplaceJoinOnDC {
         $DomainControllersHybridJoinGPO = New-GPO -Name $GPOName
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($DomainControllersHybridJoinGPO.DisplayName)' GPO (linked to '($($CurrentHostPoolOU.DistinguishedName))'"
     }
-    $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
+    $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
     $DomainControllersOU = Get-ADOrganizationalUnit -Filter 'Name -eq "Domain Controllers"' -SearchBase $DefaultNamingContext
     $null = $DomainControllersHybridJoinGPO | New-GPLink -Target $DomainControllersOU.DistinguishedName -LinkEnabled Yes -ErrorAction Ignore
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
@@ -6099,7 +6099,7 @@ function New-PsAvdSessionHost {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Result: `r`n$($result | Out-String)"
         #>
 
-        #URI updated on : 01/01/2026
+        #URI updated on : 07/22/2026
         #To Get the latest version of the zip by looking in the Resource Group Deployement
         #$avdModuleLocation = ((Get-AzWvdHostPool).ResourcegroupName | ForEach-Object -Process { Get-AzResourceGroupDeployment -ResourceGroupName $_} | Where-Object -FilterScript { $_.Parameters } | Foreach-Object -Process { $_.Parameters["artifactsLocation"]} | Sort-Object -Property Value -Descending | Select-Object -First 1).Value
         $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.03448.1358.zip"
@@ -7468,7 +7468,7 @@ function Remove-PsAvdHostPoolSetup {
         #endregion
 
         #region AD Computer Account Cleanup 
-        $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
+        $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
         $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
         $AzureLocation = $AzureAppAttachPooledHostPools.Location | Select-Object -Unique 
         foreach ($CurrentAzureLocation in $AzureLocation) {
@@ -9696,7 +9696,7 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
                         if ($ADGroupMutex.WaitOne()) { 
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
-                            $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
+                            $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
                             $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
 
                             #region AD MSIX groups (for include all dedicated HostPool AD MSIX Groups)
@@ -11645,7 +11645,7 @@ function New-PsAvdHostPoolSetup {
         #endregion
 
         #region AVD OU Management
-        $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
+        $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
 
@@ -11696,7 +11696,7 @@ function New-PsAvdHostPoolSetup {
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxIdleTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Disconnected_Timeout_1
         #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8095
-        $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxDisconnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 300000
+        $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxDisconnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Limits_2
         #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8099
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxConnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
