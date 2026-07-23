@@ -1226,7 +1226,7 @@ function Set-BlockAADWorkplaceJoinOnDC {
         $DomainControllersHybridJoinGPO = New-GPO -Name $GPOName
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($DomainControllersHybridJoinGPO.DisplayName)' GPO (linked to '($($CurrentHostPoolOU.DistinguishedName))'"
     }
-    $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
+    $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
     $DomainControllersOU = Get-ADOrganizationalUnit -Filter 'Name -eq "Domain Controllers"' -SearchBase $DefaultNamingContext
     $null = $DomainControllersHybridJoinGPO | New-GPLink -Target $DomainControllersOU.DistinguishedName -LinkEnabled Yes -ErrorAction Ignore
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
@@ -7468,7 +7468,7 @@ function Remove-PsAvdHostPoolSetup {
         #endregion
 
         #region AD Computer Account Cleanup 
-        $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
+        $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
         $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
         $AzureLocation = $AzureAppAttachPooledHostPools.Location | Select-Object -Unique 
         foreach ($CurrentAzureLocation in $AzureLocation) {
@@ -9696,7 +9696,7 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
                         if ($ADGroupMutex.WaitOne()) { 
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
-                            $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
+                            $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
                             $AVDRootOU = Get-ADOrganizationalUnit -Filter 'Name -eq "AVD"' -SearchBase $DefaultNamingContext
 
                             #region AD MSIX groups (for include all dedicated HostPool AD MSIX Groups)
@@ -11635,17 +11635,17 @@ function New-PsAvdHostPoolSetup {
         $DnsServerConditionalForwarderZones = "file.core.windows.net", "vaultcore.azure.net", "vault.azure.net", "wvd.microsoft.com"
         #region DNS Conditional Forwarders
         foreach ($CurrentDnsServerConditionalForwarderZone in $DnsServerConditionalForwarderZones) {
-            if ($null -eq (Get-DnsServerZone -Name $CurrentDnsServerConditionalForwarderZone -ComputerName $((Get-ADDomainController -Discover).Name) -ErrorAction Ignore)) {
+            if ($null -eq (Get-DnsServerZone -Name $CurrentDnsServerConditionalForwarderZone -ErrorAction Ignore)) {
                 #Adding Dns Server Conditional Forwarder Zone
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding Dns Server Conditional Forwarder Zone for '$CurrentDnsServerConditionalForwarderZone'"
                 #From https://learn.microsoft.com/en-us/azure/virtual-network/what-is-ip-address-168-63-129-16
-                Add-DnsServerConditionalForwarderZone -Name $CurrentDnsServerConditionalForwarderZone -MasterServers "168.63.129.16" -ReplicationScope "Forest" -ComputerName $((Get-ADDomainController -Discover).Name)
+                Add-DnsServerConditionalForwarderZone -Name $CurrentDnsServerConditionalForwarderZone -MasterServers "168.63.129.16" -ReplicationScope "Forest"
             }
         }
         #endregion
 
         #region AVD OU Management
-        $DefaultNamingContext = (Get-ADRootDSE -Server $(Get-ADDomainController -Discover)).defaultNamingContext
+        $DefaultNamingContext = (Get-ADRootDSE -Server localhost).defaultNamingContext
         #$DomainName = (Get-ADDomain).DNSRoot
         $DomainName = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().Name
 
@@ -11696,7 +11696,7 @@ function New-PsAvdHostPoolSetup {
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxIdleTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Disconnected_Timeout_1
         #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8095
-        $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxDisconnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 900000
+        $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxDisconnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 300000
         #From https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_SESSIONS_Limits_2
         #From https://gpsearch.azurewebsites.net/default.aspx?policyid=16972&lang=en-US#8099
         $null = Set-PsAvdGPRegistryValue -Name $AVDGPO.DisplayName -Key 'HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services' -ValueName "MaxConnectionTime" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
