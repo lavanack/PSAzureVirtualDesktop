@@ -6102,7 +6102,7 @@ function New-PsAvdSessionHost {
         #URI updated on : 01/01/2026
         #To Get the latest version of the zip by looking in the Resource Group Deployement
         #$avdModuleLocation = ((Get-AzWvdHostPool).ResourcegroupName | ForEach-Object -Process { Get-AzResourceGroupDeployment -ResourceGroupName $_} | Where-Object -FilterScript { $_.Parameters } | Foreach-Object -Process { $_.Parameters["artifactsLocation"]} | Sort-Object -Property Value -Descending | Select-Object -First 1).Value
-        $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.03266.1110.zip"
+        $avdModuleLocation = "https://wvdportalstorageblob.blob.core.windows.net/galleryartifacts/Configuration_1.0.03448.1358.zip"
         #$avdModuleLocation = "https://raw.githubusercontent.com/Azure/RDS-Templates/refs/heads/master/ARM-wvd-templates/DSC/Configuration.zip"
         $avdExtensionName = "DSC"
         $avdExtensionPublisher = "Microsoft.Powershell"
@@ -6156,8 +6156,9 @@ function New-PsAvdSessionHost {
 
     }
     else {
-        #URI updated on : 01/04/2026
-        $avdModuleLocation = "https://www.laurentvanacker.com/downloads/AVD/AgentDSC.2025.12.12.1.zip"
+        #URI updated on : 07/22/2026
+        #$avdModuleLocation = Get-AzWvdHostPool | ForEach-Object -Process { (Get-AzWvdSessionHost -ResourceGroupName $_.ResourceGroupName -HostPoolName $_.Name) | ForEach-Object -Process { $AzResource = Get-AzResource -ResourceId $_.ResourceId; ((Get-AzVMExtension -ResourceGroupName $AzResource.ResourceGroupName -VMName $AzResource.Name -ErrorAction Ignore | Where-Object -FilterScript { $_.Name -eq "Microsoft.PowerShell.DSC"}).PublicSettings | ConvertFrom-Json -ErrorAction Ignore).ModulesUrl } }
+        $avdModuleLocation = "https://www.laurentvanacker.com/downloads/AVD/AgentDSC.2026.6.3.1.zip"
         $avdExtensionName = "DSC"
         $avdExtensionPublisher = "Microsoft.Powershell"
         $avdExtensionVersion = "2.73"
@@ -13073,9 +13074,9 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
     #Old working version
     #$AMBAAVDURI = "https://raw.githubusercontent.com/Azure/azure-monitor-baseline-alerts/0cd73726172ae99069e8ac0cf5136e9081da0958/patterns/avd/avdArm.json"
     #From Another fix: https://github.com/durrante/AVDMonitoringBaseline
-    #$AMBAAVDURI = "https://raw.githubusercontent.com/durrante/AVDMonitoringBaseline/main/patterns/avd/avdArm.json"
+    $AMBAAVDURI = "https://raw.githubusercontent.com/durrante/AVDMonitoringBaseline/main/patterns/avd/avdArm.json"
     #My fix
-    $AMBAAVDURI = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/AMBA/avdarm.json"
+    #$AMBAAVDURI = "https://raw.githubusercontent.com/lavanack/laurentvanacker.com/refs/heads/master/Azure/Azure%20Virtual%20Desktop/AMBA/avdarm.json"
     $TemplateFileName = Split-Path -Path $AMBAAVDURI -Leaf
     $TemplateFilePath = Join-Path -Path $env:Temp -ChildPath $TemplateFileName
     Invoke-RestMethod -Uri $AMBAAVDURI -OutFile $TemplateFilePath
