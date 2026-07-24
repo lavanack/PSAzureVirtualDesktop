@@ -12761,8 +12761,8 @@ function New-PsAvdScalingPlan {
                     RampDownStartTimeHour                   = '16'
                     RampDownStartTimeMinute                 = '0'
                     RampDownLoadBalancingAlgorithm          = 'BreadthFirst'
-                    RampDownMinimumHostsPct                 = '1'
-                    RampDownCapacityThresholdPct            = '0'
+                    RampDownMinimumHostsPct                 = '0'
+                    RampDownCapacityThresholdPct            = '1'
                     RampDownForceLogoffUser                 = $true
                     RampDownWaitTimeMinute                  = '30'
                     RampDownNotificationMessage             = 'Please log out of your session.'
@@ -12793,8 +12793,8 @@ function New-PsAvdScalingPlan {
                     RampDownStartTimeHour          = '18'
                     RampDownStartTimeMinute        = '0'
                     RampDownLoadBalancingAlgorithm = 'BreadthFirst'
-                    RampDownMinimumHostsPct        = '1'
-                    RampDownCapacityThresholdPct   = '0'
+                    RampDownMinimumHostsPct        = '0'
+                    RampDownCapacityThresholdPct   = '1'
                     RampDownForceLogoffUser        = $true
                     RampDownWaitTimeMinute         = '30'
                     RampDownNotificationMessage    = '"Log out now, please."'
