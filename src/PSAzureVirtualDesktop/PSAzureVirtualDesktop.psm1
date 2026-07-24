@@ -1706,7 +1706,7 @@ function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
             $Timer = [system.diagnostics.stopwatch]::StartNew()
             do {
                 try {
-                    $Result = New-MgBetaPolicyMobileDeviceManagementPolicyIncludedGroupByRef -MobileDeviceManagementPolicyId $mobilityManagementPolicyId -OdataId $OdataId -PassThru -ErrorAction Stop
+                    $Result = New-MgBetaPolicyMobileDeviceManagementPolicyIncludedGroupByRef -MobilityManagementPolicyId $mobilityManagementPolicyId -OdataId $OdataId -PassThru -ErrorAction Stop
                 }
                 catch {
                     Write-Warning -Message "$($_.Exception)"
@@ -7850,8 +7850,7 @@ function New-PsAvdPersonalHostPoolSetup {
 
 
             #region Identity Provider Management
-            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinUserNameSecretName) -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinPasswordSecretName)).SecretValue
@@ -8176,8 +8175,7 @@ function New-PsAvdPersonalHostPoolSetup {
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
-            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
             }
             #endregion 
@@ -8606,8 +8604,7 @@ function New-PsAvdPooledHostPoolSetup {
             }
 
 
-            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #region Creating an <Azure Location> OU 
                 $LocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$($CurrentHostPool.Location)'" -SearchBase $ADOrganizationalUnit.DistinguishedName
                 if (-not($LocationOU)) {
@@ -8782,8 +8779,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion 
 
                 #region FSLogix AD Management
-                if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-                #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region Dedicated HostPool AD group
                     #region Dedicated HostPool AD FSLogix groups
                     $CurrentHostPoolFSLogixContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixContributor"
@@ -8854,8 +8850,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #region FSLogix Storage Account Management
 
                 #region Dedicated Host Pool AD GPO Management (1 FSLogix per Host Pool)
-                if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-                #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region FSLogix GPO
                     $CurrentHostPoolFSLogixGPO = Get-GPO -Name "$($CurrentHostPool.Name) - FSLogix Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolFSLogixGPO)) {
@@ -9311,7 +9306,7 @@ function New-PsAvdPooledHostPoolSetup {
                         Start-Sleep -Seconds 30
                     } while (-not((Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).AllowSharedKeyAccess))
 
-                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
+                    if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                         Remove-PSDrive -Name Z -ErrorAction Ignore
                         $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
@@ -9470,8 +9465,7 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
                 #region FSLogix AD Management
 
                 #region Dedicated Host Pool AD GPO Management (1 AVD GPO per Host Pool)
-                if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-                #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                     #region AVD GPO
                     $CurrentHostPoolAVDGPO = Get-GPO -Name "$($CurrentHostPool.Name) - AVD Settings" -ErrorAction Ignore
                     if (-not($CurrentHostPoolAVDGPO)) {
@@ -9512,7 +9506,6 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
             #endregion 
 
             #region MSIX AppAttach / Azure AppAttach
-            #if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
             if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
@@ -10274,8 +10267,7 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
             #endregion
 
             #region Identity Provider Management
-            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 <#
                 $AdJoinUserName = $CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinUserNameSecretName) -AsPlainText
                 $AdJoinPassword = ($CurrentHostPool.KeyVault | Get-AzKeyVaultSecret -Name $([hostpool]::AdJoinPasswordSecretName)).SecretValue
@@ -10829,8 +10821,7 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
             $SessionHostVMs = $SessionHosts.ResourceId | Get-AzVM
             $SessionHostNames = $SessionHostVMs.Name
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SessionHostNames: $($SessionHostNames -join ', ')"
-            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 $CurrentHostPoolSessionHostsADGroupName | Add-ADGroupMember -Members $($SessionHostNames | Get-ADComputer).DistinguishedName
             }
             #endregion
@@ -11059,8 +11050,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
 
 
             #region MSIX AppAttach / Azure AppAttach
-            if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
-            #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
@@ -12771,8 +12761,8 @@ function New-PsAvdScalingPlan {
                     RampDownStartTimeHour                   = '16'
                     RampDownStartTimeMinute                 = '0'
                     RampDownLoadBalancingAlgorithm          = 'BreadthFirst'
-                    RampDownMinimumHostsPct                 = '100'
-                    RampDownCapacityThresholdPct            = '20'
+                    RampDownMinimumHostsPct                 = '1'
+                    RampDownCapacityThresholdPct            = '0'
                     RampDownForceLogoffUser                 = $true
                     RampDownWaitTimeMinute                  = '30'
                     RampDownNotificationMessage             = 'Please log out of your session.'
@@ -12803,9 +12793,9 @@ function New-PsAvdScalingPlan {
                     RampDownStartTimeHour          = '18'
                     RampDownStartTimeMinute        = '0'
                     RampDownLoadBalancingAlgorithm = 'BreadthFirst'
-                    RampDownMinimumHostsPct        = '0'
-                    RampDownCapacityThresholdPct   = '20'
-                    RampDownForceLogoffUser        = $false
+                    RampDownMinimumHostsPct        = '1'
+                    RampDownCapacityThresholdPct   = '0'
+                    RampDownForceLogoffUser        = $true
                     RampDownWaitTimeMinute         = '30'
                     RampDownNotificationMessage    = '"Log out now, please."'
                     RampDownStopHostsWhen          = 'ZeroSessions'
