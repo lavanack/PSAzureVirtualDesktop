@@ -1,5 +1,4 @@
-﻿﻿#region PowerShell HostPool classes
-
+﻿#region PowerShell HostPool classes
 # Defines how the session host VMs are joined to a directory.
 # - ActiveDirectory: traditional on-premises AD domain join.
 # - MicrosoftEntraID: cloud-only join to Microsoft Entra ID (formerly Azure AD).
@@ -13312,7 +13311,7 @@ function Import-PsAvdWorkbookTemplate {
                     }
                 }
                 catch [System.Net.WebException] {
-                    #Write-Warning  -Message $($_.Exception.Message)
+                    Write-Warning  -Message $($_.Exception.Message)
                 }
             }
         }
@@ -13929,8 +13928,6 @@ function Get-PsAvdHostPoolDirectLaunchUrl {
         $HostPoolDirectLaunchUrls
     }
 }
-#endregion
-
 #endregion
 
 #endregion
