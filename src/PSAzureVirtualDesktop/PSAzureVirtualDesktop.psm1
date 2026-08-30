@@ -13897,12 +13897,18 @@ function Get-PsAvdHostPoolDirectLaunchUrl {
             $ApplicationGroups = $CurrentHostPool.ApplicationGroupReference | Get-AzWvdApplicationGroup
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] HostPool PreferredAppGroupType: $($CurrentHostPool.PreferredAppGroupType)"
             $ApplicationGroupHT = $ApplicationGroups | Group-Object -Property Kind -AsHashTable -AsString
+            if ($CurrentHostPool.PreferredAppGroupType -eq "Desktop") {
+                $Key = $CurrentHostPool.PreferredAppGroupType
+            }
+            else {
+                $Key = "RemoteApp"
+            }
             $Parameters = @{
-                ResourceGroupName    = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].ResourceGroupName
-                ApplicationGroupName = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].Name
+                ResourceGroupName    = $ApplicationGroupHT[$Key].ResourceGroupName
+                ApplicationGroupName = $ApplicationGroupHT[$Key].Name
             }
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Parameters:`r`n$($Parameters | Out-string)"
-            $WorkspaceArmPath = $ApplicationGroupHT[$CurrentHostPool.PreferredAppGroupType].WorkspaceArmPath
+            $WorkspaceArmPath = $ApplicationGroupHT[$Key].WorkspaceArmPath
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$WorkspaceArmPath: $WorkspaceArmPath"
 
             if ($CurrentHostPool.PreferredAppGroupType -eq "Desktop") {
