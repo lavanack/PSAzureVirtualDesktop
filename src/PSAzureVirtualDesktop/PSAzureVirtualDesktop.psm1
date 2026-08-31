@@ -13302,7 +13302,7 @@ function Import-PsAvdWorkbookTemplate {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$DisplayName' WorkBookTemplate in the '$Location' Location from '$CurrentURI'"
                 try {
                     $ResourceGroupDeployment = New-AzResourceGroupDeployment -ResourceGroupName $ResourceGroupName -TemplateUri $CurrentURI -ErrorAction Stop
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ResourceGroupDeployment: $ResourceGroupDeployment"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ResourceGroupDeployment: $($ResourceGroupDeployment | Out-String)"
                     if ($null -eq $ResourceGroupDeployment) {
                         Write-Warning -Message "$CurrentURI is not reachable."
                     }
