@@ -15,7 +15,7 @@
 
 - [1.0.20]
   - Code improvements
-  - Adding HybridJoin VM a,dnd Cloud Only Identities se cases
+  - Adding HybridJoin VM and Cloud Only Identities use cases
 - [1.0.19]
   - Test Version
 - [1.0.18]
