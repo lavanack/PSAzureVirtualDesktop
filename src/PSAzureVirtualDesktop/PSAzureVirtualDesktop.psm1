@@ -1,4 +1,14 @@
 ﻿#region PowerShell HostPool classes
+# PSAzureVirtualDesktop models and deploys Azure Virtual Desktop host pools and their
+# supporting Azure, Microsoft Entra ID, Microsoft Intune, FSLogix, backup, monitoring,
+# application-attach, and disaster-recovery resources.
+#
+# The classes below hold deployment configuration and derive Azure resource names. Most
+# mutating class methods return the current instance so configuration calls can be chained.
+# The exported functions then use those models to create, update, validate, or remove the
+# corresponding cloud and directory resources. Many operations require authenticated Az and
+# Microsoft Graph sessions and are designed to be idempotent across repeated deployments.
+
 # Defines how the session host VMs are joined to a directory.
 # - ActiveDirectory: traditional on-premises AD domain join.
 # - MicrosoftEntraID: cloud-only join to Microsoft Entra ID (formerly Azure AD).
@@ -41,6 +51,7 @@ enum DiffDiskPlacement {
 # associated configuration (networking, identity, security, image, etc.).
 # PooledHostPool and PersonalHostPool derive from this class.
 class HostPool {
+    # Core deployment choices supplied by the caller or initialized by a constructor.
     [ValidateNotNullOrEmpty()] [JoinMode] $JoinMode
     [ValidateNotNullOrEmpty()] [IdentityModel] $IdentityModel
     [ValidateNotNullOrEmpty()] [string] $Name
@@ -54,6 +65,7 @@ class HostPool {
     [ValidateNotNullOrEmpty()] [string] $VMSize
     [string] $CustomConfigurationScriptUrl
 
+    # Optional host-pool capabilities. Setter methods below enforce dependencies between them.
     [boolean] $Intune
     [boolean] $Spot
     [boolean] $ScalingPlan
@@ -62,6 +74,7 @@ class HostPool {
     [boolean] $SSO
     [string] $PrivateEndpointSubnetId
 
+    # Resource names and regional metadata derived from the host-pool configuration.
     hidden [string] $PairedRegion
     hidden [string] $ResourceGroupName
     hidden [string] $KeyVaultName
@@ -71,6 +84,7 @@ class HostPool {
     hidden [string] $WorkSpaceName
     hidden [string] $ScalingPlanName
 
+    # Image, load-balancing, and disaster-recovery settings used by deployment functions.
     [String] $PreferredAppGroupType  
     [string] $ImagePublisherName
     [string] $ImageOffer
@@ -532,6 +546,8 @@ class HostPool {
 # optional FSLogix Cloud Cache pairing with a host pool in the paired region.
 class PooledHostPool : HostPool {
     static [hashtable] $IndexHT = $null   # Per-location auto-incrementing index used to build unique names.
+
+    # Pooled-session capacity and profile/application delivery feature flags.
     [ValidateRange(0, 10)] [uint16] $MaxSessionLimit
     [ValidateNotNullOrEmpty()] [boolean] $FSLogix
     [ValidateNotNullOrEmpty()] [boolean] $OneDriveForKnownFolders
@@ -540,6 +556,7 @@ class PooledHostPool : HostPool {
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
     [ValidateNotNullOrEmpty()] [boolean] $SessionHostConfiguration = $false
 
+    # Related host-pool reference and derived storage/configuration resource names.
     [PooledHostPool] $FSLogixCloudCachePairedPooledHostPool  
     hidden [string] $FSLogixStorageAccountName
     hidden [String] $FSLogixCloudCachePairedPooledHostPoolFSLogixStorageAccountName
@@ -909,6 +926,8 @@ class PooledHostPool : HostPool {
 # Supports VM hibernation (mutually exclusive with Spot instances).
 class PersonalHostPool : HostPool {
     static [hashtable] $IndexHT = $null
+
+    # Personal desktops can hibernate, but the toggle methods prevent combining this with Spot.
     #Hibernation is not compatible with Spot Instance and is only allowed for Personal Dektop
     [ValidateNotNullOrEmpty()] [boolean] $HibernationEnabled = $false
 
