@@ -423,7 +423,7 @@ class HostPool {
         return ([JoinMode]::Hybrid -eq $this.JoinMode)
     }
 
-    # Sets the identity model; choosing CloudOnly forces the join mode to Microsoft Entra ID.
+    # Sets the identity model; choosing CloudOnly forces the join mode to Microsoft Entra ID (Hybrid join mode is also supported).
     [HostPool] SetIdentityModel([IdentityModel] $IdentityModel) {
         $this.IdentityModel = $IdentityModel
         if ([IdentityModel]::CloudOnly -eq $IdentityModel) {
@@ -8621,8 +8621,7 @@ function New-PsAvdPooledHostPoolSetup {
                 $Tag['ASRFailOverVNetId'] = $CurrentHostPool.ASRFailOverVNetId
             }
 
-
-            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined() -or ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid)) {
                 #region Creating an <Azure Location> OU 
                 $LocationOU = Get-ADOrganizationalUnit -Filter "Name -eq '$($CurrentHostPool.Location)'" -SearchBase $ADOrganizationalUnit.DistinguishedName
                 if (-not($LocationOU)) {
@@ -8647,7 +8646,21 @@ function New-PsAvdPooledHostPoolSetup {
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$($CurrentHostPoolOU.DistinguishedName)' OU (under '$($PooledDesktopsOU.DistinguishedName)')"
                 }
                 #endregion
+            }
 
+            if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                #region AD Session Hosts groups
+                $SessionHosts = "SessionHosts"
+                $CurrentHostPoolSessionHostsADGroupName = "$($CurrentHostPool.Name) - $SessionHosts"
+                $CurrentHostPoolSessionHostsADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolSessionHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
+                if (-not($CurrentHostPoolSessionHostsADGroup)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolSessionHostsADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
+                    $CurrentHostPoolSessionHostsADGroup = New-ADGroup -Name $CurrentHostPoolSessionHostsADGroupName -SamAccountName $CurrentHostPoolSessionHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolSessionHostsADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
+                }
+                #endregion 
+            }
+
+            if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
                 #region Host Pool Management: Dedicated AD users group
                 $CurrentHostPoolDAGUsersGroupName = "$($CurrentHostPool.Name) - Desktop Application Group Users"
                 $CurrentHostPoolDAGUsersGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolDAGUsersGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
@@ -8663,16 +8676,6 @@ function New-PsAvdPooledHostPoolSetup {
                     $CurrentHostPoolRAGUsersGroup = New-ADGroup -Name $CurrentHostPoolRAGUsersGroupName -SamAccountName $CurrentHostPoolRAGUsersGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolRAGUsersGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
                 }
                 #endregion
-
-                #region AD Session Hosts groups
-                $SessionHosts = "SessionHosts"
-                $CurrentHostPoolSessionHostsADGroupName = "$($CurrentHostPool.Name) - $SessionHosts"
-                $CurrentHostPoolSessionHostsADGroup = Get-ADGroup -Filter "Name -eq '$CurrentHostPoolSessionHostsADGroupName' -and GroupCategory -eq 'Security' -and GroupScope -eq 'Global'" -SearchBase $CurrentHostPoolOU.DistinguishedName
-                if (-not($CurrentHostPoolSessionHostsADGroup)) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating '$CurrentHostPoolSessionHostsADGroupName' AD Group (under '$($CurrentHostPoolOU.DistinguishedName)')"
-                    $CurrentHostPoolSessionHostsADGroup = New-ADGroup -Name $CurrentHostPoolSessionHostsADGroupName -SamAccountName $CurrentHostPoolSessionHostsADGroupName -GroupCategory Security -GroupScope Global -DisplayName $CurrentHostPoolSessionHostsADGroupName -Path $CurrentHostPoolOU.DistinguishedName -PassThru
-                }
-                #endregion 
 
                 #region Run a sync with Azure AD
                 Start-MicrosoftEntraIDConnectSync
@@ -8797,7 +8800,7 @@ function New-PsAvdPooledHostPoolSetup {
                 #endregion 
 
                 #region FSLogix AD Management
-                if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
                     #region Dedicated HostPool AD group
                     #region Dedicated HostPool AD FSLogix groups
                     $CurrentHostPoolFSLogixContributorGroupName = "$($CurrentHostPool.Name) - $FSLogixContributor"
@@ -9214,7 +9217,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #Constrain the scope to the target file share
                     $SubscriptionId = $AzContext.Subscription.Id
 
-                    if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
                         #region Setting up the file share with right RBAC: FSLogix Contributor = "Storage File Data SMB Share Contributor"
                         #Assign the custom role to the target identity with the specified scope.
                         do {
@@ -9324,7 +9327,50 @@ function New-PsAvdPooledHostPoolSetup {
                         Start-Sleep -Seconds 30
                     } while (-not((Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).AllowSharedKeyAccess))
 
-                    if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                        #region Configure Windows ACLs for cloud-only identities by using PowerShell
+                        #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell
+                        # To use the -EncodedCommand parameter:
+                        $ScriptBlockContent = @"
+param()
+Connect-MgGraph -NoWelcome -UseDeviceCode
+#region Login to your Azure subscription.
+While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
+	Connect-AzAccount -UseDeviceAuthentication
+}
+#endregion
+
+Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
+`$null = Set-AzStorageAccount -ResourceGroupName "$CurrentHostPoolResourceGroupName" -Name "$CurrentHostPoolStorageAccountName" -AllowSharedKeyAccess `$true
+`$CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName "$CurrentHostPoolResourceGroupName" -AccountName "$CurrentHostPoolStorageAccountName") | Where-Object -FilterScript { `$_.KeyName -eq "key1" }).Value
+`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -StorageAccountKey `$CurrentHostPoolStorageAccountKey
+`$FileShareName = "$CurrentHostPoolShareName"
+`$FilePath = "/"
+
+#System + Creator Owner = Full Control
+`$Acl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;CO)"
+`$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
+Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
+`$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key -ErrorAction Stop
+
+Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
+`$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
+Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
+`$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
+"@
+                        $Path = Join-Path -Path $env:Temp -ChildPath $("pwsh_AzFileAce_{0}.ps1" -f $CurrentHostPool.Name)                            
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Powershell 7+ Script Path for Azure File ACE(s):$Path"
+                        $null = New-Item -Path $Path -ItemType File -Value $ScriptBlockContent -Force
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
+                        $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
+                        if (pwsh -v) {
+                            pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
+                        }
+                        else {
+                            Write-Warning -Message "Powershell 7+ not installed. Install it (Invoke-Expression -Command ""& { $(Invoke-RestMethod https://aka.ms/install-powershell.ps1) } -UseMSI -Quiet"") and proceed with https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell or run the following script (from pwsh):`r`n$ScriptBlockContent"
+                        }
+                    }
+                    else { #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                         Remove-PSDrive -Name Z -ErrorAction Ignore
                         $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
@@ -9413,49 +9459,6 @@ function New-PsAvdPooledHostPoolSetup {
                         #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
                         #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
                         #endregion
-                    }
-                    elseif ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
-                        #region Configure Windows ACLs for cloud-only identities by using PowerShell
-                        #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell
-                        # To use the -EncodedCommand parameter:
-                        $ScriptBlockContent = @"
-param()
-Connect-MgGraph -NoWelcome -UseDeviceCode
-#region Login to your Azure subscription.
-While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
-	Connect-AzAccount -UseDeviceAuthentication
-}
-#endregion
-
-Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
-`$null = Set-AzStorageAccount -ResourceGroupName "$CurrentHostPoolResourceGroupName" -Name "$CurrentHostPoolStorageAccountName" -AllowSharedKeyAccess `$true
-`$CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName "$CurrentHostPoolResourceGroupName" -AccountName "$CurrentHostPoolStorageAccountName") | Where-Object -FilterScript { `$_.KeyName -eq "key1" }).Value
-`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -StorageAccountKey `$CurrentHostPoolStorageAccountKey
-`$FileShareName = "$CurrentHostPoolShareName"
-`$FilePath = "/"
-
-#System + Creator Owner = Full Control
-`$Acl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;CO)"
-`$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
-Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
-`$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key -ErrorAction Stop
-
-Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
-`$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
-Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
-`$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
-"@
-                        $Path = Join-Path -Path $env:Temp -ChildPath $("pwsh_AzFileAce_{0}.ps1" -f $CurrentHostPool.Name)                            
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Powershell 7+ Script Path for Azure File ACE(s):$Path"
-                        $null = New-Item -Path $Path -ItemType File -Value $ScriptBlockContent -Force
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
-                        $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
-                        if (pwsh -v) {
-                            pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
-                        }
-                        else {
-                            Write-Warning -Message "Powershell 7+ not installed. Install it (Invoke-Expression -Command ""& { $(Invoke-RestMethod https://aka.ms/install-powershell.ps1) } -UseMSI -Quiet"") and proceed with https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell or run the following script (from pwsh):`r`n$ScriptBlockContent"
-                        }
                     }
 
                 }
@@ -11072,9 +11075,10 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
                 if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
                     #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
-                    $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountResourceGroupName: $CurrentHostPoolStorageAccountResourceGroupName"
                     #endregion 
 
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPool : $($CurrentHostPool.Name)"
