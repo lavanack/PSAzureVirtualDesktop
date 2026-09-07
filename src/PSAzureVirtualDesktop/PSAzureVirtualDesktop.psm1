@@ -9327,50 +9327,7 @@ function New-PsAvdPooledHostPoolSetup {
                         Start-Sleep -Seconds 30
                     } while (-not((Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).AllowSharedKeyAccess))
 
-                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
-                        #region Configure Windows ACLs for cloud-only identities by using PowerShell
-                        #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell
-                        # To use the -EncodedCommand parameter:
-                        $ScriptBlockContent = @"
-param()
-Connect-MgGraph -NoWelcome -UseDeviceCode
-#region Login to your Azure subscription.
-While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
-	Connect-AzAccount -UseDeviceAuthentication
-}
-#endregion
-
-Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
-`$null = Set-AzStorageAccount -ResourceGroupName "$CurrentHostPoolResourceGroupName" -Name "$CurrentHostPoolStorageAccountName" -AllowSharedKeyAccess `$true
-`$CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName "$CurrentHostPoolResourceGroupName" -AccountName "$CurrentHostPoolStorageAccountName") | Where-Object -FilterScript { `$_.KeyName -eq "key1" }).Value
-`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -StorageAccountKey `$CurrentHostPoolStorageAccountKey
-`$FileShareName = "$CurrentHostPoolShareName"
-`$FilePath = "/"
-
-#System + Creator Owner = Full Control
-`$Acl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;CO)"
-`$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
-Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
-`$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key -ErrorAction Stop
-
-Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
-`$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
-Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
-`$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
-"@
-                        $Path = Join-Path -Path $env:Temp -ChildPath $("pwsh_AzFileAce_{0}.ps1" -f $CurrentHostPool.Name)                            
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Powershell 7+ Script Path for Azure File ACE(s):$Path"
-                        $null = New-Item -Path $Path -ItemType File -Value $ScriptBlockContent -Force
-                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
-                        $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
-                        if (pwsh -v) {
-                            pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
-                        }
-                        else {
-                            Write-Warning -Message "Powershell 7+ not installed. Install it (Invoke-Expression -Command ""& { $(Invoke-RestMethod https://aka.ms/install-powershell.ps1) } -UseMSI -Quiet"") and proceed with https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell or run the following script (from pwsh):`r`n$ScriptBlockContent"
-                        }
-                    }
-                    else { #if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
+                    if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
                         Remove-PSDrive -Name Z -ErrorAction Ignore
                         $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
@@ -9461,6 +9418,53 @@ Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = F
                         #endregion
                     }
 
+                }
+
+                if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                    #region Configure Windows ACLs for cloud-only identities by using PowerShell
+                    #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell
+                    # To use the -EncodedCommand parameter:
+                    $ScriptBlockContent = @"
+#requires -PSEdition Core
+param()
+Connect-MgGraph -NoWelcome -UseDeviceCode
+#region Login to your Azure subscription.
+While (-not(Get-AzAccessToken -ErrorAction Ignore)) {
+Connect-AzAccount -UseDeviceAuthentication
+}
+#endregion
+
+Import-Module -Name Az.Accounts, Az.Storage, RestSetAcls
+`$null = Set-AzStorageAccount -ResourceGroupName "$CurrentHostPoolResourceGroupName" -Name "$CurrentHostPoolStorageAccountName" -AllowSharedKeyAccess `$true
+`$CurrentHostPoolStorageAccountKey = ((Get-AzStorageAccountKey -ResourceGroupName "$CurrentHostPoolResourceGroupName" -AccountName "$CurrentHostPoolStorageAccountName") | Where-Object -FilterScript { `$_.KeyName -eq "key1" }).Value
+`$Context = New-AzStorageContext -StorageAccountName "$CurrentHostPoolStorageAccountName" -StorageAccountKey `$CurrentHostPoolStorageAccountKey
+`$FileShareNames = "$($FSLogixShareName -join '", "')"
+`$FilePath = "/"
+
+foreach (`$FileShareName in `$FileShareNames) {
+    #System + Creator Owner = Full Control
+    `$Acl = "O:BAG:SYD:(A;OICI;FA;;;SY)(A;OICI;FA;;;CO)"
+    `$Key = New-AzFileAcl -Context `$Context -FileShareName `$FileShareName -Acl `$Acl -AclFormat Sddl
+    Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
+    `$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key
+
+    Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
+    `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
+    Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
+    `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
+}
+"@
+                    $Path = Join-Path -Path $env:Temp -ChildPath $("pwsh_AzFileAce_{0}.ps1" -f $CurrentHostPool.Name)                            
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Powershell 7+ Script Path for Azure File ACE(s):$Path"
+                    $null = New-Item -Path $Path -ItemType File -Value $ScriptBlockContent -Force
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$ScriptBlockContent:`r`n$ScriptBlockContent"
+                    $ScriptBlock = [scriptblock]::Create($ScriptBlockContent)
+                    if (pwsh -v) {
+                        pwsh -NoProfile -ExecutionPolicy Bypass -Command $ScriptBlock
+                    }
+                    else {
+                        Write-Warning -Message "Powershell 7+ not installed. Install it (Invoke-Expression -Command ""& { $(Invoke-RestMethod https://aka.ms/install-powershell.ps1) } -UseMSI -Quiet"") and proceed with https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell or run the following script (from pwsh):`r`n$ScriptBlockContent"
+                    }
                 }
                 #endregion
 
