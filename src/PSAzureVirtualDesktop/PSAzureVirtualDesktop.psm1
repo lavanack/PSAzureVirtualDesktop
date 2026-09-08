@@ -542,7 +542,7 @@ class HostPool {
 }
 
 # Pooled (multi-session) host pool. Adds profile management options (FSLogix / OneDrive Known
-# Folders), application delivery (MSIX App Attach / Azure App Attach), session limits and an
+# Folders), application delivery (Azure AppAttach), session limits and an
 # optional FSLogix Cloud Cache pairing with a host pool in the paired region.
 class PooledHostPool : HostPool {
     static [hashtable] $IndexHT = $null   # Per-location auto-incrementing index used to build unique names.
@@ -551,7 +551,6 @@ class PooledHostPool : HostPool {
     [ValidateRange(0, 10)] [uint16] $MaxSessionLimit
     [ValidateNotNullOrEmpty()] [boolean] $FSLogix
     [ValidateNotNullOrEmpty()] [boolean] $OneDriveForKnownFolders
-    [ValidateNotNullOrEmpty()] [boolean] $MSIX
     [ValidateNotNullOrEmpty()] [boolean] $AppAttach
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
     [ValidateNotNullOrEmpty()] [boolean] $SessionHostConfiguration = $false
@@ -584,7 +583,6 @@ class PooledHostPool : HostPool {
         $this.ImageSku = "win11-25h2-avd-m365"
         #$this.DisableOneDriveForKnownFolders()
         $this.EnableFSLogix()
-        #$this.DisableMSIX()
         $this.DisableSessionHostConfiguration()
         $this.EnableAppAttach()
         $this.LoadBalancerType = "BreadthFirst"
@@ -651,7 +649,7 @@ class PooledHostPool : HostPool {
 
 
     [string] GetAppAttachStorageAccountResourceGroupName() {
-        if (($this.MSIX) -or ($this.AppAttach)) {
+        if ($this.AppAttach) {
             return $this.AppAttachStorageAccountResourceGroupName
         }
         else {
@@ -660,7 +658,7 @@ class PooledHostPool : HostPool {
     }
 
     [string] GetAppAttachStorageAccountName() {
-        if (($this.MSIX) -or ($this.AppAttach)) {
+        if ($this.AppAttach) {
             return $this.AppAttachStorageAccountName
         }
         else {
@@ -749,7 +747,6 @@ class PooledHostPool : HostPool {
         return $this
     }
 
-    # App Attach and MSIX App Attach are mutually exclusive; enabling one disables the other.
     [PooledHostPool]DisableAppAttach() {
         $this.AppAttach = $false
         $this.RefreshNames()        
@@ -758,14 +755,7 @@ class PooledHostPool : HostPool {
 
     [PooledHostPool]EnableAppAttach() {
         $this.AppAttach = $true
-        $this.DisableMSIX()
         #$this.RefreshNames()        
-        return $this
-    }
-
-    hidden [PooledHostPool]DisableMSIX() {
-        $this.MSIX = $false
-        $this.RefreshNames()        
         return $this
     }
 
@@ -781,23 +771,8 @@ class PooledHostPool : HostPool {
         return $this
     }
 
-    hidden [PooledHostPool]EnableMSIX() {
-        #if (-not($this.IsMicrosoftEntraIdJoined())) {
-        if ($this.IsActiveDirectoryJoined() -or $this.IsHybridJoined()) {
-            $this.MSIX = $true
-            $this.DisableAppAttach()
-            $this.RefreshNames()        
-        }
-        return $this
-    }
-
-    # Overrides the base join mode setter: MSIX App Attach is not supported with Entra ID join.
     [PooledHostPool] SetJoinMode([JoinMode] $JoinMode) {
         $this.JoinMode = $JoinMode
-        if ($this.IsMicrosoftEntraIdJoined()) {
-            #No MSIX with EntraID: https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
-            $this.MSIX = $false
-        }
         $this.RefreshNames()
         return $this
     }
@@ -874,12 +849,7 @@ class PooledHostPool : HostPool {
         }
 
 
-        if ($this.MSIX) {
-            $this.AppAttachStorageAccountResourceGroupName = "rg-avd-{0}" -f $this.Name
-            $this.AppAttachStorageAccountName = "apat{0}" -f $($this.Name -replace "\W")
-            $this.AppAttachStorageAccountName = $this.AppAttachStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.AppAttachStorageAccountName.Length))
-        }
-        elseif ($this.AppAttach) {
+        if ($this.AppAttach) {
             $Index = 1 
             $this.AppAttachStorageAccountResourceGroupName = "rg-avd-appattach-poc-{0}-{1:D3}" -f [HostPool]::GetAzLocationShortName($this.Location), $Index
             #Checking if a StorageAccount have been already configured for this Azure location in this configuration. If yes we are reusing it.
@@ -4012,9 +3982,9 @@ function Set-AdminConsent {
 .SYNOPSIS
     Verifies the storage account names required by the given host pools are available.
 .DESCRIPTION
-    For each host pool, checks the availability of the FSLogix and/or App Attach/MSIX storage
+    For each host pool, checks the availability of the FSLogix and/or App Attach storage
     account names. App Attach accounts that are already taken are treated as reusable (warning),
-    while unavailable FSLogix/MSIX names are treated as errors. Optionally runs the host pool class
+    while unavailable FSLogix names are treated as errors. Optionally runs the host pool class
     Pester tests first.
 .PARAMETER HostPool
     The host pool object(s) to validate.
@@ -4052,7 +4022,7 @@ function Test-PsAvdStorageAccountNameAvailability {
     $result = $true
     foreach ($CurrentHostPool in $HostPool) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Processing '$($CurrentHostPool.Name)'"
-        if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
+        if ($CurrentHostPool.AppAttach) {
             $CurrentHostPoolStorageAccountName = $null
             $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
@@ -7299,7 +7269,7 @@ function Revoke-ActiveSASDiskAccess {
 .PARAMETER FullName
     Path(s) to exported host pool JSON file(s) describing what to remove (FullName parameter set).
 .PARAMETER KeepAzureAppAttachStorage
-    Preserve the Azure App Attach storage account instead of deleting it.
+    Preserve the Azure AppAttach storage account instead of deleting it.
 #>
 function Remove-PsAvdHostPoolSetup {
     [CmdletBinding(PositionalBinding = $false)]
@@ -8606,7 +8576,7 @@ function New-PsAvdPooledHostPoolSetup {
             #Creating a Private Endpoint for this KeyVault on this Subnet
              
             $Status = @{ $true = "Enabled"; $false = "Disabled" }
-            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; MSIX = $Status[$CurrentHostPool.MSIX]; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; OneDriveForKnownFolders = $Status[$CurrentHostPool.OneDriveForKnownFolders]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking]; PreferredAppGroupType = $CurrentHostPool.PreferredAppGroupType }
+            $Tag = @{LoadBalancerType = $CurrentHostPool.LoadBalancerType; VMSize = $CurrentHostPool.VMSize; KeyVault = $CurrentHostPool.KeyVault.VaultName; VMNumberOfInstances = $CurrentHostPool.VMNumberOfInstances; Location = $CurrentHostPool.Location; AppAttach = $Status[$CurrentHostPool.AppAttach]; FSLogix = $Status[$CurrentHostPool.FSLogix]; FSLogixCloudCache = $Status[$CurrentHostPool.FSLogixCloudCache]; OneDriveForKnownFolders = $Status[$CurrentHostPool.OneDriveForKnownFolders]; Intune = $Status[$CurrentHostPool.Intune]; SSO = $Status[$CurrentHostPool.SSO]; HostPoolName = $CurrentHostPool.Name; HostPoolType = $CurrentHostPool.Type; CreationTime = [Datetime]::Now; CreatedBy = (Get-AzContext).Account.Id; EphemeralODisk = $CurrentHostPool.DiffDiskPlacement; ScalingPlan = $Status[$CurrentHostPool.ScalingPlan]; SpotInstance = $Status[$CurrentHostPool.Spot]; Watermarking = $Status[$CurrentHostPool.Watermarking]; PreferredAppGroupType = $CurrentHostPool.PreferredAppGroupType }
             if ($CurrentHostPool.VMSourceImageId) {
                 $Tag['Image'] = 'Azure Compute Gallery'
                 $Tag['VMSourceImageId'] = $CurrentHostPool.VMSourceImageId
@@ -9530,11 +9500,11 @@ foreach (`$FileShareName in `$FileShareNames) {
             }
             #endregion 
 
-            #region MSIX AppAttach / Azure AppAttach
+            #region Azure AppAttach
             if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
-                if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
-                    #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                if ($CurrentHostPool.AppAttach) {
+                    #region Azure AppAttach Storage Account and ResourceGroup Names Setup
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
@@ -9580,7 +9550,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                             else {
                                 $IsNewCurrentHostPoolStorageAccountName = $false
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
-                                #Creating a Private Endpoint for the MSIX / Azure App attach Storage Account on the HostPool PE Subnet and the Subnet used by this DC
+                                #Creating a Private Endpoint for the Azure AppAttach Storage Account on the HostPool PE Subnet and the Subnet used by this DC
                                 $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
                                 $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
                                 New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -StorageAccount $CurrentHostPoolStorageAccount
@@ -9651,7 +9621,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                                 $CurrentHostPoolStorageAccountShare = Get-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext -ErrorAction Ignore
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountShare:`r`n$($CurrentHostPoolStorageAccountShare | Out-String)"
                                 if ($null -eq $CurrentHostPoolStorageAccountShare) {
-                                    #Create a share for MSIX
+                                    #Create a share for Azure AppAttach
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group)"
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
@@ -9865,7 +9835,7 @@ foreach (`$FileShareName in `$FileShareNames) {
 
                     #region Turning off automatic updates for MSIX app attach applications
                     #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Turning off automatic updates for MSIX app attach applications for '$($CurrentHostPoolMSIXGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Turning off automatic updates for Azure AppAttach applications for '$($CurrentHostPoolMSIXGPO.DisplayName)' GPO (linked to '$($PooledDesktopsOU.DistinguishedName)' OU)"
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolMSIXGPO.DisplayName -Key 'HKLM\Software\Policies\Microsoft\WindowsStore' -ValueName "AutoDownload" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 2
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolMSIXGPO.DisplayName -Key 'HKCU\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager' -ValueName "PreInstalledAppsEnabled" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 0
                     $null = Set-PsAvdGPRegistryValue -Name $CurrentHostPoolMSIXGPO.DisplayName -Key 'HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\ContentDeliveryManager\Debug' -ValueName "ContentDeliveryAllowedOverride" -Type ([Microsoft.Win32.RegistryValueKind]::DWord) -Value 2
@@ -9914,12 +9884,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering the Storage Account '$CurrentHostPoolStorageAccountName' with your AD environment (under '$($CurrentHostPoolOU.DistinguishedName)') OU"
                                 Import-Module AzFilesHybrid #-DisableNameChecking #-Force
                                 #$null = New-AzStorageAccountKey -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -KeyName "kerb1"
-                                if ($CurrentHostPool.MSIX) {
-                                    $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $CurrentHostPoolOU.DistinguishedName -Confirm:$false #-OverwriteExistingADObject
-                                }
-                                else {
-                                    $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $PooledDesktopsOU.DistinguishedName -Confirm:$false -OverwriteExistingADObject 
-                                }
+                                $null = Join-AzStorageAccountForAuth -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -DomainAccountType "ComputerAccount" -OrganizationUnitDistinguishedName $PooledDesktopsOU.DistinguishedName -Confirm:$false -OverwriteExistingADObject 
                                 # You can run the Debug-AzStorageAccountAuth cmdlet to conduct a set of basic checks on your AD configuration 
                                 # with the logged on AD user. This cmdlet is supported on AzFilesHybrid v0.1.2+ version. For more details on 
                                 # the checks performed in this cmdlet, see Azure Files Windows troubleshooting guide.
@@ -10060,12 +10025,12 @@ foreach (`$FileShareName in `$FileShareNames) {
 
                 }
                 else {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX AppAttach Or Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
                 }
             }
             else {
                 if ($CurrentHostPool.AppAttach) {
-                    #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                    #region Azure AppAttach Storage Account and ResourceGroup Names Setup
                     $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
@@ -10110,7 +10075,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                             }
                             else {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'CurrentHostPoolStorageAccountName' StorageAccount already exists"
-                                #Creating a Private Endpoint for the MSIX / Azure App attach Storage Account on the HostPool PE Subnet and the Subnet used by this DC
+                                #Creating a Private Endpoint for the Azure AppAttach Storage Account on the HostPool PE Subnet and the Subnet used by this DC
                                 $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
                                 $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
                                 New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -StorageAccount $CurrentHostPoolStorageAccount
@@ -10180,7 +10145,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                                 $CurrentHostPoolStorageAccountShare = Get-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext -ErrorAction Ignore
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountShare:`r`n$($CurrentHostPoolStorageAccountShare | Out-String)"
                                 if ($null -eq $CurrentHostPoolStorageAccountShare) {
-                                    #Create a share for MSIX
+                                    #Create a share for Azure AppAttach
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group)"
                                     $CurrentHostPoolStorageAccountShare = New-AzStorageShare -Name $CurrentHostPoolShareName -Context $storageContext
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolStorageAccountResourceGroupName' Resource Group) is created"
@@ -10674,9 +10639,6 @@ foreach (`$FileShareName in `$FileShareNames) {
             if ($CurrentHostPool.OneDriveForKnownFolders) {
                 $Options += 'OneDrive (ForKnownFolders)'
             }
-            if ($CurrentHostPool.MSIX) {
-                $Options += 'MSIX'
-            }
             if ($CurrentHostPool.AppAttach) {
                 $Options += 'AppAttach'
             }
@@ -11074,11 +11036,11 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
             #endregion 
 
 
-            #region MSIX AppAttach / Azure AppAttach
+            #region Azure AppAttach
             if ($CurrentHostPool.IsActiveDirectoryJoined() -or $CurrentHostPool.IsHybridJoined()) {
                 #No EntraID and MSIX : https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-overview?pivots=msix-app-attach#identity-providers
-                if ($CurrentHostPool.MSIX -or $CurrentHostPool.AppAttach) {
-                    #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                if ($CurrentHostPool.AppAttach) {
+                    #region Azure AppAttach Storage Account and ResourceGroup Names Setup
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountName: $CurrentHostPoolStorageAccountName"
                     $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
@@ -11114,72 +11076,15 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                     Restart-PsAvdSessionHost -HostPool $CurrentHostPool -Wait
                     Wait-PsAvdRunPowerShell -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName
                     #endregion 
-
-                    #region MSIX
-                    if ($CurrentHostPool.MSIX) {
-                        #region Adding the MSIX package(s) to the Host Pool
-                        #Adding a script property to keep only the Application name (using the Basename property with the naming convention AppName_x.y.z.vhdx where x.y.z is the version number)
-                        $MSIXDemoPackages | Add-Member -MemberType ScriptProperty -Name AppName -Value { $this.BaseName -replace "_.+$" } -Force
-                        #Keeping only the highest version per MSI packages (only one possible version per application with MSIX)
-                        $HighestVersionMSIXDemoPackages = $MSIXDemoPackages | Sort-Object -Property BaseName -Descending  | Sort-Object -Property AppName -Unique
-                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell
-                        foreach ($CurrentMSIXDemoPackage in $HighestVersionMSIXDemoPackages) {
-                            $obj = $null
-                            $ExpandMSIXImageStartTime = Get-Date
-                            while (($null -eq $obj) -and ((New-TimeSpan -Start $ExpandMSIXImageStartTime -End (Get-Date)).TotalMinutes -lt 15)) {
-                                $Index++
-                                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Expanding MSIX Image '$CurrentMSIXDemoPackage'"
-                                #Temporary Allowing storage account key access (disabled due to SFI)
-                                do {
-                                    $Result = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $($Result | Out-String)"
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                                    Start-Sleep -Seconds 30
-                                } while (-not((Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName).AllowSharedKeyAccess))
-
-                                $MyError = $null
-                                #$obj = Expand-PsAvdMSIXImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage
-                                $obj = Expand-AzWvdMsixImage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -Uri $CurrentMSIXDemoPackage -ErrorVariable MyError
-                                if (($null -eq $obj)) {
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Error Message: $($MyError.Exception.Message)"
-                                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                                    Start-Sleep -Seconds 30
-                                }
-                            }
-                            if ($null -eq $obj) {
-                                Write-Error -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The MSIX Image '$CurrentMSIXDemoPackage' CAN'T be expanded"
-                                continue
-                            }
-                            $DisplayName = "{0} (v{1})" -f $obj.PackageApplication.FriendlyName, $obj.Version
-                            #$DisplayName = $obj.PackageApplication.FriendlyName
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding MSIX Image '$CurrentMSIXDemoPackage' as '$DisplayName'..."
-                            New-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName -PackageAlias $obj.PackageAlias -DisplayName $DisplayName -ImagePath $CurrentMSIXDemoPackage -IsActive:$true
-                            #Get-AzWvdMsixPackage -HostPoolName $CurrentHostPool.Name -ResourceGroupName $CurrentHostPoolResourceGroupName | Where-Object {$_.PackageFamilyName -eq $obj.PackageFamilyName}
-                        } 
-                        #endregion 
-
-                        #region Publishing MSIX apps to application groups
-                        #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-powershell#publish-msix-apps-to-an-application-group
-                        #Publishing MSIX application to a desktop application group
-                        if ($null -ne $obj) { 
-                            $SubscriptionId = $AzContext.Subscription.Id
-                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzDesktopApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0
-            
-                            #Publishing MSIX application to a RemoteApp application group
-                            $null = New-AzWvdApplication -ResourceGroupName $CurrentHostPoolResourceGroupName -SubscriptionId $SubscriptionId -Name $obj.PackageName -ApplicationType MsixApplication -ApplicationGroupName $CurrentAzRemoteApplicationGroup.Name -MsixPackageFamilyName $obj.PackageFamilyName -CommandLineSetting 0 -MsixPackageApplicationId $obj.PackageApplication.AppId
-                        }
-                        #endregion 
-                    }
-                    #endregion
                 }               
                 else {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX AppAttach Or Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Azure AppAttach NOT enabled for '$($CurrentHostPool.Name)' HostPool"
                 }
             }
             else {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' is not AD joined"
                 if ($CurrentHostPool.AppAttach) {
-                    #region MSIX / Azure App Attach Storage Account and ResourceGroup Names Setup
+                    #region Azure AppAttach Storage Account and ResourceGroup Names Setup
                     $CurrentHostPoolStorageAccountName = $null
                     $CurrentHostPoolStorageAccountName = $CurrentHostPool.GetAppAttachStorageAccountName()
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$CurrentHostPoolStorageAccountResourceGroupName: $CurrentHostPoolStorageAccountResourceGroupName"
@@ -11254,9 +11159,9 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                 }
             }
 
-            if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
+            if ($CurrentHostPool.AppAttach) {
                 $CurrentHostPoolStorageAccountResourceGroupName = $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
-                #Creating a Private Endpoint for the MSIX / Azure App attach Storage Account on the HostPool PE Subnet and the Subnet used by this DC
+                #Creating a Private Endpoint for the Azure AppAttach Storage Account on the HostPool PE Subnet and the Subnet used by this DC
                 $CurrentHostPoolVirtualNetwork = Get-AzResource -ResourceId $($CurrentHostPool.SubnetId -replace "/subnets/.+$") | Get-AzVirtualNetwork
                 $ThisDomainControllerVirtualNetwork = Get-AzVMVirtualNetwork
                 New-PsAvdPrivateEndpointSetup -PrivateEndpointSubnetId $CurrentHostPool.PrivateEndpointSubnetId -PrivateDNSZoneVirtualNetworkId $CurrentHostPoolVirtualNetwork.Id, $ThisDomainControllerVirtualNetwork.Id -StorageAccount $CurrentHostPoolStorageAccount
@@ -12663,9 +12568,9 @@ function Get-PsAvdFSLogixProfileShare {
 
 <#
 .SYNOPSIS
-    Opens the App Attach/MSIX 'appattach' file share for each enabled host pool in Explorer.
+    Opens the Azure App Attach file share for each enabled host pool in Explorer.
 .DESCRIPTION
-    For each MSIX/App Attach host pool reachable from the current subnet (via its storage account
+    For each Azure App Attach host pool reachable from the current subnet (via its storage account
     private endpoint), locates the 'appattach' file share and opens its UNC path. Optionally runs the
     App Attach Azure Pester tests.
 .PARAMETER HostPool
@@ -12687,7 +12592,7 @@ function Get-PsAvdAppAttachProfileShare {
     $ThisDomainControllerSubnet = Get-AzVMSubnet
 
     foreach ($CurrentHostPool in $HostPool) {
-        if (($CurrentHostPool.MSIX) -or ($CurrentHostPool.AppAttach)) {
+        if ($CurrentHostPool.AppAttach) {
             $PrivateEndpointSubnetId = (Get-AzPrivateEndpoint | Where-Object -FilterScript { $_.PrivateLinkServiceConnections.PrivateLinkServiceId -match $((Get-AzStorageAccount -Name $CurrentHostPool.GetAppAttachStorageAccountName() -ResourceGroupName $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()).Id) }).Subnet.Id
             if ($ThisDomainControllerSubnet.Id -in $PrivateEndpointSubnetId) {
                 $CurrentHostPoolStorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetAppAttachStorageAccountName() -ResourceGroupName $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
@@ -12699,14 +12604,14 @@ function Get-PsAvdAppAttachProfileShare {
                 }
             }
             else {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The MSIX FileShare is not accessible from this subnet ('$($ThisDomainControllerSubnet.Id)')"
+                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Azure AppAttach FileShare is not accessible from this subnet ('$($ThisDomainControllerSubnet.Id)')"
             }
         }
         else {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] MSIX is not enabled for '$($CurrentHostPool.Name)' HostPool"
+            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Azure AppAttach is not enabled for '$($CurrentHostPool.Name)' HostPool"
         }
     }
-    #region Pester Tests for Azure Host Pool - MSIX File Share - Azure Instantiation
+    #region Pester Tests for Azure Host Pool - Azure AppAttach File Share - Azure Instantiation
     if ($Pester) {
         $ModuleBase = Get-ModuleBase
         $PesterDirectory = Join-Path -Path $ModuleBase -ChildPath 'Pester'
@@ -13116,11 +13021,6 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
         $HostPoolId = (Get-AzWvdHostPool -Name $CurrentHostPool.Name -ResourceGroupName $CurrentHostPool.GetResourceGroupName()).Id -as [array]
         $AVDResourceGroupId = (Get-AzResourceGroup -Name $CurrentHostPool.GetResourceGroupName()).ResourceId
 
-        if ($CurrentHostPool.MSIX) {
-            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' MSIX: $($CurrentHostPool.MSIX)"
-            $StorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetAppAttachStorageAccountName() -ResourceGroupName $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
-            $storageAccountResourceIds += $StorageAccount.Id
-        }
         if ($CurrentHostPool.AppAttach) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] '$($CurrentHostPool.Name)' AppAttach: $($CurrentHostPool.AppAttach)"
             $StorageAccount = Get-AzStorageAccount -Name $CurrentHostPool.GetAppAttachStorageAccountName() -ResourceGroupName $CurrentHostPool.GetAppAttachStorageAccountResourceGroupName()
