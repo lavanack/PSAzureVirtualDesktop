@@ -103,6 +103,7 @@ class HostPool {
 
     # Cached lookup tables shared by all instances (built once, lazily) to avoid repeated Azure calls.
     hidden static [hashtable] $AzLocationShortNameHT = $null     # Maps Azure location -> short name (for naming conventions).
+    hidden static [hashtable] $AzResourceTypeShortNameHT = $null # Maps Azure resource type -> short name (for naming conventions).
     static [hashtable] $AzEphemeralOsDiskSkuHT = $null           # Maps location -> VM SKUs eligible for ephemeral OS disks.
     static [hashtable] $AzPairedRegionHT = $null                 # Maps location -> its Azure paired region (for DR/ASR).
     static [uint16] $VMProfileOsdiskSizeGb = 127                 # Default OS disk size in GB used for SKU evaluation.
@@ -121,6 +122,15 @@ class HostPool {
             $AzLocation = Get-AzLocation | Select-Object -Property Location, DisplayName | Group-Object -Property DisplayName -AsHashTable -AsString
             $ANTResourceLocation = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/main/src/repository/resourcelocations.json
             [HostPool]::AzLocationShortNameHT = $ANTResourceLocation | Select-Object -Property name, shortName, @{Name = 'Location'; Expression = { $AzLocation[$_.name].Location } } | Where-Object -FilterScript { $_.Location } | Group-Object -Property Location -AsHashTable -AsString
+        }
+    }
+    
+    # Builds (once) the location -> short-name lookup table by combining Azure locations
+    # with the Azure Naming Tool reference data published on GitHub.
+    hidden static BuildAzureResourceTypeShortNameHashtable() {
+        if ($null -eq [HostPool]::AzResourceTypeShortNameHT) {
+            $ANTResourceType = Invoke-RestMethod -Uri https://raw.githubusercontent.com/mspnp/AzureNamingTool/refs/heads/main/src/repository/resourcetypes.json 
+            [HostPool]::AzResourceTypeShortNameHT = $ANTResourceType | Where-Object -FilterScript { $_.property -notin @('Linux') } | Select-Object -Property resource, shortName, property, lengthMax | Group-Object -Property resource -AsHashTable -AsString
         }
     }
     
@@ -174,6 +184,7 @@ class HostPool {
     # networking, disabled optional features) used by the constructors.
     hidden Init([Object] $KeyVault, [string] $SubnetId, [string[]] $PrivateEndpointSubnetId) {
         [HostPool]::BuildAzureLocationShortNameHashtable()
+        [HostPool]::BuildAzureResourceTypeShortNameHashtable()
         if ($null -eq [HostPool]::AzEphemeralOsDiskSkuHT) {
             [HostPool]::AzEphemeralOsDiskSkuHT = @{}
         }
@@ -784,7 +795,8 @@ class PooledHostPool : HostPool {
         $KeyVaultNameMaxLength = 24
         $StorageAccountNameMaxLength = 24
 
-        $TempName = "hp-np"
+        #$TempName = "hp-nd"
+        $TempName = "{0}-np" -f [HostPool]::AzResourceTypeShortNameHT["DesktopVirtualization/hostPools"].shortName
         $TempNamePrefix = "n"
 
         if ($this.IsMicrosoftEntraIdJoined()) {
@@ -964,12 +976,13 @@ class PersonalHostPool : HostPool {
         return $this
     }
 
-    # Recomputes the derived resource names (personal pools use the "hp-pd" prefix and have no
+    # Recomputes the derived resource names (personal pools use the "avdhp-pd" prefix and have no
     # FSLogix/App Attach storage accounts).
     hidden RefreshNames() {
         $KeyVaultNameMaxLength = 24
         $StorageAccountNameMaxLength = 24
-        $TempName = "hp-pd"
+        #$TempName = "hp-pd"
+        $TempName = "{0}-pd" -f [HostPool]::AzResourceTypeShortNameHT["DesktopVirtualization/hostPools"].shortName
         $TempNamePrefix = "p"
 
         if ($this.IsMicrosoftEntraIdJoined()) {
@@ -7999,7 +8012,7 @@ function New-PsAvdPersonalHostPoolSetup {
                 }
 
                 while (-not(Get-AzRoleAssignment @Parameters)) {
-                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.ObjectId)' ObjectId"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' Scope"
                     $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -10281,7 +10294,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                 else {
                     $Tag['IdentityModel'] = "Hybrid"
                 }
-                #region Assign Virtual Machine User Login' RBAC role to the Resource Group
+                #region Assign 'Virtual Machine User Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
                 foreach ($CurrentHostPoolAGUsersGroupName in $CurrentHostPoolDAGUsersGroupName, $CurrentHostPoolRAGUsersGroupName) {
                     do {
@@ -10296,7 +10309,6 @@ foreach (`$FileShareName in `$FileShareNames) {
                     # Assign users to the application group
                     #region 'Virtual Machine User Login' RBAC Assignment
                     $RoleDefinition = Get-AzRoleDefinition -Name "Virtual Machine User Login"
-                    $Scope = $CurrentHostPoolStorageAccount.Id
 
                     $Parameters = @{
                         ObjectId           = $AzADGroup.Id
@@ -13127,6 +13139,8 @@ function Import-PsAvdWorkbook {
         "Windows Virtual Desktop Workbook - Billy York" = "https://raw.githubusercontent.com/scautomation/WVD-Workbook/master/galleryTemplate/template.json"
         #From https://github.com/microsoft/Application-Insights-Workbooks/tree/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights
         "AVD Insights - Application-Insights-Workbooks" = "https://raw.githubusercontent.com/microsoft/Application-Insights-Workbooks/master/Workbooks/Windows%20Virtual%20Desktop/AVD%20Insights/AVDWorkbookV2.workbook"
+        #From https://github.com/krishna-sunkavalli/vm-retirement-workbook
+        "Azure VM Lifecycle & Modernization Readiness Workbook" = "https://raw.githubusercontent.com/krishna-sunkavalli/vm-retirement-workbook/refs/heads/main/workbook/vm-lifecycle-readiness.workbook"
     }
 
     [HostPool]::BuildAzureLocationShortNameHashtable()
