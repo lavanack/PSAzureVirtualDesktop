@@ -28,6 +28,9 @@ function Send-FSlogixProfileToastNotification {
         [string] $FileSystemLabel = "*Profile-$ENV:USERNAME*",
         [int] $TimeoutInMs = 10000
     )
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
+
     # Get the relevant informations from the FSLogix profile
     $FSLogixProfileVolume = Get-Volume -FileSystemLabel $FileSystemLabel | Where-Object -FilterScript { $_.DriveType -eq 'Fixed' }
 
@@ -36,6 +39,8 @@ function Send-FSlogixProfileToastNotification {
         # Calculate the free space in percent
         $PercentFree = [Math]::round((($FSLogixProfileVolume.SizeRemaining / $FSLogixProfileVolume.Size) * 100))
         $SizeRemainingInGB = "{0:N0}" -f $($FSLogixProfileVolume.SizeRemaining / 1GB)
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$PercentFree: $PercentFree"
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$SizeRemainingInGB: $SizeRemainingInGB"
 
 
         Add-Type -AssemblyName System.Windows.Forms
@@ -59,12 +64,18 @@ function Send-FSlogixProfileToastNotification {
         }
 
         $Path = (Get-Process -id $PID).Path
+        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Path: $Path"
         $BalMsg.Icon = [System.Drawing.Icon]::ExtractAssociatedIcon($Path)
         $BalMsg.BalloonTipTitle = $HeadlineText
         $BalMsg.BalloonTipText = $bodyText
         $BalMsg.Visible = $true
         $BalMsg.ShowBalloonTip($TimeoutInMs)
+        Start-Sleep -Milliseconds ($TimeoutInMs)
+        $BalMsg.Visible = $false
+        $BalMsg.Dispose()
     }
+
+    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Leaving function '$($MyInvocation.MyCommand)'"
 }
 #endregion
 
@@ -83,5 +94,5 @@ Start-Sleep -Seconds 10
 #>
 
 #Send-FSlogixProfileToastNotification -FileSystemLabel Windows -TimeoutInMs 5000 -Verbose
-Send-FSlogixProfileToastNotification
+Send-FSlogixProfileToastNotification #-Verbose
 #endregion
