@@ -25,6 +25,7 @@ enum JoinMode {
 enum IdentityModel {
     Hybrid
     CloudOnly
+    External
 }
 
 # The two Azure Virtual Desktop host pool types.
@@ -437,7 +438,7 @@ class HostPool {
     # Sets the identity model; choosing CloudOnly forces the join mode to Microsoft Entra ID (Hybrid join mode is also supported).
     [HostPool] SetIdentityModel([IdentityModel] $IdentityModel) {
         $this.IdentityModel = $IdentityModel
-        if ([IdentityModel]::CloudOnly -eq $IdentityModel) {
+        if ($IdentityModel -in [IdentityModel]::CloudOnly, [IdentityModel]::External) {
             $this.SetJoinMode([JoinMode]::MicrosoftEntraID)
         }
         return $this
@@ -565,6 +566,7 @@ class PooledHostPool : HostPool {
     [ValidateNotNullOrEmpty()] [boolean] $AppAttach
     [ValidateNotNullOrEmpty()] [boolean] $FSLogixCloudCache = $false
     [ValidateNotNullOrEmpty()] [boolean] $SessionHostConfiguration = $false
+    [ValidateNotNullOrEmpty()] [boolean] $ExternalIdentities = $false
 
     # Related host-pool reference and derived storage/configuration resource names.
     [PooledHostPool] $FSLogixCloudCachePairedPooledHostPool  
@@ -573,6 +575,7 @@ class PooledHostPool : HostPool {
     hidden [String] $AppAttachStorageAccountName
     hidden [String] $AppAttachStorageAccountResourceGroupName
     hidden [String] $SessionHostConfigurationName
+    hidden [String] $ExternalIdentitiesEntraIDGroupName
 
     static [hashtable] $AppAttachStorageAccountNameHT = @{}
 
@@ -716,10 +719,35 @@ class PooledHostPool : HostPool {
         return $this
     }
 
+
+    [PooledHostPool]DisableExternalIdentities() {
+        $this.ExternalIdentities = $false
+        $this.SetIdentityModel([IdentityModel]::Hybrid)
+        $this.SetJoinMode([JoinMode]::ActiveDirectory)
+        $this.DisableSSO()
+        $this.ExternalIdentitiesEntraIDGroupName = $null
+        return $this
+    }
+
+    [PooledHostPool]EnableExternalIdentities([string] $ExternalIdentitiesEntraIDGroupName) {
+        $this.ExternalIdentities = $true
+        $this.SetIdentityModel([IdentityModel]::External)
+        #$this.SetJoinMode([JoinMode]::MicrosoftEntraID)
+        $this.EnableSSO()
+        $this.ExternalIdentitiesEntraIDGroupName = $ExternalIdentitiesEntraIDGroupName
+        return $this
+    }
+
+
+    [string] GetExternalIdentitiesEntraIDGroupName() {
+        return $this.ExternalIdentitiesEntraIDGroupName
+    }
+    
     [PooledHostPool]DisableOneDriveForKnownFolders() {
         $this.OneDriveForKnownFolders = $false
         return $this
     }
+
 
     [PooledHostPool]EnableOneDriveForKnownFolders() {
         if ($this.IsActiveDirectoryJoined() -or $this.IsHybridJoined()) {
@@ -875,7 +903,7 @@ class PooledHostPool : HostPool {
                 }
                 #else creating a new one
                 else {
-                    do {
+                    Do {
                         $RandomNumber = Get-Random -Minimum 1 -Maximum 1000
                         $this.AppAttachStorageAccountName = "saavdapatpoc{0}{1:D3}" -f [HostPool]::GetAzLocationShortName($this.Location), $RandomNumber
                         $this.AppAttachStorageAccountName = $this.AppAttachStorageAccountName.Substring(0, [system.math]::min($StorageAccountNameMaxLength, $this.AppAttachStorageAccountName.Length)).ToLower()
@@ -1182,7 +1210,7 @@ function Register-PsAvdRequiredResourceProvider {
         if ($FeatureStatus -ne "Registered") {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Registering '$RequiredPreviewResourceProviders' Resource Provider"
             Register-AzProviderFeature -ProviderNamespace $ProviderNamespace -FeatureName $FeatureName
-            do {
+            Do {
                 $FeatureStatus = (Get-AzProviderFeature -ProviderNamespace $ProviderNamespace -FeatureName $FeatureName).RegistrationState
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Waiting for '$CurrentRequiredPreviewResourceProvider' Resource Provider to be registered ... Waiting 10 seconds"
                 Start-Sleep -Seconds 10
@@ -1655,7 +1683,7 @@ function Get-MgGraphObject {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Entering function '$($MyInvocation.MyCommand)'"
 
     $GraphRequestUri = $Uri
-    $MgGraphObject = do {
+    $MgGraphObject = Do {
         $Result = (Invoke-MgGraphRequest -Uri $GraphRequestUri -Method GET -OutputType PSObject)
         $GraphRequestUri = $Result."@odata.nextLink"
         if ($Result.value) {
@@ -1705,7 +1733,7 @@ function Update-PsAvdMgBetaPolicyMobileDeviceManagementPolicy {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Adding the '$($CurrentGroup.DisplayName)' Group to the windows Intune Enrollment selected groups"
             $OdataId = "https://graph.microsoft.com/odata/groups('$($CurrentGroup.Id)')"
             $Timer = [system.diagnostics.stopwatch]::StartNew()
-            do {
+            Do {
                 try {
                     $Result = New-MgBetaPolicyMobileDeviceManagementPolicyIncludedGroupByRef -MobilityManagementPolicyId $mobilityManagementPolicyId -OdataId $OdataId -PassThru -ErrorAction Stop
                 }
@@ -3607,7 +3635,7 @@ function Set-PsAvdGPRegistryValue {
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Value: $Value"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$TimeoutInSeconds: $TimeoutInSeconds"
     $Timer = [System.Diagnostics.Stopwatch]::StartNew()
-    do {
+    Do {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Timer: $($Timer | Out-String)"
         try {
             $Output = Set-GPRegistryValue -Name $Name -Key $Key -ValueName $ValueName -Type $Type -Value $Value -ErrorAction Stop
@@ -4136,7 +4164,7 @@ function Get-LocalAdminCredential {
         $Attempts = [int]::MaxValue
     }
     $Loop = 0
-    do {
+    Do {
         $Loop ++  
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Loop #$($Loop)"  
         try {
@@ -4185,7 +4213,7 @@ function Get-AdjoinCredential {
         $Attempts = [int]::MaxValue
     }
     $Loop = 0
-    do {
+    Do {
         $Loop ++  
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Loop #$($Loop)"  
         try {
@@ -4634,7 +4662,7 @@ function New-PsAvdHostPoolSessionHostCredentialKeyVault {
     #endregion
     
     $Index = 0
-    do {
+    Do {
         $Index++
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Index: $Index"
         $KeyVaultName = "kvavdhpcred{0}{1:D3}" -f [HostPool]::GetAzLocationShortName($Location), $Index
@@ -6968,7 +6996,7 @@ function Wait-PSSession {
     }
     $Loop = 0
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Computer Names (Nb: $($ComputerName.Count)): $($ComputerName -join ', ')"  
-    do {
+    Do {
         $Loop ++  
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Loop #$($Loop)"  
         if ($Credential) {
@@ -7050,7 +7078,7 @@ function Wait-PsAvdRunPowerShell {
     $SessionHosts = Get-AzWvdSessionHost -HostPoolName $HostPoolName -ResourceGroupName $ResourceGroupName
     #Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Session Hosts (Nb: $($SessionHosts.Count)): $($SessionHosts.Name -replace "^.*/" -join ', ')"
     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Session Hosts (Nb: $($SessionHosts.Count)): $($SessionHosts.Name -replace "^.*/" -replace "\..*$" -join ', ')"
-    do {
+    Do {
         $Loop ++  
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Loop #$($Loop)"  
         $Jobs = foreach ($CurrentSessionHost in $SessionHosts) {
@@ -7105,7 +7133,7 @@ function Start-MicrosoftEntraIDConnectSync {
             catch {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Microsoft Entra ID Sync already in progress"
             }
-            do {
+            Do {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 5 seconds"
                 Start-Sleep -Seconds 5
                 $ADSyncConnectorRunStatus = Get-ADSyncConnectorRunStatus
@@ -7539,7 +7567,7 @@ function Add-PsAvdAzureAppAttach {
         $FirstHostPoolInthisLocationStorageAccountResourceGroupName = $FirstHostPoolInthisLocation.GetAppAttachStorageAccountResourceGroupName()
 
         #Temporary Allowing storage account key access (disabled due to SFI)
-        do {
+        Do {
             $Result = Set-AzStorageAccount -ResourceGroupName $FirstHostPoolInthisLocationStorageAccountResourceGroupName -Name $FirstHostPoolInthisLocationStorageAccountName -AllowSharedKeyAccess $true
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $($Result | Out-String)"
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -7869,6 +7897,9 @@ function New-PsAvdPersonalHostPoolSetup {
                     if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
                         $Tag['IdentityModel'] = "CloudOnly"
                     }
+                    elseif ($CurrentHostPool.IdentityModel -eq [IdentityModel]::External) {
+                        $Tag['IdentityModel'] = "External"
+                    }
                     else {
                         $Tag['IdentityModel'] = "Hybrid"
                     }
@@ -7878,7 +7909,7 @@ function New-PsAvdPersonalHostPoolSetup {
                 $Tag['JoinMode'] = "Microsoft Entra ID"
                 #region Assign Virtual Machine Administrator Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
-                do {
+                Do {
                     Start-MicrosoftEntraIDConnectSync
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
@@ -7990,7 +8021,7 @@ function New-PsAvdPersonalHostPoolSetup {
 
                 #region Assign 'Desktop Virtualization User' RBAC role to application groups
                 # Get the object ID of the user group you want to assign to the application group
-                do {
+                Do {
                     Start-MicrosoftEntraIDConnectSync
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
@@ -8063,6 +8094,9 @@ function New-PsAvdPersonalHostPoolSetup {
             }
             if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
                 $Options += "CloudOnly"
+            }
+            elseif ($CurrentHostPool.IdentityModel -eq [IdentityModel]::External) {
+                $Options += "External"
             }
             else {
                 $Options += "Hybrid"
@@ -8196,7 +8230,7 @@ function New-PsAvdPersonalHostPoolSetup {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the Log Analytics WorkSpace '$($LogAnalyticsWorkSpaceName)' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
             $LogAnalyticsWorkSpace = New-AzOperationalInsightsWorkspace -Location $CurrentHostPool.Location -Name $LogAnalyticsWorkSpaceName -Sku pergb2018 -ResourceGroupName $CurrentHostPoolResourceGroupName -Force
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Log Analytics WorkSpace '$($LogAnalyticsWorkSpaceName)' (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
-            do {
+            Do {
                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 10 seconds"
                 Start-Sleep -Seconds 10
                 $LogAnalyticsWorkSpace = $null
@@ -9087,7 +9121,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-powershell#enable-microsoft-entra-kerberos-authentication-for-hybrid-user-accounts
                     #From https://smbtothecloud.com/azure-ad-joined-avd-with-FSLogix-aad-kerberos-authentication/
                     #From https://www.ciraltos.com/avd-fslogix-without-domain-controllers-a-complete-cloud-native-setup/
-                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                    if ($CurrentHostPool.IdentityModel -in [IdentityModel]::CloudOnly, [IdentityModel]::External) {
                         $null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -StorageAccountName $CurrentHostPoolStorageAccountName -EnableAzureActiveDirectoryKerberosForFile $true -DefaultSharePermission "StorageFileDataSmbShareContributor"
                     }
                     else {
@@ -9098,7 +9132,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #region Grant admin consent to the new service principal
                     #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-auth-hybrid-identities-enable?tabs=azure-powershell#grant-admin-consent-to-the-new-service-principal
                     # Get the created service principal
-                    do {
+                    Do {
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 60 seconds ..."
                         Start-Sleep -Seconds 60
                         $Application = Get-MgBetaApplication -Filter "DisplayName eq '[Storage Account] $CurrentHostPoolStorageAccountName.file.core.windows.net'"
@@ -9108,7 +9142,7 @@ function New-PsAvdPooledHostPoolSetup {
                     Set-AdminConsent -Context $AzContext -applicationId $Application.AppId
                     #endregion
 
-                    if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                    if ($CurrentHostPool.IdentityModel -in [IdentityModel]::CloudOnly, [IdentityModel]::External) {
                         #From https://www.ciraltos.com/avd-fslogix-without-domain-controllers-a-complete-cloud-native-setup/
                         #region Enable Cloud-Only Group Support
                         $requiredTag = "kdc_enable_cloud_group_sids"
@@ -9166,7 +9200,7 @@ function New-PsAvdPooledHostPoolSetup {
 
 
                 #Temporary Allowing storage account key access (disabled due to SFI)
-                do {
+                Do {
                     $Result = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $($Result | Out-String)"
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -9203,7 +9237,7 @@ function New-PsAvdPooledHostPoolSetup {
                     if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
                         #region Setting up the file share with right RBAC: FSLogix Contributor = "Storage File Data SMB Share Contributor"
                         #Assign the custom role to the target identity with the specified scope.
-                        do {
+                        Do {
                             Start-MicrosoftEntraIDConnectSync
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                             Start-Sleep -Seconds 30
@@ -9236,7 +9270,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #region Setting up the file share with right RBAC: FSLogix Elevated Contributor = "Storage File Data SMB Share Elevated Contributor"
                     #Get the name of the custom role
                     #Assign the custom role to the target identity with the specified scope.
-                    do {
+                    Do {
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
@@ -9269,7 +9303,7 @@ function New-PsAvdPooledHostPoolSetup {
                     #Get the name of the custom role
                     $FileShareContributorRole = Get-AzRoleDefinition -Name "Storage File Data SMB Share Reader"
                     #Assign the custom role to the target identity with the specified scope.
-                    do {
+                    Do {
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
@@ -9303,14 +9337,14 @@ function New-PsAvdPooledHostPoolSetup {
 
                     #region ACE/NTFS permissions for FSLogix
                     #Temporary Allowing storage account key access (disabled due to SFI)
-                    do {
+                    Do {
                         $Result = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $($Result | Out-String)"
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                     } while (-not((Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).AllowSharedKeyAccess))
 
-                    if ($CurrentHostPool.IdentityModel -ne [IdentityModel]::CloudOnly) {
+                    if ($CurrentHostPool.IdentityModel -notin [IdentityModel]::CloudOnly, [IdentityModel]::External) {
                         Remove-PSDrive -Name Z -ErrorAction Ignore
                         $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
@@ -9403,10 +9437,14 @@ function New-PsAvdPooledHostPoolSetup {
 
                 }
 
-                if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                if ($CurrentHostPool.IdentityModel -in [IdentityModel]::CloudOnly, [IdentityModel]::External) {
                     #region Configure Windows ACLs for cloud-only identities by using PowerShell
                     #From https://learn.microsoft.com/en-us/azure/storage/files/storage-files-identity-configure-file-level-permissions#configure-windows-acls-for-cloud-only-identities-by-using-powershell
                     # To use the -EncodedCommand parameter:
+                    $Principals = @($CurrentHostPoolFSLogixContributorGroupName)
+                    if ($CurrentHostPool.ExternalIdentities) {
+                        $Principals += $CurrentHostPool.GetExternalIdentitiesEntraIDGroupName()
+                    }
                     $ScriptBlockContent = @"
 #requires -PSEdition Core
 param()
@@ -9431,8 +9469,11 @@ foreach (`$FileShareName in `$FileShareNames) {
     Write-Host "Setting ACE 'System + Creator Owner = Full Control' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
     `$null = Set-AzFileAclKey -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Key `$Key
 
-    Write-Host "Setting ACE '$CurrentHostPoolFSLogixContributorGroupName = Modify' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
-    `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixContributorGroupName" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
+    foreach (`$Principal in $("'{0}'" -f $($Principals -join "','"))) {
+        Write-Host "Setting ACE '`$Principal = Modify' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
+        `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "`$Principal" -AccessRights Modify -InheritanceFlags None -PropagationFlags None
+    }
+
     Write-Host "Setting ACE '$CurrentHostPoolFSLogixElevatedContributorGroupName = FullControl' on '$CurrentHostPoolStorageAccountName\`$FileShareName'"
     `$null = Add-AzFileAce -Context `$Context -FileShareName `$FileShareName -FilePath `$FilePath -Type Allow -Principal "$CurrentHostPoolFSLogixElevatedContributorGroupName" -AccessRights FullControl -InheritanceFlags ContainerInherit, ObjectInherit -PropagationFlags None
 }
@@ -9623,7 +9664,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
                                 #Temporary Allowing storage account key access (disabled due to SFI)
-                                do {
+                                Do {
                                     $Result = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $($Result | Out-String)"
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -9761,7 +9802,7 @@ foreach (`$FileShareName in `$FileShareNames) {
 
                     #region NTFS permissions for MSIX
                     #Temporary Allowing storage account key access (disabled due to SFI)
-                    do {
+                    Do {
                         $Result = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $($Result | Out-String)"
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -9940,7 +9981,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                     #region Setting up the file share with right RBAC: MSIX Hosts & MSIX Users = "Storage File Data SMB Share Contributor" + MSIX Share Admins = Storage File Data SMB Share Elevated Contributor
                     #https://docs.microsoft.com/en-us/azure/virtual-desktop/app-attach-file-share#how-to-set-up-the-file-share
                     #Get the name of the custom role
-                    do {
+                    Do {
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
@@ -9968,7 +10009,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                     }
                     #endregion
 
-                    do {
+                    Do {
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
@@ -10001,7 +10042,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                     #Get the name of the custom role
                     $FileShareContributorRole = Get-AzRoleDefinition -Name "Storage File Data SMB Share Elevated Contributor"
                     #Assign the custom role to the target identity with the specified scope.
-                    do {
+                    Do {
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
@@ -10147,7 +10188,7 @@ foreach (`$FileShareName in `$FileShareNames) {
                                 Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Received '$MutexName' mutex"
 
                                 #Temporary Allowing storage account key access (disabled due to SFI)
-                                do {
+                                Do {
                                     $Result = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolStorageAccountResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $true
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Result: $($Result | Out-String)"
                                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
@@ -10284,11 +10325,10 @@ foreach (`$FileShareName in `$FileShareNames) {
                 else {
                     $Tag['JoinMode'] = "Hybrid"
                 }
-                $Tag['IdentityModel'] = "Hybrid"
             }
             else {
                 $Tag['JoinMode'] = "Microsoft Entra ID"
-                if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
+                if ($CurrentHostPool.IdentityModel -in [IdentityModel]::CloudOnly, [IdentityModel]::External) {
                     $Tag['IdentityModel'] = "CloudOnly"
                 }
                 else {
@@ -10296,8 +10336,12 @@ foreach (`$FileShareName in `$FileShareNames) {
                 }
                 #region Assign 'Virtual Machine User Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
-                foreach ($CurrentHostPoolAGUsersGroupName in $CurrentHostPoolDAGUsersGroupName, $CurrentHostPoolRAGUsersGroupName) {
-                    do {
+                $CurrentHostPoolAGUsersGroupNames = $CurrentHostPoolDAGUsersGroupName, $CurrentHostPoolRAGUsersGroupName
+                if ($CurrentHostPool.ExternalIdentities) {
+                    $CurrentHostPoolAGUsersGroupNames += $CurrentHostPool.ExternalIdentitiesEntraIDGroupName
+                }
+                foreach ($CurrentHostPoolAGUsersGroupName in $CurrentHostPoolAGUsersGroupNames) {
+                    Do {
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
@@ -10543,38 +10587,45 @@ foreach (`$FileShareName in `$FileShareNames) {
             $null = Get-AzWvdDesktop @parameters | Update-AzWvdDesktop -FriendlyName $CurrentHostPool.Name
 
             #region Assign 'Desktop Virtualization User' RBAC role to application groups
-            # Get the object ID of the user group you want to assign to the application group
-            do {
-                Start-MicrosoftEntraIDConnectSync
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                Start-Sleep -Seconds 30
-                $AzADGroup = $null
-                #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
-                $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
-            } while (-not($AzADGroup.Id))
-
-            # Assign users to the application group
-            #region 'Desktop Virtualization User' RBAC Assignment
-            $RoleDefinition = Get-AzRoleDefinition -Name "Desktop Virtualization User"
-            $Scope = $CurrentHostPoolStorageAccount.Id
-
-            $Parameters = @{
-                ObjectId           = $AzADGroup.Id
-                ResourceName       = $CurrentAzDesktopApplicationGroup.Name
-                ResourceGroupName  = $CurrentHostPoolResourceGroupName
-                RoleDefinitionName = $RoleDefinition.Name
-                ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
-                #Verbose            = $true
+            $EntraIDGroupNames = @($CurrentHostPoolDAGUsersGroupName)
+            if ($CurrentHostPool.ExternalIdentities) {
+                $EntraIDGroupNames += $CurrentHostPool.GetExternalIdentitiesEntraIDGroupName()
             }
+            foreach ($EntraIDGroupName in $EntraIDGroupNames) {
+                # Get the object ID of the user group you want to assign to the application group
+                Do {
+                    Start-MicrosoftEntraIDConnectSync
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                    Start-Sleep -Seconds 30
+                    $AzADGroup = $null
+                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
+                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$EntraIDGroupName'"
+                } while (-not($AzADGroup.Id))
+
+                # Assign users to the application group
+                #region 'Desktop Virtualization User' RBAC Assignment
+                $RoleDefinition = Get-AzRoleDefinition -Name "Desktop Virtualization User"
+                $Scope = $CurrentHostPoolStorageAccount.Id
+
+                $Parameters = @{
+                    ObjectId           = $AzADGroup.Id
+                    ResourceName       = $CurrentAzDesktopApplicationGroup.Name
+                    ResourceGroupName  = $CurrentHostPoolResourceGroupName
+                    RoleDefinitionName = $RoleDefinition.Name
+                    ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
+                    #Verbose            = $true
+                }
 
 
-            while (-not(Get-AzRoleAssignment @Parameters)) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
-                $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                Start-Sleep -Seconds 30
+                while (-not(Get-AzRoleAssignment @Parameters)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
+                    $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                    Start-Sleep -Seconds 30
+                }
             }
+            
             #endregion
             #endregion 
 
@@ -10596,38 +10647,44 @@ foreach (`$FileShareName in `$FileShareNames) {
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The Remote Application Group for the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
 
             #region Assign required RBAC role to application groups
-            # Get the object ID of the user group you want to assign to the application group
-            do {
-                Start-MicrosoftEntraIDConnectSync
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                Start-Sleep -Seconds 30
-                $AzADGroup = $null
-                #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolRAGUsersGroupName
-                $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolRAGUsersGroupName'"
-            } while (-not($AzADGroup.Id))
-
-            # Assign users to the application group
-            #region 'Desktop Virtualization User' RBAC Assignment
-            $RoleDefinition = Get-AzRoleDefinition -Name "Desktop Virtualization User"
-            $Scope = $CurrentHostPoolStorageAccount.Id
-
-            $Parameters = @{
-                ObjectId           = $AzADGroup.Id
-                ResourceName       = $CurrentAzRemoteApplicationGroup.Name
-                ResourceGroupName  = $CurrentHostPoolResourceGroupName
-                RoleDefinitionName = $RoleDefinition.Name
-                ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
-
-                #Verbose            = $true
+            $EntraIDGroupNames = @($CurrentHostPoolRAGUsersGroupName)
+            if ($CurrentHostPool.ExternalIdentities) {
+                $EntraIDGroupNames += $CurrentHostPool.GetExternalIdentitiesEntraIDGroupName()
             }
+            foreach ($EntraIDGroupName in $EntraIDGroupNames) {
+                # Get the object ID of the user group you want to assign to the application group
+                Do {
+                    Start-MicrosoftEntraIDConnectSync
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                    Start-Sleep -Seconds 30
+                    $AzADGroup = $null
+                    #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolRAGUsersGroupName
+                    $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$EntraIDGroupName'"
+                } while (-not($AzADGroup.Id))
+
+                # Assign users to the application group
+                #region 'Desktop Virtualization User' RBAC Assignment
+                $RoleDefinition = Get-AzRoleDefinition -Name "Desktop Virtualization User"
+                $Scope = $CurrentHostPoolStorageAccount.Id
+
+                $Parameters = @{
+                    ObjectId           = $AzADGroup.Id
+                    ResourceName       = $CurrentAzRemoteApplicationGroup.Name
+                    ResourceGroupName  = $CurrentHostPoolResourceGroupName
+                    RoleDefinitionName = $RoleDefinition.Name
+                    ResourceType       = 'Microsoft.DesktopVirtualization/applicationGroups'
+
+                    #Verbose            = $true
+                }
 
 
-            while (-not(Get-AzRoleAssignment @Parameters)) {
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
-                $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
-                Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
-                Start-Sleep -Seconds 30
+                while (-not(Get-AzRoleAssignment @Parameters)) {
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Assigning the '$($Parameters.RoleDefinitionName)' RBAC role to the '$($Parameters.ObjectId)' Identity on the '$($Parameters.Scope)' scope"
+                    $RoleAssignment = New-AzRoleAssignment @Parameters -ErrorAction Ignore
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$RoleAssignment:`r`n$($RoleAssignment | Out-String)"
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
+                    Start-Sleep -Seconds 30
+                }
             }
             #endregion
             #endregion 
@@ -10680,6 +10737,9 @@ foreach (`$FileShareName in `$FileShareNames) {
             }
             if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::CloudOnly) {
                 $Options += "CloudOnly"
+            }
+            elseif ($CurrentHostPool.IdentityModel -eq [IdentityModel]::External) {
+                $Options += "External"
             }
             else {
                 $Options += "Hybrid"
@@ -11117,7 +11177,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                         $TempFolder = New-Item -Path $(Join-Path -Path $env:TEMP -ChildPath $("{0:yyyyMMddHHmmss}" -f (Get-Date))) -ItemType Directory -Force
                         $URI = "https://laurentvanacker.com/downloads/Azure/Azure%20Virtual%20Desktop/MSIX"
 
-                        do {
+                        Do {
                             Start-Sleep -Seconds 30 
                         } while (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
                         $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'URI' = $URI; 'FileRegExPattern' = "\.pfx?$"; 'Destination' = $TempFolder }
@@ -11142,7 +11202,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                             }
                         }
 
-                        do {
+                        Do {
                             Start-Sleep -Seconds 30 
                         } while (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
                         $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock -Parameter @{'Filter' = "*.pfx"; 'Destination' = $TempFolder; 'ClearTextPassword' = $ClearTextPassword }
@@ -11152,7 +11212,7 @@ Register-ScheduledTask -TaskName 'Send-FSLogixProfileToastNotification' -InputOb
                         #region Disabling the "\Microsoft\Windows\WindowsUpdate\Scheduled Start" Scheduled Task on Session Host(s)
                         #From https://learn.microsoft.com/en-us/azure/virtual-desktop/app-attach-azure-portal#turn-off-automatic-updates-for-msix-app-attach-applications
                         $ScriptBlock = { $null = Disable-ScheduledTask -TaskPath "\Microsoft\Windows\WindowsUpdate\" -TaskName "Scheduled Start" }
-                        do {
+                        Do {
                             Start-Sleep -Seconds 30 
                         } while (Get-AzVMRunCommand -ResourceGroupName $ResourceGroupName -VMName $VMName) 
                         $RunPowerShellScript = Invoke-PsAvdAzVMRunPowerShellScript -ResourceGroupName $ResourceGroupName -VMName $VMName -ScriptString $ScriptBlock
@@ -13066,7 +13126,7 @@ function New-PsAvdAzureMonitorBaselineAlertsDeployment {
 
         $Index = 0
         $Limit = 5
-        do {
+        Do {
             $Index++
             Write-Host -Object "[$Index/$Limit] Starting Subscription Deployment from '$TemplateFilePath' (AsJob) for '$($CurrentHostPool.Name)' HostPool ..."
 			$DeploymentName = "{0}_{1:yyyyMMddHHmmss}" -f (Get-Item -Path $TemplateFilePath).BaseName, (Get-Date)
@@ -13403,7 +13463,7 @@ function New-PsAvdStopInactiveSessionHostAzFunction {
     $FunctionApp = Get-AzFunctionApp | Where-Object -FilterScript { $_.Name -match "^$AzureFunctionNamePattern" } | Select-Object -First 1
     if (-not($FunctionApp) -or $Force) {
         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] No Azure Function with the '^$AzureFunctionNamePattern' RegExp pattern found"
-        do {
+        Do {
             $Instance = Get-Random -Minimum 0 -Maximum $([long]([Math]::Pow(10, $DigitNumber)))
             $StorageAccountName = "$StorageAccountNamePattern{0:D$DigitNumber}" -f $Instance
             $AzureFunctionName = "$AzureFunctionNamePattern-{0:D$DigitNumber}" -f $Instance
@@ -13525,7 +13585,7 @@ function New-PsAvdStopInactiveSessionHostAzFunction {
         $ResourceGroupName = $FunctionApp.ResourceGroup
         $StorageAccount = Get-AzStorageAccount -ResourceGroupName $ResourceGroupName | Where-Object -FilterScript { $_.StorageAccountName -match "^$StorageAccountNamePattern" } | Select-Object -First 1
         if (-not($StorageAccount)) {
-            do {
+            Do {
                 $StorageAccountName = "$StorageAccountNamePattern{0:D$DigitNumber}" -f $Instance
                 $Instance = Get-Random -Minimum 0 -Maximum $([long]([Math]::Pow(10, $DigitNumber)))
             } while (-not(Get-AzStorageAccountNameAvailability -Name $StorageAccountName).NameAvailable)
@@ -13755,7 +13815,7 @@ function Invoke-PsAvdAzVMRunPowerShellScript {
     }
     #>
     $Parameters[$psCmdlet.ParameterSetName] = (Get-Variable -Name $psCmdlet.ParameterSetName -Scope Local).Value
-    do { 
+    Do { 
         if ($AsJob) {
             $Result = Invoke-AzVMRunCommand @Parameters -AsJob
         }
