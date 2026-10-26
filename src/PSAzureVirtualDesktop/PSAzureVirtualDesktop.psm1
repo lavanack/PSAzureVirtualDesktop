@@ -730,11 +730,13 @@ class PooledHostPool : HostPool {
     }
 
     [PooledHostPool]EnableExternalIdentities([string] $ExternalIdentitiesEntraIDGroupName) {
-        $this.ExternalIdentities = $true
-        $this.SetIdentityModel([IdentityModel]::External)
-        #$this.SetJoinMode([JoinMode]::MicrosoftEntraID)
-        $this.EnableSSO()
-        $this.ExternalIdentitiesEntraIDGroupName = $ExternalIdentitiesEntraIDGroupName
+        if (-not([string]::IsNullOrEmpty($ExternalIdentitiesEntraIDGroupName))) {
+            $this.ExternalIdentities = $true
+            $this.SetIdentityModel([IdentityModel]::External)
+            #$this.SetJoinMode([JoinMode]::MicrosoftEntraID)
+            $this.EnableSSO()
+            $this.ExternalIdentitiesEntraIDGroupName = $ExternalIdentitiesEntraIDGroupName
+        }
         return $this
     }
 
@@ -7909,14 +7911,20 @@ function New-PsAvdPersonalHostPoolSetup {
                 $Tag['JoinMode'] = "Microsoft Entra ID"
                 #region Assign Virtual Machine Administrator Login' RBAC role to the Resource Group
                 # Get the object ID of the user group you want to assign to the application group
+                $Attemps = 0
                 Do {
+                    $Attempts++
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                     Start-MicrosoftEntraIDConnectSync
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                     $AzADGroup = $null
                     #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
                     $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
-                } while (-not($AzADGroup.Id))
+                } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                if (-not($AzADGroup.Id)) {
+                    Write-Error -Message "The '$CurrentHostPoolDAGUsersGroupName' was not found in EntraID" -ErrorAction Stop
+                }
 
                 # Assign users to the application group
 
@@ -8021,14 +8029,20 @@ function New-PsAvdPersonalHostPoolSetup {
 
                 #region Assign 'Desktop Virtualization User' RBAC role to application groups
                 # Get the object ID of the user group you want to assign to the application group
+                $Attempts=0
                 Do {
+                    $Attempts++
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                     Start-MicrosoftEntraIDConnectSync
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                     $AzADGroup = $null
                     #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
                     $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolDAGUsersGroupName'"
-                } while (-not($AzADGroup.Id))
+                } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                if (-not($AzADGroup.Id)) {
+                    Write-Error -Message "The '$CurrentHostPoolDAGUsersGroupName' was not found in EntraID" -ErrorAction Stop
+                }
 
                 # Assign users to the application group
                 #region 'Desktop Virtualization User' RBAC Assignment
@@ -9237,14 +9251,20 @@ function New-PsAvdPooledHostPoolSetup {
                     if ($CurrentHostPool.IdentityModel -eq [IdentityModel]::Hybrid) {
                         #region Setting up the file share with right RBAC: FSLogix Contributor = "Storage File Data SMB Share Contributor"
                         #Assign the custom role to the target identity with the specified scope.
+                        $Attempts=0
                         Do {
+                            $Attempts++
+                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                             Start-MicrosoftEntraIDConnectSync
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                             Start-Sleep -Seconds 30
                             $AzADGroup = $null
                             #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixContributorGroupName
                             $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixContributorGroupName'"
-                        } while (-not($AzADGroup.Id))
+                        } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                        if (-not($AzADGroup.Id)) {
+                            Write-Error -Message "The '$CurrentHostPoolFSLogixContributorGroupName' was not found in EntraID" -ErrorAction Stop
+                        }
                         #Assigning the "Storage File Data SMB Share Contributor" RBAC Role to the dedicated Entra ID Group
                         #region 'Storage File Data SMB Share Contributor' RBAC Assignment
                         $RoleDefinition = Get-AzRoleDefinition -Name "Storage File Data SMB Share Contributor"
@@ -9270,14 +9290,20 @@ function New-PsAvdPooledHostPoolSetup {
                     #region Setting up the file share with right RBAC: FSLogix Elevated Contributor = "Storage File Data SMB Share Elevated Contributor"
                     #Get the name of the custom role
                     #Assign the custom role to the target identity with the specified scope.
+                    $Attempts=0
                     Do {
+                        $Attempts++
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
                         #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixElevatedContributorGroupName
                         $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixElevatedContributorGroupName'"
-                    } while (-not($AzADGroup.Id))
+                    } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                    if (-not($AzADGroup.Id)) {
+                        Write-Error -Message "The '$CurrentHostPoolFSLogixElevatedContributorGroupName' was not found in EntraID" -ErrorAction Stop
+                    }
 
                     #region 'Storage File Data SMB Share Elevated Contributor' RBAC Assignment
                     $RoleDefinition = Get-AzRoleDefinition -Name "Storage File Data SMB Share Elevated Contributor"
@@ -9303,14 +9329,20 @@ function New-PsAvdPooledHostPoolSetup {
                     #Get the name of the custom role
                     $FileShareContributorRole = Get-AzRoleDefinition -Name "Storage File Data SMB Share Reader"
                     #Assign the custom role to the target identity with the specified scope.
+                    $Attempts=0
                     Do {
+                        $Attempts++
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
                         #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolFSLogixReaderGroupName
                         $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolFSLogixReaderGroupName'"
-                    } while (-not($AzADGroup.Id))
+                    } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                    if (-not($AzADGroup.Id)) {
+                        Write-Error -Message "The '$CurrentHostPoolFSLogixReaderGroupName' was not found in EntraID" -ErrorAction Stop
+                    }
 
                     #region 'Storage File Data SMB Share Reader' RBAC Assignment
                     $RoleDefinition = Get-AzRoleDefinition -Name "Storage File Data SMB Share Reader"
@@ -9981,14 +10013,20 @@ foreach (`$FileShareName in `$FileShareNames) {
                     #region Setting up the file share with right RBAC: MSIX Hosts & MSIX Users = "Storage File Data SMB Share Contributor" + MSIX Share Admins = Storage File Data SMB Share Elevated Contributor
                     #https://docs.microsoft.com/en-us/azure/virtual-desktop/app-attach-file-share#how-to-set-up-the-file-share
                     #Get the name of the custom role
+                    $Attempts=0
                     Do {
+                        $Attempts++
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
                         #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXHostsADGroupName
                         $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXHostsADGroupName'"
-                    } while (-not($AzADGroup.Id))
+                    } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                    if (-not($AzADGroup.Id)) {
+                        Write-Error -Message "The '$CurrentHostPoolMSIXHostsADGroupName' was not found in EntraID" -ErrorAction Stop
+                    }
 
                     #region 'Storage File Data SMB Share Contributor' RBAC Assignment
                     $RoleDefinition = Get-AzRoleDefinition -Name "Storage File Data SMB Share Contributor"
@@ -10009,14 +10047,20 @@ foreach (`$FileShareName in `$FileShareNames) {
                     }
                     #endregion
 
+                    $Attempts=0
                     Do {
+                        $Attempts++
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
                         #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXUsersADGroupName
                         $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXUsersADGroupName'"
-                    } while (-not($AzADGroup.Id))
+                    } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                    if (-not($AzADGroup.Id)) {
+                        Write-Error -Message "The '$CurrentHostPoolMSIXUsersADGroupName' was not found in EntraID" -ErrorAction Stop
+                    }
 
                     #region 'Storage File Data SMB Share Contributor' RBAC Assignment
                     $RoleDefinition = Get-AzRoleDefinition -Name "Storage File Data SMB Share Contributor"
@@ -10042,14 +10086,20 @@ foreach (`$FileShareName in `$FileShareNames) {
                     #Get the name of the custom role
                     $FileShareContributorRole = Get-AzRoleDefinition -Name "Storage File Data SMB Share Elevated Contributor"
                     #Assign the custom role to the target identity with the specified scope.
+                    $Attempts=0
                     Do {
+                        $Attempts++
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
                         #$AzADGroup = Get-AzADGroup -SearchString $CurrentHostPoolMSIXShareAdminsADGroupName
                         $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolMSIXShareAdminsADGroupName'"
-                    } while (-not($AzADGroup.Id))
+                    } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                    if (-not($AzADGroup.Id)) {
+                        Write-Error -Message "The '$CurrentHostPoolMSIXShareAdminsADGroupName' was not found in EntraID" -ErrorAction Stop
+                    }
 
 
 
@@ -10341,14 +10391,20 @@ foreach (`$FileShareName in `$FileShareNames) {
                     $CurrentHostPoolAGUsersGroupNames += $CurrentHostPool.ExternalIdentitiesEntraIDGroupName
                 }
                 foreach ($CurrentHostPoolAGUsersGroupName in $CurrentHostPoolAGUsersGroupNames) {
+                    $Attempts=0
                     Do {
+                        $Attempts++
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                         Start-MicrosoftEntraIDConnectSync
                         Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                         Start-Sleep -Seconds 30
                         $AzADGroup = $null
                         #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
                         $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$CurrentHostPoolAGUsersGroupName'"
-                    } while (-not($AzADGroup.Id))
+                    } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                    if (-not($AzADGroup.Id)) {
+                        Write-Error -Message "The '$CurrentHostPoolAGUsersGroupName' was not found in EntraID" -ErrorAction Stop
+                    }
 
                     # Assign users to the application group
                     #region 'Virtual Machine User Login' RBAC Assignment
@@ -10593,14 +10649,20 @@ foreach (`$FileShareName in `$FileShareNames) {
             }
             foreach ($EntraIDGroupName in $EntraIDGroupNames) {
                 # Get the object ID of the user group you want to assign to the application group
+                $Attempts=0
                 Do {
+                    $Attempts++
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                     Start-MicrosoftEntraIDConnectSync
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                     $AzADGroup = $null
                     #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolDAGUsersGroupName
                     $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$EntraIDGroupName'"
-                } while (-not($AzADGroup.Id))
+                } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                if (-not($AzADGroup.Id)) {
+                    Write-Error -Message "The '$EntraIDGroupName' was not found in EntraID" -ErrorAction Stop
+                }
 
                 # Assign users to the application group
                 #region 'Desktop Virtualization User' RBAC Assignment
@@ -10653,14 +10715,20 @@ foreach (`$FileShareName in `$FileShareNames) {
             }
             foreach ($EntraIDGroupName in $EntraIDGroupNames) {
                 # Get the object ID of the user group you want to assign to the application group
+                $Attempts=0
                 Do {
+                    $Attempts++
+                    Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] `$Attempts: $Attempts"
                     Start-MicrosoftEntraIDConnectSync
                     Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Sleeping 30 seconds"
                     Start-Sleep -Seconds 30
                     $AzADGroup = $null
                     #$AzADGroup = Get-AzADGroup -DisplayName $CurrentHostPoolRAGUsersGroupName
                     $AzADGroup = Get-MgBetaGroup -Filter "DisplayName eq '$EntraIDGroupName'"
-                } while (-not($AzADGroup.Id))
+                } while ((-not($AzADGroup.Id)) -and ($Attempts -lt 10))
+                if (-not($AzADGroup.Id)) {
+                    Write-Error -Message "The '$EntraIDGroupName' was not found in EntraID" -ErrorAction Stop
+                }
 
                 # Assign users to the application group
                 #region 'Desktop Virtualization User' RBAC Assignment
