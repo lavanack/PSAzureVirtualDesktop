@@ -9376,10 +9376,10 @@ function New-PsAvdPooledHostPoolSetup {
                         Start-Sleep -Seconds 30
                     } while (-not((Get-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName).AllowSharedKeyAccess))
 
-                    if ($CurrentHostPool.IdentityModel -notin [IdentityModel]::CloudOnly, [IdentityModel]::External) {
-                        Remove-PSDrive -Name Z -ErrorAction Ignore
-                        $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+                    Remove-PSDrive -Name Z -ErrorAction Ignore
+                    $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
 
+                    if ($CurrentHostPool.IdentityModel -notin [IdentityModel]::CloudOnly, [IdentityModel]::External) {
                         #From https://blue42.net/windows/changing-ntfs-security-permissions-using-powershell/
                         #From https://learn.microsoft.com/en-us/FSLogix/how-to-configure-storage-permissions#recommended-acls
                         #region Sample NTFS permissions for FSLogix
@@ -9433,13 +9433,19 @@ function New-PsAvdPooledHostPoolSetup {
                         # Apply the modified access rule to the folder
                         $existingAcl | Set-Acl -Path Z:
                         #endregion
+                        #endregion
+                    }
 
-                        #region redirection.xml file management
-                        #Creating the redirection.xml file
-                        if ($CurrentHostPoolShareName -eq "profiles") {
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
-                            $null = New-Item -Path Z: -Name "redirections.xml" -ItemType "file" -Value $RedirectionsXMLFileContent -Force
-                            Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
+                    #region redirection.xml file management
+                    #Creating the redirection.xml file
+                    if ($CurrentHostPoolShareName -eq "profiles") {
+                        Remove-PSDrive -Name Z -ErrorAction Ignore
+                        $null = New-PSDrive -Name Z -PSProvider FileSystem -Root "\\$CurrentHostPoolStorageAccountName.file.$StorageEndpointSuffix\$CurrentHostPoolShareName"
+
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
+                        $null = New-Item -Path Z: -Name "redirections.xml" -ItemType "file" -Value $RedirectionsXMLFileContent -Force
+                        Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] The 'redirections.xml' file for the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group) is created"
+                        if ($CurrentHostPool.IdentityModel -notin [IdentityModel]::CloudOnly, [IdentityModel]::External) {
                             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Setting the ACL for the 'redirections.xml' file in the Share '$CurrentHostPoolShareName' in the Storage Account '$CurrentHostPoolStorageAccountName' (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
                             $existingAcl = Get-Acl Z:\redirections.xml
                             #Add Read for "Users" Group for This folder only
@@ -9457,16 +9463,14 @@ function New-PsAvdPooledHostPoolSetup {
 
                             $existingAcl | Set-Acl -Path Z:\redirections.xml
                         }
-                        #endregion
-
-                        # Unmount the share
-                        Remove-PSDrive -Name Z
-                        #Not Allowing storage account key access (SFI compliant)
-                        #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
-                        #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
-                        #endregion
                     }
 
+                    # Unmount the share
+                    Remove-PSDrive -Name Z
+                    #Not Allowing storage account key access (SFI compliant)
+                    #$null = Set-AzStorageAccount -ResourceGroupName $CurrentHostPoolResourceGroupName -Name $CurrentHostPoolStorageAccountName -AllowSharedKeyAccess $false
+                    #Start-Process -FilePath $env:ComSpec -ArgumentList "/c", "net use z: /delete" -Wait -NoNewWindow
+                    #endregion
                 }
 
                 if ($CurrentHostPool.IdentityModel -in [IdentityModel]::CloudOnly, [IdentityModel]::External) {
