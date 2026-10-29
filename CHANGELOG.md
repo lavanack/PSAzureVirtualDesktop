@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - [\[Unreleased\]](#unreleased)
     - [Changed](#changed)
   - [\[1.0.20\] - 2026-06-13](#1020---2026-06-13)
+    - [Added](#added)
+    - [Changed](#changed-1)
+    - [Fixed](#fixed)
+    - [Removed](#removed)
+    - [Upgrade notes](#upgrade-notes)
   - [\[1.0.19\] - 2026-05-16](#1019---2026-05-16)
   - [\[1.0.18\] - 2026-xx-yy](#1018---2026-xx-yy)
   - [\[1.0.17\] - 2026-01-12](#1017---2026-01-12)
@@ -46,15 +51,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - 2024-09-27 - Updated `CHANGELOG.md`
 - 2024-09-05 - Created `CHANGELOG.md`
 
-## [1.0.20] - 2026-06-13
+## [1.0.20] - 2026-10-29
 
-- Added [Microsoft Entra hybrid join](https://learn.microsoft.com/en-us/entra/identity/devices/concept-hybrid-join) support for the AVD Session Hosts. Dedicated "Hybrid Join Settings" GPOs (setting the `autoWorkplaceJoin` and `CDJ\AAD` `TenantId`/`TenantName` registry values) are created and linked to the Host Pool OU.
-- Added the `Set-BlockAADWorkplaceJoinOnDC` function, which creates and links a GPO on the `Domain Controllers` OU to disable `autoWorkplaceJoin` and enable `BlockAADWorkplaceJoin` (preventing the Domain Controllers from registering in Microsoft Entra ID).
-- Added a new `IdentityModel` (`Hybrid` / `CloudOnly`) on the [HostPool](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/HostPool-PowerShell-Classes) class. `CloudOnly` targets identities that exist only in Microsoft Entra ID and forces the Microsoft Entra ID join mode (`SetIdentityModel()` method and `IdentityModel` property/tag added).
-- Improved the `Az.DesktopVirtualization` prerequisite handling: replaced `Update-AzDesktopVirtualizationModule.ps1` with `Install-AzDesktopVirtualizationModule.ps1` and updated `Test-NewerAvailableModule.ps1`.
-- Added a workaround for [azure-monitor-baseline-alerts issue #812](https://github.com/Azure/azure-monitor-baseline-alerts/issues/812).
-- Refactored the [`New-PsAvdRdcMan`](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/New-PsAvdRdcMan) function (previous implementation kept as `New-PsAvdRdcManOld`; removed the `New-PsAvdRdcManV2` function).
-- Added extensive inline code comments and help across the module.
+### Added
+
+- **Microsoft Entra hybrid join:** Added `JoinMode.Hybrid` and `IsHybridJoined()` for session hosts. Dedicated "Hybrid Join Settings" GPOs configure `autoWorkplaceJoin` and the `CDJ\AAD` tenant registry values on the host pool OU.
+- **Separate device and user identity settings:** Added `IdentityModel` (`Hybrid`, `CloudOnly`, `External`) and `SetIdentityModel()` to the [HostPool](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/HostPool-PowerShell-Classes) class. Selecting `CloudOnly` or `External` sets the session host join mode to `MicrosoftEntraID`.
+- **Cloud-only identities:** Added Microsoft Entra group provisioning and FSLogix Azure Files configuration for cloud-only users, including Microsoft Entra Kerberos authentication and cloud-only group SID support.
+- **External identities:** Added `EnableExternalIdentities()`, `DisableExternalIdentities()`, and `GetExternalIdentitiesEntraIDGroupName()` to `PooledHostPool`. Enabling external identities configures Microsoft Entra ID join and SSO, and includes the supplied Entra ID group in application-group and session host access assignments.
+- **Domain controller join protection:** Added the internal `Set-BlockAADWorkplaceJoinOnDC` helper to create and link a GPO on the `Domain Controllers` OU, disabling `autoWorkplaceJoin` and enabling `BlockAADWorkplaceJoin`.
+- **Domain administrator check:** Added the exported `Test-DomainAdmin` function to check whether the current user's security token includes the Domain Admins group.
+
+### Changed
+
+- **Join configuration API:** Replaced the `IdentityProvider` enum/property and `SetIdentityProvider()` method with `JoinMode` and `SetJoinMode()`, supporting `ActiveDirectory`, `MicrosoftEntraID`, and `Hybrid`. SSO and Intune enablement now checks the configured join mode instead of automatically switching it to Microsoft Entra ID.
+- **FSLogix profiles:** Enabled `CleanupInvalidSessions` through GPO and the registry helper. Revised profile redirections to exclude Windows temporary files, crash dumps, Windows Error Reporting data, and Teams/OneDrive logs without broadly excluding Outlook, Edge, or OneDrive data. Improved profile-share drive mapping and redirection-file creation.
+- **OneDrive known folders:** Enabling OneDrive known-folder redirection no longer disables FSLogix for Microsoft Entra ID-joined pooled hosts; Active Directory and hybrid-joined hosts retain that behavior.
+- **Monitoring:** Expanded performance counters for personal and pooled host pools, including per-volume disk metrics and network adapter activity. Standardized the configured performance-counter sampling intervals to 30 seconds.
+- **Session host deployment:** Updated the standard AVD DSC package to `Configuration_1.0.03448.1358.zip` and the Session Host Configuration package to `AgentDSC.2026.6.3.1.zip`.
+- **Scaling plans:** Changed peak-hour load balancing from `DepthFirst` to `BreadthFirst`, and ramp-down load balancing from `BreadthFirst` to `DepthFirst`.
+- **RDCMan:** Promoted the former `New-PsAvdRdcManV2` implementation to [`New-PsAvdRdcMan`](https://github.com/lavanack/PSAzureVirtualDesktop/wiki/New-PsAvdRdcMan). Connection entries now use deployed Azure session hosts and their private IP addresses rather than relying on AD computer discovery or predicted VM names. The previous implementation remains internal as `New-PsAvdRdcManOld`.
+- **Prerequisites:** Replaced the `Az.DesktopVirtualization` update script with an installation/import script targeting `5.4.6-preview`, invoked when the module loads. Added verbose version information to the newer-module availability check.
+- **Resource naming and defaults:** Added Azure Naming Tool resource-type short-name lookup and hybrid-join name suffixes. Changed the base `HostPool` default VM size from `Standard_B2as_v2` to `Standard_E2_v4`.
+- **Help and diagnostics:** Added extensive comment-based help and improved verbose output for workbook deployments and FSLogix profile-space notifications.
+
+### Fixed
+
+- Added a workaround for [Azure Monitor Baseline Alerts issue #812](https://github.com/Azure/azure-monitor-baseline-alerts/issues/812), using an alternate AVD alert template and adjusting deployment parameters.
+- Limited Entra ID group lookups for pooled desktop and RemoteApp application-group role assignments to 10 attempts, with a terminating error if the group cannot be found, instead of waiting indefinitely.
+- Updated the FSLogix profile-space notification to wait for the display timeout, hide the notification icon, and dispose of its resources.
+
+### Removed
+
+- Removed legacy MSIX App Attach configuration from `PooledHostPool`, including the `MSIX` property, `EnableMSIX()` / `DisableMSIX()` methods, and related deployment branches and tags. Azure App Attach remains available through `AppAttach`.
+
+### Upgrade notes
+
+- Update scripts that reference `[IdentityProvider]`, `.IdentityProvider`, or `.SetIdentityProvider()` to use `[JoinMode]`, `.JoinMode`, and `.SetJoinMode()`. Configure the user identity model separately with `.SetIdentityModel()` where needed.
+- Select `MicrosoftEntraID` or `Hybrid` before calling `EnableSSO()` or `EnableIntune()`; these methods no longer change the join mode for you.
+- Replace legacy MSIX App Attach class settings with the supported App Attach configuration. Use `New-PsAvdRdcMan` instead of `New-PsAvdRdcManV2`.
+- Review generated resource names and VM sizing before redeploying existing configurations, because naming derivation and the base VM-size default have changed.
 
 ## [1.0.19] - 2026-05-16
 

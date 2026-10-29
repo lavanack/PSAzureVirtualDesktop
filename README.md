@@ -14,8 +14,16 @@
 ## Release Notes
 
 - [1.0.20]
-  - Code improvements
-  - Adding HybridJoin VM and Cloud Only Identities use cases
+  - Added [Microsoft Entra hybrid join](https://learn.microsoft.com/en-us/entra/identity/devices/concept-hybrid-join) for session hosts, including automatic host pool GPO configuration and protection against workplace join on domain controllers.
+  - Separated session host `JoinMode` (`ActiveDirectory`, `MicrosoftEntraID`, `Hybrid`) from user `IdentityModel` (`Hybrid`, `CloudOnly`, `External`).
+  - Added cloud-only identity configuration, including Microsoft Entra Kerberos and cloud-only group support for FSLogix profile shares.
+  - Added external identity support for pooled host pools through `EnableExternalIdentities()`, including SSO and group-based application access.
+  - Improved FSLogix profile redirections, invalid-session cleanup, and profile-space notification handling.
+  - Expanded session host performance monitoring, updated DSC deployment packages, and added a workaround for Azure Monitor Baseline Alerts deployment issues.
+  - Updated scaling plans to use breadth-first load balancing during peak hours and depth-first during ramp-down.
+  - Improved RDCMan generation using deployed session hosts and their private IP addresses; added `Test-DomainAdmin` and bounded retries for application-group identity lookups.
+  - Updated prerequisite handling to install and import `Az.DesktopVirtualization` 5.4.6-preview.
+  - **Upgrade notes:** Replace `IdentityProvider` / `SetIdentityProvider()` with `JoinMode` / `SetJoinMode()`. Legacy MSIX App Attach class options were removed; use `AppAttach`. See the [detailed changes and compatibility notes](CHANGELOG.md#1020---2026-06-13).
 - [1.0.19]
   - Test Version
 - [1.0.18]
