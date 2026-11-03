@@ -12894,11 +12894,12 @@ function New-PsAvdScalingPlan {
                 $OffPeakActionOnLogoff = 'Hibernate'
             }
             else {
-                $PeakActionOnDisconnect = 'Deallocate'
-                $RampDownActionOnLogoff = 'Deallocate'
                 $RampUpActionOnDisconnect = 'Deallocate'
                 $RampUpActionOnLogoff = 'Deallocate'
+                $PeakActionOnDisconnect = 'Deallocate'
                 $PeakActionOnLogoff = 'Deallocate'
+                $RampDownActionOnDisconnect = 'Deallocate'
+                $RampDownActionOnLogoff = 'Deallocate'
                 $OffPeakActionOnDisconnect = 'Deallocate'
                 $OffPeakActionOnLogoff = 'Deallocate'
             }
@@ -12926,7 +12927,7 @@ function New-PsAvdScalingPlan {
                 RampDownStartTimeMinute           = '0'
                 RampDownStartVMOnConnect          = 'Disable'
                 RampDownMinutesToWaitOnDisconnect = '10'
-                RampDownActionOnDisconnect        = 'None'
+                RampDownActionOnDisconnect        = $RampDownActionOnDisconnect
                 RampDownMinutesToWaitOnLogoff     = '15'
                 RampDownActionOnLogoff            = $RampDownActionOnLogoff
                 OffPeakStartTimeHour              = '19'
