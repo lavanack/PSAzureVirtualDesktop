@@ -7967,19 +7967,23 @@ function New-PsAvdPersonalHostPoolSetup {
                 # No RDP redirection for COM ports, Local Drives and printers.
                 $CustomRdpProperty = "redirectcomports:i:0;redirectlocation:i:0;redirectprinters:i:0;drivestoredirect:s:;usbdevicestoredirect:s:;"
             }
+            $AgentUpdateMaintenanceWindow = @( @{  DayOfWeek = "Saturday"; Hour = 20 })
             $Parameters = @{
-                Name                          = $CurrentHostPool.Name
-                ResourceGroupName             = $CurrentHostPoolResourceGroupName
-                HostPoolType                  = 'Personal'
-                PersonalDesktopAssignmentType = 'Automatic'
-                LoadBalancerType              = $CurrentHostPool.LoadBalancerType
-                PreferredAppGroupType         = $CurrentHostPool.PreferredAppGroupType
-                Location                      = $CurrentHostPool.Location
-                StartVMOnConnect              = $true
-                ExpirationTime                = $RegistrationInfoExpirationTime.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
-                CustomRdpProperty             = $CustomRdpProperty
-                Tag                           = $Tag
-                #Verbose                       = $true
+                Name                               = $CurrentHostPool.Name
+                ResourceGroupName                  = $CurrentHostPoolResourceGroupName
+                HostPoolType                       = 'Personal'
+                PersonalDesktopAssignmentType      = 'Automatic'
+                LoadBalancerType                   = $CurrentHostPool.LoadBalancerType
+                PreferredAppGroupType              = $CurrentHostPool.PreferredAppGroupType
+                Location                           = $CurrentHostPool.Location
+                StartVMOnConnect                   = $true
+                ExpirationTime                     = $RegistrationInfoExpirationTime.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
+                CustomRdpProperty                  = $CustomRdpProperty
+                Tag                                = $Tag
+                AgentUpdateType                    = "Scheduled" 
+                AgentUpdateMaintenanceWindow       = $AgentUpdateMaintenanceWindow 
+                AgentUpdateUseSessionHostLocalTime = $true
+                #Verbose                            = $true
             }
 
             Write-Verbose -Message "[$(Get-Date -Format "yyyy-MM-dd HH:mm:ss")][$($MyInvocation.MyCommand)] Creating the '$($CurrentHostPool.Name)' Host Pool (in the '$CurrentHostPoolResourceGroupName' Resource Group)"
@@ -10453,21 +10457,26 @@ foreach (`$FileShareName in `$FileShareNames) {
 
             #region Host Pool Setup
             $RegistrationInfoExpirationTime = (Get-Date).ToUniversalTime().AddDays(1)
+
+            $AgentUpdateMaintenanceWindow = @( @{  DayOfWeek = "Saturday"; Hour = 20 })
             $Parameters = @{
-                Name                  = $CurrentHostPool.Name
-                ResourceGroupName     = $CurrentHostPoolResourceGroupName
-                HostPoolType          = 'Pooled'
-                LoadBalancerType      = $CurrentHostPool.LoadBalancerType
-                PreferredAppGroupType = $CurrentHostPool.PreferredAppGroupType
-                MaxSessionLimit       = $CurrentHostPool.MaxSessionLimit
-                Location              = $CurrentHostPool.Location
-                StartVMOnConnect      = $true
+                Name                               = $CurrentHostPool.Name
+                ResourceGroupName                  = $CurrentHostPoolResourceGroupName
+                HostPoolType                       = 'Pooled'
+                LoadBalancerType                   = $CurrentHostPool.LoadBalancerType
+                PreferredAppGroupType              = $CurrentHostPool.PreferredAppGroupType
+                MaxSessionLimit                    = $CurrentHostPool.MaxSessionLimit
+                Location                           = $CurrentHostPool.Location
+                StartVMOnConnect                   = $true
                 # From https://learn.microsoft.com/en-us/windows-server/remote/remote-desktop-services/clients/rdp-files?context=%2Fazure%2Fvirtual-desktop%2Fcontext%2Fcontext#device-redirection
                 # No RDP redirection for COM ports, Local Drives and printers.
-                ExpirationTime        = $RegistrationInfoExpirationTime.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
-                CustomRdpProperty     = $CustomRdpProperty
-                IdentityType          = "SystemAssigned"
-                Tag                   = $Tag
+                ExpirationTime                     = $RegistrationInfoExpirationTime.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ')
+                CustomRdpProperty                  = $CustomRdpProperty
+                IdentityType                       = "SystemAssigned"
+                Tag                                = $Tag
+                AgentUpdateType                    = "Scheduled" 
+                AgentUpdateMaintenanceWindow       = $AgentUpdateMaintenanceWindow 
+                AgentUpdateUseSessionHostLocalTime = $true
                 #Verbose               = $true
             }
 
